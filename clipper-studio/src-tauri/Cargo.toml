@@ -53,3 +53,6 @@ reqwest = { version = "0.12", features = ["json"] }
 
 # Async utilities
 tokio-util = "0.7"
+
+# Configuration
+toml = "0.8"

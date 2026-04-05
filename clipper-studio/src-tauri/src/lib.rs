@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod config;
 pub mod core;
 pub mod db;
 pub mod shell;
@@ -13,24 +14,33 @@ pub mod utils;
 // pub mod agent;
 // pub mod sync;
 
+use std::sync::RwLock;
+
 use tauri::Manager;
 
+use crate::config::AppConfig;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
 /// Application shared state, injected via Tauri State
 pub struct AppState {
     pub db: Database,
+    pub config: RwLock<AppConfig>,
+    pub config_dir: std::path::PathBuf,
     pub ffmpeg_path: String,
     pub ffprobe_path: String,
 }
 
 /// Build and configure the Tauri application
 pub fn run() {
+    // Pre-init: load config to get log level before full setup
+    // We do a minimal init here; full config is loaded in setup()
+    let pre_log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "clipper_studio_lib=debug,info".into()),
+                .unwrap_or_else(|_| format!("clipper_studio_lib={},info", pre_log_level).into()),
         )
         .init();
 
@@ -40,15 +50,34 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            // Detect FFmpeg binaries
-            let app_dir = app
+            // Resolve data directory
+            let data_dir = app
                 .path()
-                .resource_dir()
-                .unwrap_or_default();
-            let bin_dir = app_dir.join("bin");
+                .app_data_dir()
+                .expect("failed to resolve app data dir");
+            std::fs::create_dir_all(&data_dir)?;
 
-            let ffmpeg_path = ffmpeg::detect_binary("ffmpeg", &bin_dir);
-            let ffprobe_path = ffmpeg::detect_binary("ffprobe", &bin_dir);
+            // Load config from config.toml
+            let app_config = AppConfig::load(&data_dir);
+            tracing::info!("Log level from config: {}", app_config.general.log_level);
+
+            // Resolve FFmpeg paths: config override > bin dir > system PATH
+            let resource_dir = app.path().resource_dir().unwrap_or_default();
+            let bin_dir = resource_dir.join("bin");
+
+            let ffmpeg_path = if !app_config.ffmpeg.ffmpeg_path.is_empty() {
+                tracing::info!("FFmpeg path from config: {}", app_config.ffmpeg.ffmpeg_path);
+                Some(app_config.ffmpeg.ffmpeg_path.clone())
+            } else {
+                ffmpeg::detect_binary("ffmpeg", &bin_dir)
+            };
+
+            let ffprobe_path = if !app_config.ffmpeg.ffprobe_path.is_empty() {
+                tracing::info!("FFprobe path from config: {}", app_config.ffmpeg.ffprobe_path);
+                Some(app_config.ffmpeg.ffprobe_path.clone())
+            } else {
+                ffmpeg::detect_binary("ffprobe", &bin_dir)
+            };
 
             if let Some(ref path) = ffmpeg_path {
                 tracing::info!("FFmpeg found: {}", path);
@@ -61,20 +90,14 @@ pub fn run() {
                 tracing::warn!("FFprobe not found! Media probe features will be unavailable.");
             }
 
-            // Initialize database
-            let data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
-            std::fs::create_dir_all(&data_dir)?;
-            let db_path = data_dir.join("data.db");
+            // Initialize database (path from config)
+            let db_path = app_config.resolve_db_path(&data_dir);
             tracing::info!("Database path: {}", db_path.display());
 
             let db = tauri::async_runtime::block_on(async {
                 Database::connect(&db_path).await
             })?;
 
-            // Run migrations
             tauri::async_runtime::block_on(async {
                 db.run_migrations().await
             })?;
@@ -87,6 +110,8 @@ pub fn run() {
             // Manage application state
             app.manage(AppState {
                 db,
+                config: RwLock::new(app_config),
+                config_dir: data_dir,
                 ffmpeg_path: ffmpeg_path.unwrap_or_default(),
                 ffprobe_path: ffprobe_path.unwrap_or_default(),
             });
@@ -97,6 +122,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_app_info,
             commands::system::check_ffmpeg,
+            commands::workspace::list_workspaces,
+            commands::workspace::create_workspace,
+            commands::workspace::delete_workspace,
+            commands::workspace::get_active_workspace,
+            commands::workspace::set_active_workspace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");

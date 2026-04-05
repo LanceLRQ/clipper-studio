@@ -9,9 +9,11 @@ use crate::utils::ffmpeg;
 pub struct AppInfo {
     pub version: String,
     pub data_dir: String,
+    pub config_path: String,
     pub ffmpeg_available: bool,
     pub ffmpeg_version: Option<String>,
     pub ffprobe_available: bool,
+    pub has_workspaces: bool,
 }
 
 /// Get application info including version, data directory, and FFmpeg availability
@@ -32,12 +34,36 @@ pub fn get_app_info(
         None
     };
 
+    let config_path = state.config_dir.join("config.toml").to_string_lossy().to_string();
+
+    // Check if any workspaces exist (for welcome wizard logic)
+    let has_workspaces = tauri::async_runtime::block_on(async {
+        let result = sea_orm::ConnectionTrait::query_one(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT COUNT(*) as cnt FROM workspaces".to_string(),
+            ),
+        )
+        .await;
+        match result {
+            Ok(Some(row)) => {
+                
+                let cnt: i32 = row.try_get("", "cnt").unwrap_or(0);
+                cnt > 0
+            }
+            _ => false,
+        }
+    });
+
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir,
+        config_path,
         ffmpeg_available: !state.ffmpeg_path.is_empty(),
         ffmpeg_version,
         ffprobe_available: !state.ffprobe_path.is_empty(),
+        has_workspaces,
     })
 }
 
