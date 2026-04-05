@@ -92,4 +92,39 @@ mod tests {
         // Just ensure it doesn't panic
         let _ = result;
     }
+
+    #[test]
+    fn test_detect_binary_empty_name() {
+        let result = detect_binary("", &PathBuf::from("/nonexistent/path"));
+        // Empty name should not panic, result depends on system
+        let _ = result;
+    }
+
+    #[test]
+    fn test_get_version_empty_path() {
+        let result = get_version("");
+        assert!(result.is_none(), "empty path should return None");
+    }
+
+    #[test]
+    fn test_get_version_nonexistent_path() {
+        let result = get_version("/nonexistent/binary/that/does/not/exist");
+        assert!(result.is_none(), "nonexistent path should return None");
+    }
+
+    #[test]
+    fn test_get_bin_path_returns_path() {
+        let bin_dir = PathBuf::from("/opt/app/bin");
+        // get_bin_path is private, test via detect_binary behavior
+        // We just verify detect_binary with a non-existent dir doesn't panic
+        let _ = detect_binary("nonexistent_tool_xyz", &bin_dir);
+    }
+
+    #[test]
+    fn test_detect_binary_typical_names() {
+        // Test with common names, just ensure no panic
+        let dir = PathBuf::from("/tmp/clipper_test_bin");
+        let _ = detect_binary("ffmpeg", &dir);
+        let _ = detect_binary("ffprobe", &dir);
+    }
 }

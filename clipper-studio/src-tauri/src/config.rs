@@ -215,4 +215,97 @@ mod tests {
         config.remove_recent_workspace("/path/b");
         assert_eq!(config.workspaces.recent, vec!["/path/a"]);
     }
+
+    #[test]
+    fn test_recent_workspaces_truncate_at_20() {
+        let mut config = AppConfig::default();
+        for i in 0..25 {
+            config.add_recent_workspace(&format!("/path/{}", i));
+        }
+        assert_eq!(config.workspaces.recent.len(), 20);
+        // Most recent should be first
+        assert_eq!(config.workspaces.recent[0], "/path/24");
+    }
+
+    #[test]
+    fn test_recent_workspaces_dedup_moves_to_front() {
+        let mut config = AppConfig::default();
+        config.add_recent_workspace("/path/a");
+        config.add_recent_workspace("/path/b");
+        config.add_recent_workspace("/path/c");
+        // Re-add "a" — should move to front
+        config.add_recent_workspace("/path/a");
+        assert_eq!(config.workspaces.recent, vec!["/path/a", "/path/c", "/path/b"]);
+    }
+
+    #[test]
+    fn test_remove_recent_nonexistent() {
+        let mut config = AppConfig::default();
+        config.add_recent_workspace("/path/a");
+        config.remove_recent_workspace("/path/nonexistent");
+        // Should not panic, list unchanged
+        assert_eq!(config.workspaces.recent, vec!["/path/a"]);
+    }
+
+    #[test]
+    fn test_resolve_db_path_absolute() {
+        let mut config = AppConfig::default();
+        config.general.database_path = "/absolute/path/my.db".to_string();
+        let resolved = config.resolve_db_path(Path::new("/app/data"));
+        assert_eq!(resolved, PathBuf::from("/absolute/path/my.db"));
+    }
+
+    #[test]
+    fn test_save_and_load_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+        let mut original = AppConfig::default();
+        original.general.log_level = "debug".to_string();
+        original.ffmpeg.ffmpeg_path = "/usr/local/bin/ffmpeg".to_string();
+        original.add_recent_workspace("/test/path");
+
+        original.save(tmp.path()).unwrap();
+
+        let loaded = AppConfig::load(tmp.path());
+        assert_eq!(loaded.general.log_level, "debug");
+        assert_eq!(loaded.ffmpeg.ffmpeg_path, "/usr/local/bin/ffmpeg");
+        assert_eq!(loaded.workspaces.recent, vec!["/test/path"]);
+    }
+
+    #[test]
+    fn test_load_invalid_toml_uses_defaults() {
+        let tmp = TempDir::new().unwrap();
+        let mut f = fs::File::create(tmp.path().join("config.toml")).unwrap();
+        writeln!(f, "this is not valid toml [[[").unwrap();
+
+        let config = AppConfig::load(tmp.path());
+        // Should fall back to defaults
+        assert_eq!(config.general.log_level, "info");
+    }
+
+    #[test]
+    fn test_load_partial_config_fills_defaults() {
+        let tmp = TempDir::new().unwrap();
+        let mut f = fs::File::create(tmp.path().join("config.toml")).unwrap();
+        // Only override log_level, rest should be defaults
+        writeln!(f, "[general]\nlog_level = \"trace\"").unwrap();
+
+        let config = AppConfig::load(tmp.path());
+        assert_eq!(config.general.log_level, "trace");
+        assert_eq!(config.general.database_path, "data.db");
+        assert!(config.ffmpeg.ffmpeg_path.is_empty());
+        assert!(config.workspaces.recent.is_empty());
+    }
+
+    #[test]
+    fn test_toml_serialization_roundtrip() {
+        let mut config = AppConfig::default();
+        config.general.log_level = "warn".to_string();
+        config.ffmpeg.ffprobe_path = "/opt/bin/ffprobe".to_string();
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: AppConfig = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.general.log_level, "warn");
+        assert_eq!(parsed.ffmpeg.ffprobe_path, "/opt/bin/ffprobe");
+    }
 }

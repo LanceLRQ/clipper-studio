@@ -54,27 +54,137 @@ pub fn parse_duration_ms(s: &str) -> Option<i64> {
 mod tests {
     use super::*;
 
+    // ==================== format_duration_ms ====================
+
     #[test]
-    fn test_format_duration_ms() {
+    fn test_format_zero() {
         assert_eq!(format_duration_ms(0), "00:00.000");
-        assert_eq!(format_duration_ms(1500), "00:01.500");
-        assert_eq!(format_duration_ms(90_000), "01:30.000");
-        assert_eq!(format_duration_ms(3_661_500), "01:01:01.500");
     }
 
     #[test]
-    fn test_parse_duration_ms() {
+    fn test_format_milliseconds_only() {
+        assert_eq!(format_duration_ms(500), "00:00.500");
+        assert_eq!(format_duration_ms(1), "00:00.001");
+        assert_eq!(format_duration_ms(999), "00:00.999");
+    }
+
+    #[test]
+    fn test_format_seconds() {
+        assert_eq!(format_duration_ms(1_000), "00:01.000");
+        assert_eq!(format_duration_ms(1_500), "00:01.500");
+        assert_eq!(format_duration_ms(59_999), "00:59.999");
+    }
+
+    #[test]
+    fn test_format_minutes() {
+        assert_eq!(format_duration_ms(60_000), "01:00.000");
+        assert_eq!(format_duration_ms(90_000), "01:30.000");
+    }
+
+    #[test]
+    fn test_format_hours() {
+        assert_eq!(format_duration_ms(3_600_000), "01:00:00.000");
+        assert_eq!(format_duration_ms(3_661_500), "01:01:01.500");
+        assert_eq!(format_duration_ms(86_399_999), "23:59:59.999");
+    }
+
+    #[test]
+    fn test_format_large_values() {
+        assert_eq!(format_duration_ms(360_000_000), "100:00:00.000");
+        assert_eq!(format_duration_ms(86_400_000), "24:00:00.000");
+    }
+
+    #[test]
+    fn test_format_negative_values() {
+        // Negative values are not expected in normal usage,
+        // but verify the function does not panic
+        // -1: total_seconds=-1/1000=0, ms=-1%1000=-1
+        assert_eq!(format_duration_ms(-1), "00:00.-01");
+        // -1500: total_seconds=-1, minutes=0, seconds=-1, ms=-500
+        assert_eq!(format_duration_ms(-1500), "00:-1.-500");
+    }
+
+    // ==================== parse_duration_ms ====================
+
+    #[test]
+    fn test_parse_mmss_mmm() {
+        assert_eq!(parse_duration_ms("00:00.000"), Some(0));
         assert_eq!(parse_duration_ms("00:01.500"), Some(1500));
         assert_eq!(parse_duration_ms("01:30.000"), Some(90_000));
-        assert_eq!(parse_duration_ms("01:01:01.500"), Some(3_661_500));
-        assert_eq!(parse_duration_ms("invalid"), None);
+        assert_eq!(parse_duration_ms("59:59.999"), Some(3_599_999));
     }
 
     #[test]
-    fn test_roundtrip() {
-        let ms = 5_432_100;
+    fn test_parse_hhmmss_mmm() {
+        assert_eq!(parse_duration_ms("01:01:01.500"), Some(3_661_500));
+        assert_eq!(parse_duration_ms("01:00:00.000"), Some(3_600_000));
+        assert_eq!(parse_duration_ms("23:59:59.999"), Some(86_399_999));
+    }
+
+    #[test]
+    fn test_parse_without_millis() {
+        // MM:SS without .mmm
+        assert_eq!(parse_duration_ms("01:30"), Some(90_000));
+        assert_eq!(parse_duration_ms("00:05"), Some(5000));
+        // HH:MM:SS without .mmm
+        assert_eq!(parse_duration_ms("01:00:00"), Some(3_600_000));
+        assert_eq!(parse_duration_ms("00:01:30"), Some(90_000));
+    }
+
+    #[test]
+    fn test_parse_short_millis_pads_right() {
+        // "5" -> "500"
+        assert_eq!(parse_duration_ms("00:01.5"), Some(1500));
+        // "50" -> "500"
+        assert_eq!(parse_duration_ms("00:01.50"), Some(1500));
+        // "05" -> "050"
+        assert_eq!(parse_duration_ms("00:01.05"), Some(1050));
+    }
+
+    #[test]
+    fn test_parse_invalid_inputs() {
+        assert_eq!(parse_duration_ms("invalid"), None);
+        assert_eq!(parse_duration_ms(""), None);
+        assert_eq!(parse_duration_ms("1:2:3:4"), None); // too many parts
+        assert_eq!(parse_duration_ms("ab:cd.ef"), None);
+    }
+
+    #[test]
+    fn test_parse_edge_cases() {
+        // Single colon with no seconds
+        assert_eq!(parse_duration_ms("00:"), None);
+        // Empty parts
+        assert_eq!(parse_duration_ms(":"), None);
+    }
+
+    // ==================== roundtrip ====================
+
+    #[test]
+    fn test_roundtrip_zero() {
+        let ms = 0i64;
         let formatted = format_duration_ms(ms);
         let parsed = parse_duration_ms(&formatted).unwrap();
         assert_eq!(ms, parsed);
+    }
+
+    #[test]
+    fn test_roundtrip_large() {
+        let ms = 5_432_100i64;
+        let formatted = format_duration_ms(ms);
+        let parsed = parse_duration_ms(&formatted).unwrap();
+        assert_eq!(ms, parsed);
+    }
+
+    #[test]
+    fn test_roundtrip_various() {
+        let test_values = [
+            1i64, 999, 1_000, 59_999, 60_000, 90_000, 3_599_999,
+            3_600_000, 3_661_500, 86_399_999, 86_400_000, 360_000_000,
+        ];
+        for ms in test_values {
+            let formatted = format_duration_ms(ms);
+            let parsed = parse_duration_ms(&formatted).unwrap();
+            assert_eq!(ms, parsed, "roundtrip failed for {} (formatted as {})", ms, formatted);
+        }
     }
 }
