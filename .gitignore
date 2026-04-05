@@ -141,3 +141,5 @@ vite.config.ts.timestamp-*
 # project
 plans
 CLAUDE.local.md
+.claude
+.opencode

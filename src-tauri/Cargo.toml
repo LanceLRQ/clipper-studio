@@ -1,0 +1,55 @@
+[package]
+name = "clipper-studio"
+version = "0.1.0"
+description = "A local-first desktop video workbench for live stream clip creators"
+authors = ["LanceLRQ"]
+license = "GPL-3.0"
+repository = "https://github.com/LanceLRQ/clipper-studio"
+default-run = "clipper-studio"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "clipper_studio_lib"
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Database - sea-orm for modeling/migration, rusqlite for raw SQL
+sea-orm = { version = "1", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+] }
+sea-orm-migration = { version = "1", features = [] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# File hashing
+blake3 = "1"
+
+# HTTP client (for ASR/LLM service calls)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Async utilities
+tokio-util = "0.7"
