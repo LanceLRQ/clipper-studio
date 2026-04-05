@@ -19,6 +19,7 @@ use std::sync::RwLock;
 use tauri::Manager;
 
 use crate::config::AppConfig;
+use crate::core::media_server::MediaServer;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
@@ -29,6 +30,7 @@ pub struct AppState {
     pub config_dir: std::path::PathBuf,
     pub ffmpeg_path: String,
     pub ffprobe_path: String,
+    pub media_server_port: u16,
 }
 
 /// Build and configure the Tauri application
@@ -49,6 +51,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             // Resolve data directory
             let data_dir = app
@@ -104,6 +107,12 @@ pub fn run() {
 
             tracing::info!("Database initialized successfully");
 
+            // Start local media server
+            let media_server = tauri::async_runtime::block_on(async {
+                MediaServer::start().await
+            })?;
+            let media_server_port = media_server.port();
+
             // Set up system tray
             shell::tray::setup_tray(app)?;
 
@@ -114,6 +123,7 @@ pub fn run() {
                 config_dir: data_dir,
                 ffmpeg_path: ffmpeg_path.unwrap_or_default(),
                 ffprobe_path: ffprobe_path.unwrap_or_default(),
+                media_server_port,
             });
 
             tracing::info!("ClipperStudio ready!");
@@ -122,6 +132,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_app_info,
             commands::system::check_ffmpeg,
+            commands::video::import_video,
+            commands::video::list_videos,
+            commands::video::get_video,
+            commands::video::delete_video,
             commands::workspace::list_workspaces,
             commands::workspace::create_workspace,
             commands::workspace::delete_workspace,

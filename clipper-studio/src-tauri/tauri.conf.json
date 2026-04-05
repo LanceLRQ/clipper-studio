@@ -22,7 +22,11 @@
             }
         ],
         "security": {
-            "csp": null
+            "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' asset: https://asset.localhost http://asset.localhost ipc: http://ipc.localhost; img-src 'self' asset: https://asset.localhost http://asset.localhost blob: data:; media-src 'self' asset: https://asset.localhost http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:",
+            "assetProtocol": {
+                "enable": true,
+                "scope": ["**"]
+            }
         },
         "trayIcon": {
             "iconPath": "icons/icon.png",

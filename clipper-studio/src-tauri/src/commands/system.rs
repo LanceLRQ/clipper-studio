@@ -14,6 +14,7 @@ pub struct AppInfo {
     pub ffmpeg_version: Option<String>,
     pub ffprobe_available: bool,
     pub has_workspaces: bool,
+    pub media_server_port: u16,
 }
 
 /// Get application info including version, data directory, and FFmpeg availability
@@ -64,6 +65,7 @@ pub fn get_app_info(
         ffmpeg_version,
         ffprobe_available: !state.ffprobe_path.is_empty(),
         has_workspaces,
+        media_server_port: state.media_server_port,
     })
 }
 

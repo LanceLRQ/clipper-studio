@@ -21,4 +21,5 @@ export interface AppInfo {
   ffmpeg_version: string | null;
   ffprobe_available: boolean;
   has_workspaces: boolean;
+  media_server_port: number;
 }

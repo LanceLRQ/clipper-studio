@@ -1,7 +1,7 @@
 pub mod system;
+pub mod video;
 pub mod workspace;
 // Phase 1 后续
-// pub mod video;
 // pub mod clip;
 // pub mod task;
 // Phase 2+

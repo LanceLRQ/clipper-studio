@@ -60,6 +60,107 @@ fn find_in_path(name: &str) -> Option<String> {
         })
 }
 
+/// Video probe result from FFprobe
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProbeResult {
+    pub duration_ms: Option<i64>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub format_name: Option<String>,
+    pub file_size: i64,
+}
+
+/// Run FFprobe on a file and return structured metadata
+pub fn probe(ffprobe_path: &str, file_path: &std::path::Path) -> Result<ProbeResult, String> {
+    if ffprobe_path.is_empty() {
+        return Err("FFprobe not available".to_string());
+    }
+
+    let output = Command::new(ffprobe_path)
+        .args([
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            "-show_streams",
+        ])
+        .arg(file_path)
+        .output()
+        .map_err(|e| format!("Failed to run ffprobe: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFprobe failed: {}", stderr));
+    }
+
+    let json_str = String::from_utf8(output.stdout)
+        .map_err(|e| format!("FFprobe output not UTF-8: {}", e))?;
+
+    let json: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("FFprobe JSON parse error: {}", e))?;
+
+    // Extract format info
+    let format = json.get("format");
+    let duration_ms = format
+        .and_then(|f| f.get("duration"))
+        .and_then(|d| d.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .map(|d| (d * 1000.0) as i64);
+
+    let file_size = format
+        .and_then(|f| f.get("size"))
+        .and_then(|s| s.as_str())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    let format_name = format
+        .and_then(|f| f.get("format_name"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+
+    // Extract stream info
+    let streams = json.get("streams").and_then(|s| s.as_array());
+
+    let mut width = None;
+    let mut height = None;
+    let mut video_codec = None;
+    let mut audio_codec = None;
+
+    if let Some(streams) = streams {
+        for stream in streams {
+            let codec_type = stream.get("codec_type").and_then(|t| t.as_str());
+            match codec_type {
+                Some("video") if video_codec.is_none() => {
+                    video_codec = stream
+                        .get("codec_name")
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.to_string());
+                    width = stream.get("width").and_then(|w| w.as_i64()).map(|w| w as i32);
+                    height = stream.get("height").and_then(|h| h.as_i64()).map(|h| h as i32);
+                }
+                Some("audio") if audio_codec.is_none() => {
+                    audio_codec = stream
+                        .get("codec_name")
+                        .and_then(|c| c.as_str())
+                        .map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(ProbeResult {
+        duration_ms,
+        width,
+        height,
+        video_codec,
+        audio_codec,
+        format_name,
+        file_size,
+    })
+}
+
 /// Get FFmpeg version string
 pub fn get_version(ffmpeg_path: &str) -> Option<String> {
     if ffmpeg_path.is_empty() {

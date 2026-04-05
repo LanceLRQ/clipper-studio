@@ -14,9 +14,10 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardWorkspacesRouteImport } from './routes/dashboard/workspaces'
-import { Route as DashboardVideosRouteImport } from './routes/dashboard/videos'
 import { Route as DashboardTasksRouteImport } from './routes/dashboard/tasks'
 import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settings'
+import { Route as DashboardVideosIndexRouteImport } from './routes/dashboard/videos/index'
+import { Route as DashboardVideosVideoIdRouteImport } from './routes/dashboard/videos/$videoId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -43,11 +44,6 @@ const DashboardWorkspacesRoute = DashboardWorkspacesRouteImport.update({
   path: '/workspaces',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardVideosRoute = DashboardVideosRouteImport.update({
-  id: '/videos',
-  path: '/videos',
-  getParentRoute: () => DashboardRoute,
-} as any)
 const DashboardTasksRoute = DashboardTasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
@@ -58,6 +54,16 @@ const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardVideosIndexRoute = DashboardVideosIndexRouteImport.update({
+  id: '/videos/',
+  path: '/videos/',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardVideosVideoIdRoute = DashboardVideosVideoIdRouteImport.update({
+  id: '/videos/$videoId',
+  path: '/videos/$videoId',
+  getParentRoute: () => DashboardRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -65,18 +71,20 @@ export interface FileRoutesByFullPath {
   '/welcome': typeof WelcomeRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
-  '/dashboard/videos': typeof DashboardVideosRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard/': typeof DashboardIndexRoute
+  '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/videos/': typeof DashboardVideosIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/welcome': typeof WelcomeRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
-  '/dashboard/videos': typeof DashboardVideosRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard': typeof DashboardIndexRoute
+  '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/videos': typeof DashboardVideosIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -85,9 +93,10 @@ export interface FileRoutesById {
   '/welcome': typeof WelcomeRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
-  '/dashboard/videos': typeof DashboardVideosRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard/': typeof DashboardIndexRoute
+  '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/videos/': typeof DashboardVideosIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,18 +106,20 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/dashboard/settings'
     | '/dashboard/tasks'
-    | '/dashboard/videos'
     | '/dashboard/workspaces'
     | '/dashboard/'
+    | '/dashboard/videos/$videoId'
+    | '/dashboard/videos/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/welcome'
     | '/dashboard/settings'
     | '/dashboard/tasks'
-    | '/dashboard/videos'
     | '/dashboard/workspaces'
     | '/dashboard'
+    | '/dashboard/videos/$videoId'
+    | '/dashboard/videos'
   id:
     | '__root__'
     | '/'
@@ -116,9 +127,10 @@ export interface FileRouteTypes {
     | '/welcome'
     | '/dashboard/settings'
     | '/dashboard/tasks'
-    | '/dashboard/videos'
     | '/dashboard/workspaces'
     | '/dashboard/'
+    | '/dashboard/videos/$videoId'
+    | '/dashboard/videos/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -164,13 +176,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardWorkspacesRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/dashboard/videos': {
-      id: '/dashboard/videos'
-      path: '/videos'
-      fullPath: '/dashboard/videos'
-      preLoaderRoute: typeof DashboardVideosRouteImport
-      parentRoute: typeof DashboardRoute
-    }
     '/dashboard/tasks': {
       id: '/dashboard/tasks'
       path: '/tasks'
@@ -185,23 +190,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardSettingsRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/videos/': {
+      id: '/dashboard/videos/'
+      path: '/videos'
+      fullPath: '/dashboard/videos/'
+      preLoaderRoute: typeof DashboardVideosIndexRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/videos/$videoId': {
+      id: '/dashboard/videos/$videoId'
+      path: '/videos/$videoId'
+      fullPath: '/dashboard/videos/$videoId'
+      preLoaderRoute: typeof DashboardVideosVideoIdRouteImport
+      parentRoute: typeof DashboardRoute
+    }
   }
 }
 
 interface DashboardRouteChildren {
   DashboardSettingsRoute: typeof DashboardSettingsRoute
   DashboardTasksRoute: typeof DashboardTasksRoute
-  DashboardVideosRoute: typeof DashboardVideosRoute
   DashboardWorkspacesRoute: typeof DashboardWorkspacesRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
+  DashboardVideosVideoIdRoute: typeof DashboardVideosVideoIdRoute
+  DashboardVideosIndexRoute: typeof DashboardVideosIndexRoute
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardSettingsRoute: DashboardSettingsRoute,
   DashboardTasksRoute: DashboardTasksRoute,
-  DashboardVideosRoute: DashboardVideosRoute,
   DashboardWorkspacesRoute: DashboardWorkspacesRoute,
   DashboardIndexRoute: DashboardIndexRoute,
+  DashboardVideosVideoIdRoute: DashboardVideosVideoIdRoute,
+  DashboardVideosIndexRoute: DashboardVideosIndexRoute,
 }
 
 const DashboardRouteWithChildren = DashboardRoute._addFileChildren(
