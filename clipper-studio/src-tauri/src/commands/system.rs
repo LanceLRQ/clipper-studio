@@ -1,5 +1,6 @@
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
+use std::path::PathBuf;
 
 use crate::AppState;
 use crate::utils::ffmpeg;
@@ -22,7 +23,7 @@ pub fn get_app_info(
     let data_dir = app_handle
         .path()
         .app_data_dir()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p: PathBuf| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
     let ffmpeg_version = if !state.ffmpeg_path.is_empty() {

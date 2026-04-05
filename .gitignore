@@ -143,3 +143,7 @@ plans
 CLAUDE.local.md
 .claude
 .opencode
+tasks.md
+
+# Tauri build artifacts
+clipper-studio/src-tauri/target/
