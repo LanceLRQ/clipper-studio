@@ -62,3 +62,48 @@ export async function searchSubtitles(
 export async function checkASRHealth(): Promise<ASRHealthInfo> {
   return invoke<ASRHealthInfo>("check_asr_health");
 }
+
+// ==================== Subtitle Editing ====================
+
+export async function updateSubtitle(
+  segmentId: number,
+  text: string,
+  startMs: number,
+  endMs: number
+): Promise<void> {
+  return invoke("update_subtitle", { segmentId, text, startMs, endMs });
+}
+
+export async function deleteSubtitle(segmentId: number): Promise<void> {
+  return invoke("delete_subtitle", { segmentId });
+}
+
+export async function mergeSubtitles(
+  segmentIds: number[]
+): Promise<SubtitleSegment> {
+  return invoke<SubtitleSegment>("merge_subtitles", { segmentIds });
+}
+
+export async function splitSubtitle(
+  segmentId: number,
+  splitAtMs: number
+): Promise<[SubtitleSegment, SubtitleSegment]> {
+  return invoke<[SubtitleSegment, SubtitleSegment]>("split_subtitle", {
+    segmentId,
+    splitAtMs,
+  });
+}
+
+// ==================== Subtitle Export ====================
+
+export async function exportSubtitlesSrt(videoId: number): Promise<string> {
+  return invoke<string>("export_subtitles_srt", { videoId });
+}
+
+export async function exportSubtitlesAss(videoId: number): Promise<string> {
+  return invoke<string>("export_subtitles_ass", { videoId });
+}
+
+export async function exportSubtitlesVtt(videoId: number): Promise<string> {
+  return invoke<string>("export_subtitles_vtt", { videoId });
+}

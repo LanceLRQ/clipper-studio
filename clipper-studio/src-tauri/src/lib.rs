@@ -214,6 +214,13 @@ pub fn run() {
             commands::asr::list_subtitles,
             commands::asr::search_subtitles,
             commands::asr::check_asr_health,
+            commands::asr::update_subtitle,
+            commands::asr::delete_subtitle,
+            commands::asr::merge_subtitles,
+            commands::asr::split_subtitle,
+            commands::asr::export_subtitles_srt,
+            commands::asr::export_subtitles_ass,
+            commands::asr::export_subtitles_vtt,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");

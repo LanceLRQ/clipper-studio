@@ -343,7 +343,7 @@ async fn import_segments(
 }
 
 /// Parse "yyyy-MM-dd HH:mm:ss" to Unix milliseconds
-fn parse_recorded_at_to_unix_ms(ts: &str) -> Option<i64> {
+pub fn parse_recorded_at_to_unix_ms(ts: &str) -> Option<i64> {
     // Format: "2026-04-05 20:30:00"
     let parts: Vec<&str> = ts.split(&['-', ' ', ':'][..]).collect();
     if parts.len() < 6 {

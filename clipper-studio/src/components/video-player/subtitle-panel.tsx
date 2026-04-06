@@ -8,6 +8,9 @@ import {
   listSubtitles,
   listASRTasks,
   checkASRHealth,
+  exportSubtitlesSrt,
+  exportSubtitlesAss,
+  exportSubtitlesVtt,
 } from "@/services/asr";
 
 interface SubtitlePanelProps {
@@ -145,9 +148,63 @@ export function SubtitlePanel({
     <div className="rounded-lg border p-4 space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-medium">字幕</h3>
-        <span className="text-xs text-muted-foreground">
-          {segments.length > 0 ? `${segments.length} 条` : ""}
-        </span>
+        <div className="flex items-center gap-2">
+          {segments.length > 0 && (
+            <>
+              <span className="text-xs text-muted-foreground">
+                {segments.length} 条
+              </span>
+              <select
+                className="h-6 rounded border text-xs px-1 bg-background"
+                defaultValue=""
+                onChange={async (e) => {
+                  const fmt = e.target.value;
+                  if (!fmt) return;
+                  e.target.value = "";
+                  try {
+                    let content: string;
+                    let ext: string;
+                    if (fmt === "srt") {
+                      content = await exportSubtitlesSrt(videoId);
+                      ext = "srt";
+                    } else if (fmt === "ass") {
+                      content = await exportSubtitlesAss(videoId);
+                      ext = "ass";
+                    } else {
+                      content = await exportSubtitlesVtt(videoId);
+                      ext = "vtt";
+                    }
+                    // Download via blob
+                    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url;
+                    a.download = `subtitles.${ext}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  } catch (err) {
+                    alert("导出失败: " + String(err));
+                  }
+                }}
+              >
+                <option value="">导出...</option>
+                <option value="srt">SRT</option>
+                <option value="ass">ASS</option>
+                <option value="vtt">VTT</option>
+              </select>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1 text-xs"
+                onClick={handleSubmitASR}
+                disabled={loading}
+                title="重新识别"
+              >
+                刷新
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* ASR progress or submit button */}
