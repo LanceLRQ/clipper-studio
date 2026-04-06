@@ -228,4 +228,80 @@ mod tests {
         let _ = detect_binary("ffmpeg", &dir);
         let _ = detect_binary("ffprobe", &dir);
     }
+
+    // ==================== probe ====================
+
+    #[test]
+    fn test_probe_empty_path() {
+        let result = probe("", std::path::Path::new("/some/file.mp4"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "FFprobe not available");
+    }
+
+    #[test]
+    fn test_probe_nonexistent_ffprobe() {
+        let result = probe(
+            "/nonexistent/ffprobe",
+            std::path::Path::new("/some/file.mp4"),
+        );
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("Failed to run ffprobe"),
+            "should report ffprobe failure"
+        );
+    }
+
+    #[test]
+    fn test_probe_nonexistent_file() {
+        // Only test if ffprobe is available on the system
+        let ffprobe = detect_binary("ffprobe", &PathBuf::from("/nonexistent/bin"));
+        if let Some(ffprobe_path) = ffprobe {
+            let result = probe(&ffprobe_path, std::path::Path::new("/nonexistent/file.mp4"));
+            assert!(result.is_err(), "probing nonexistent file should fail");
+        }
+    }
+
+    #[test]
+    fn test_probe_result_serialization() {
+        let result = ProbeResult {
+            duration_ms: Some(123456),
+            width: Some(1920),
+            height: Some(1080),
+            video_codec: Some("h264".to_string()),
+            audio_codec: Some("aac".to_string()),
+            format_name: Some("mov,mp4,m4a,3gp,3g2,mj2".to_string()),
+            file_size: 1048576,
+        };
+
+        // Verify serialization roundtrip
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: ProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.duration_ms, Some(123456));
+        assert_eq!(parsed.width, Some(1920));
+        assert_eq!(parsed.height, Some(1080));
+        assert_eq!(parsed.video_codec, Some("h264".to_string()));
+        assert_eq!(parsed.audio_codec, Some("aac".to_string()));
+        assert_eq!(parsed.format_name, Some("mov,mp4,m4a,3gp,3g2,mj2".to_string()));
+        assert_eq!(parsed.file_size, 1048576);
+    }
+
+    #[test]
+    fn test_probe_result_optional_fields() {
+        let result = ProbeResult {
+            duration_ms: None,
+            width: None,
+            height: None,
+            video_codec: None,
+            audio_codec: None,
+            format_name: None,
+            file_size: 0,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: ProbeResult = serde_json::from_str(&json).unwrap();
+        assert!(parsed.duration_ms.is_none());
+        assert!(parsed.width.is_none());
+        assert!(parsed.video_codec.is_none());
+        assert_eq!(parsed.file_size, 0);
+    }
 }

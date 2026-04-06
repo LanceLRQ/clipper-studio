@@ -18,8 +18,11 @@ use std::sync::RwLock;
 
 use tauri::Manager;
 
+use std::sync::Arc;
+
 use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
+use crate::core::queue::TaskQueue;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
@@ -31,6 +34,7 @@ pub struct AppState {
     pub ffmpeg_path: String,
     pub ffprobe_path: String,
     pub media_server_port: u16,
+    pub task_queue: Arc<TaskQueue>,
 }
 
 /// Build and configure the Tauri application
@@ -113,6 +117,9 @@ pub fn run() {
             })?;
             let media_server_port = media_server.port();
 
+            // Initialize task queue (max 2 concurrent tasks)
+            let task_queue = Arc::new(TaskQueue::new(app.handle().clone(), 2));
+
             // Set up system tray
             shell::tray::setup_tray(app)?;
 
@@ -124,6 +131,7 @@ pub fn run() {
                 ffmpeg_path: ffmpeg_path.unwrap_or_default(),
                 ffprobe_path: ffprobe_path.unwrap_or_default(),
                 media_server_port,
+                task_queue,
             });
 
             tracing::info!("ClipperStudio ready!");
@@ -136,6 +144,10 @@ pub fn run() {
             commands::video::list_videos,
             commands::video::get_video,
             commands::video::delete_video,
+            commands::clip::create_clip,
+            commands::clip::cancel_clip,
+            commands::clip::list_clip_tasks,
+            commands::clip::list_presets,
             commands::workspace::list_workspaces,
             commands::workspace::create_workspace,
             commands::workspace::delete_workspace,
