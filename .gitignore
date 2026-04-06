@@ -144,6 +144,8 @@ CLAUDE.local.md
 .claude
 .opencode
 tasks.md
+.DS_Store
 
 # Tauri build artifacts
 clipper-studio/src-tauri/target/
+clipper-studio/target/
