@@ -36,6 +36,7 @@ pub struct AppState {
     pub ffprobe_path: String,
     pub media_server_port: u16,
     pub task_queue: Arc<TaskQueue>,
+    pub danmaku_factory_path: String,
     pub watcher: Arc<WorkspaceWatcher>,
     pub plugin_manager: Arc<PluginManager>,
 }
@@ -100,6 +101,20 @@ pub fn run() {
                 tracing::warn!("FFprobe not found! Media probe features will be unavailable.");
             }
 
+            // Detect DanmakuFactory binary
+            let danmaku_factory_path = if !app_config.tools.danmaku_factory_path.is_empty() {
+                tracing::info!("DanmakuFactory path from config: {}", app_config.tools.danmaku_factory_path);
+                Some(app_config.tools.danmaku_factory_path.clone())
+            } else {
+                ffmpeg::detect_binary("DanmakuFactory", &bin_dir)
+            };
+
+            if let Some(ref path) = danmaku_factory_path {
+                tracing::info!("DanmakuFactory found: {}", path);
+            } else {
+                tracing::info!("DanmakuFactory not found. Danmaku ASS conversion will be unavailable.");
+            }
+
             // Initialize database (path from config)
             let db_path = app_config.resolve_db_path(&data_dir);
             tracing::info!("Database path: {}", db_path.display());
@@ -141,6 +156,7 @@ pub fn run() {
                 config_dir: data_dir,
                 ffmpeg_path: ffmpeg_path.unwrap_or_default(),
                 ffprobe_path: ffprobe_path.unwrap_or_default(),
+                danmaku_factory_path: danmaku_factory_path.unwrap_or_default(),
                 media_server_port,
                 task_queue,
                 watcher: watcher.clone(),
@@ -215,6 +231,10 @@ pub fn run() {
             commands::asr::list_subtitles,
             commands::asr::search_subtitles,
             commands::asr::check_asr_health,
+            commands::danmaku::load_danmaku,
+            commands::danmaku::get_danmaku_density,
+            commands::danmaku::convert_danmaku_to_ass,
+            commands::danmaku::check_danmaku_factory,
             commands::asr::update_subtitle,
             commands::asr::delete_subtitle,
             commands::asr::merge_subtitles,

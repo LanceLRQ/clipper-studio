@@ -325,6 +325,48 @@ pub async fn remux_to_mp4(
     Ok(())
 }
 
+/// Burn subtitle/danmaku ASS file into video
+pub async fn burn_subtitle(
+    ffmpeg_path: &str,
+    input: &Path,
+    ass_path: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    use tokio::process::Command as AsyncCommand;
+
+    if ffmpeg_path.is_empty() {
+        return Err("FFmpeg not available".to_string());
+    }
+
+    // Escape ASS path for FFmpeg filter (colons and backslashes need escaping)
+    let ass_escaped = ass_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(':', "\\:");
+
+    let status = AsyncCommand::new(ffmpeg_path)
+        .args([
+            "-i",
+            &input.to_string_lossy(),
+            "-vf",
+            &format!("ass={}", ass_escaped),
+            "-c:a", "copy",
+            "-y",
+            &output.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()
+        .await
+        .map_err(|e| format!("Failed to start FFmpeg burn: {}", e))?;
+
+    if !status.success() {
+        return Err("FFmpeg subtitle burn failed".to_string());
+    }
+
+    Ok(())
+}
+
 /// Get FFmpeg version string
 pub fn get_version(ffmpeg_path: &str) -> Option<String> {
     if ffmpeg_path.is_empty() {

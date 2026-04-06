@@ -6,6 +6,5 @@ pub mod workspace;
 // pub mod task;
 pub mod plugin;
 pub mod asr;
-// Phase 2+
-// pub mod danmaku;
+pub mod danmaku;
 // pub mod settings;

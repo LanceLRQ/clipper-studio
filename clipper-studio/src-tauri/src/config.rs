@@ -14,6 +14,15 @@ pub struct AppConfig {
     pub ffmpeg: FfmpegConfig,
     #[serde(default)]
     pub workspaces: WorkspacesConfig,
+    #[serde(default)]
+    pub tools: ToolsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ToolsConfig {
+    /// Override DanmakuFactory binary path (empty = auto-detect)
+    #[serde(default)]
+    pub danmaku_factory_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,6 +96,7 @@ impl Default for AppConfig {
             general: GeneralConfig::default(),
             ffmpeg: FfmpegConfig::default(),
             workspaces: WorkspacesConfig::default(),
+            tools: ToolsConfig::default(),
         }
     }
 }
