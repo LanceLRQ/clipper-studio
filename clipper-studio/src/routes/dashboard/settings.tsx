@@ -173,6 +173,94 @@ function ConfigField({
   );
 }
 
+// ===== Plugin UI Panel (Dynamic Loading) =====
+interface PluginModule {
+  registerSettings: (
+    container: HTMLElement,
+    ctx: { pluginId: string; pluginDir: string }
+  ) => void;
+}
+
+async function loadPluginUI(
+  plugin: PluginInfo
+): Promise<{ register: (container: HTMLElement) => void } | null> {
+  if (!plugin.frontend?.entry || !plugin.dir) return null;
+
+  const entryPath = `${plugin.dir}/${plugin.frontend.entry}`;
+
+  try {
+    const mod = (await import(
+      /* @vite-ignore */ entryPath
+    )) as PluginModule;
+
+    if (typeof mod.registerSettings !== "function") {
+      console.error(
+        `Plugin ${plugin.id} does not export registerSettings function`
+      );
+      return null;
+    }
+
+    return {
+      register: (container: HTMLElement) => {
+        mod.registerSettings(container, {
+          pluginId: plugin.id,
+          pluginDir: plugin.dir!,
+        });
+      },
+    };
+  } catch (e) {
+    console.error(`Failed to load plugin UI for ${plugin.id}:`, e);
+    return null;
+  }
+}
+
+function PluginUIPanel({ plugin }: { plugin: PluginInfo }) {
+  const containerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (node && plugin) {
+        // Load and mount plugin UI when container is available
+        loadPluginUI(plugin).then((loader) => {
+          if (loader) {
+            loader.register(node);
+          }
+        });
+      }
+    },
+    [plugin]
+  );
+
+  if (!plugin.frontend?.entry || !plugin.dir) return null;
+
+  return (
+    <section className="rounded-lg border p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-medium text-lg">{plugin.name}</h3>
+          <p className="text-xs text-muted-foreground">
+            {plugin.description ?? "插件界面"}
+          </p>
+        </div>
+        <span
+          className={`text-xs px-2 py-0.5 rounded ${
+            plugin.status === "loaded" || plugin.status === "running"
+              ? "bg-green-100 text-green-700"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          {plugin.status === "loaded"
+            ? "已加载"
+            : plugin.status === "running"
+              ? "运行中"
+              : plugin.status === "discovered"
+                ? "未加载"
+                : plugin.status}
+        </span>
+      </div>
+      <div ref={containerRef} className="plugin-ui-container min-h-[100px]" />
+    </section>
+  );
+}
+
 // ===== Main Settings Page =====
 function SettingsPage() {
   // ASR settings
@@ -192,6 +280,8 @@ function SettingsPage() {
   // Plugin configs
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [pluginsLoading, setPluginsLoading] = useState(false);
+  // Plugin UIs (plugins with frontend.entry)
+  const [pluginUIs, setPluginUIs] = useState<PluginInfo[]>([]);
 
   // App info
   const [appInfo, setAppInfo] = useState<{
@@ -239,6 +329,8 @@ function SettingsPage() {
       .then((list) => {
         // Only show plugins that have config and are loaded/running
         setPlugins(list.filter((p) => p.has_config));
+        // Show plugins that have frontend UI
+        setPluginUIs(list.filter((p) => p.frontend?.entry && p.dir));
       })
       .catch(console.error)
       .finally(() => setPluginsLoading(false));
@@ -424,6 +516,19 @@ function SettingsPage() {
           </p>
           {plugins.map((plugin) => (
             <PluginConfigPanel key={plugin.id} plugin={plugin} />
+          ))}
+        </section>
+      ) : null}
+
+      {/* ===== Plugin UIs (dynamic loading) ===== */}
+      {pluginUIs.length > 0 ? (
+        <section className="space-y-4">
+          <h3 className="font-medium text-lg">插件界面</h3>
+          <p className="text-xs text-muted-foreground">
+            以下插件提供了自定义界面。需先在「插件管理」页加载插件后才能使用。
+          </p>
+          {pluginUIs.map((plugin) => (
+            <PluginUIPanel key={plugin.id} plugin={plugin} />
           ))}
         </section>
       ) : null}

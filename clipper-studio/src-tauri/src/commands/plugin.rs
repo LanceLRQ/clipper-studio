@@ -66,21 +66,63 @@ pub async fn scan_plugins(
     Ok(state.plugin_manager.list().await)
 }
 
-/// List all discovered plugins
+/// List all discovered plugins (builtin + external)
 #[tauri::command]
 pub async fn list_plugins(
     state: State<'_, AppState>,
 ) -> Result<Vec<PluginInfo>, String> {
-    Ok(state.plugin_manager.list().await)
+    // Builtin plugins from registry
+    let builtin: Vec<PluginInfo> = state
+        .plugin_registry
+        .list_builtin_with_status()
+        .into_iter()
+        .map(|b| PluginInfo {
+            id: b.id,
+            name: b.name,
+            version: b.version,
+            plugin_type: b.plugin_type,
+            transport: b.transport,
+            managed: b.managed,
+            status: b.status,
+            description: b.description,
+            has_config: b.has_config,
+            config_schema: b.config_schema,
+            frontend: b.frontend,
+            dir: b.dir,
+        })
+        .collect();
+
+    // External plugins from directory scan
+    let external = state.plugin_manager.list().await;
+
+    // Merge: external overrides builtin with same ID
+    let mut result = builtin;
+    for ext in external {
+        if !result.iter().any(|p| p.id == ext.id) {
+            result.push(ext);
+        }
+    }
+
+    Ok(result)
 }
 
-/// Load a plugin (verify deps, create transport)
+/// Load a plugin (builtin or external)
 #[tauri::command]
 pub async fn load_plugin(
     state: State<'_, AppState>,
     plugin_id: String,
 ) -> Result<(), String> {
-    state.plugin_manager.load(&plugin_id).await
+    // Check if it's a builtin plugin
+    if state.plugin_registry.is_builtin(&plugin_id) {
+        // Load builtin plugin via registry (transport stored in registry's instances)
+        let _ = state.plugin_registry.load_builtin(&plugin_id).await?;
+        // Note: builtin plugins don't need manager.register_transport or set_loaded
+        // Their status is tracked via registry's instances HashMap
+        Ok(())
+    } else {
+        // External plugin - use manager
+        state.plugin_manager.load(&plugin_id).await
+    }
 }
 
 /// Unload a plugin
@@ -89,7 +131,15 @@ pub async fn unload_plugin(
     state: State<'_, AppState>,
     plugin_id: String,
 ) -> Result<(), String> {
-    state.plugin_manager.unload(&plugin_id).await
+    if state.plugin_registry.is_builtin(&plugin_id) {
+        // Unload builtin plugin via registry
+        state.plugin_registry.unload_builtin(&plugin_id).await?;
+        let _ = state.plugin_manager.set_discovered(&plugin_id).await;
+        Ok(())
+    } else {
+        // External plugin - use manager
+        state.plugin_manager.unload(&plugin_id).await
+    }
 }
 
 /// Start a managed service plugin
@@ -110,12 +160,35 @@ pub async fn stop_plugin_service(
     state.plugin_manager.stop_service(&plugin_id).await
 }
 
-/// Call a plugin action via HTTP (generic RPC with optional auth)
-/// Supports: base_url, api_key, basic_user, basic_pass
+/// Call a plugin action (builtin or external)
+/// For builtin plugins: calls handle_request directly via registry transport
+/// For external plugins: makes HTTP request to the plugin endpoint
 #[tauri::command]
 pub async fn call_plugin(
-    _state: State<'_, AppState>,
-    _plugin_id: String,
+    state: State<'_, AppState>,
+    plugin_id: String,
+    action: String,
+    payload: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    // Check if it's a builtin plugin first
+    if state.plugin_registry.is_builtin(&plugin_id) {
+        let transport = state
+            .plugin_registry
+            .get_transport(&plugin_id)
+            .ok_or_else(|| format!("Builtin plugin '{}' not loaded", plugin_id))?;
+
+        transport
+            .request(&action, payload)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        // External HTTP plugin - use existing HTTP logic
+        call_plugin_http(action, payload).await
+    }
+}
+
+/// Make HTTP call to external plugin (non-builtin)
+async fn call_plugin_http(
     action: String,
     payload: serde_json::Value,
 ) -> Result<serde_json::Value, String> {

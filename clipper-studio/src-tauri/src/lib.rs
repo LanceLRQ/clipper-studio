@@ -24,6 +24,7 @@ use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
 use crate::core::watcher::WorkspaceWatcher;
 use crate::plugin::manager::PluginManager;
+use crate::plugin::registry::PluginRegistry;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
@@ -39,6 +40,7 @@ pub struct AppState {
     pub danmaku_factory_path: String,
     pub watcher: Arc<WorkspaceWatcher>,
     pub plugin_manager: Arc<PluginManager>,
+    pub plugin_registry: Arc<PluginRegistry>,
 }
 
 /// Build and configure the Tauri application
@@ -143,6 +145,18 @@ pub fn run() {
             let _ = std::fs::create_dir_all(&plugin_dir);
             let plugin_manager = Arc::new(PluginManager::new());
 
+            // Initialize plugin registry (for builtin plugins)
+            let mut plugin_registry = PluginRegistry::new();
+            // Register builtin plugins
+            #[cfg(feature = "builtin-plugins")]
+            {
+                use clipper_studio_plugin_recorder::BilibiliRecorderPluginBuilder;
+                tracing::info!("Registering builtin plugins...");
+                plugin_registry.register(BilibiliRecorderPluginBuilder::new());
+                tracing::info!("Builtin BilibiliRecorder plugin registered");
+            }
+            let plugin_registry = Arc::new(plugin_registry);
+
             // Initialize workspace file watcher
             let watcher = Arc::new(WorkspaceWatcher::new(app.handle().clone()));
 
@@ -161,6 +175,7 @@ pub fn run() {
                 task_queue,
                 watcher: watcher.clone(),
                 plugin_manager: plugin_manager.clone(),
+                plugin_registry: plugin_registry.clone(),
             });
 
             // Start watching existing workspaces with auto_scan enabled

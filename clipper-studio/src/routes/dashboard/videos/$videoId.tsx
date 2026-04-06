@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { VideoPlayer } from "@/components/video-player/player";
@@ -77,11 +77,6 @@ function VideoDetailPage() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [clipOptions, setClipOptions] = useState<Record<string, ClipOptions>>({});
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
-
-  const selectedClip = useMemo(
-    () => clips.find((c) => c.id === selectedClipId) ?? null,
-    [clips, selectedClipId]
-  );
 
   // Track playback time
   useEffect(() => {

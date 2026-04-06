@@ -25,10 +25,24 @@ function colorToHex(color: number): string {
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
 }
 
+/** Danmaku comment format accepted by the library */
+interface DanmakuComment {
+  text: string;
+  time: number;
+  mode: "rtl" | "top" | "bottom";
+  style: {
+    font: string;
+    fillStyle: string;
+    strokeStyle: string;
+    lineWidth: number;
+    textBaseline: CanvasTextBaseline;
+  };
+}
+
 /** Convert our DanmakuItem[] to library Comment[] format */
-function toComments(items: DanmakuItem[], fontScale: number): Danmaku.Comment[] {
+function toComments(items: DanmakuItem[], fontScale: number): DanmakuComment[] {
   return items.map((item) => {
-    const modeMap: Record<string, string> = {
+    const modeMap: Record<string, "rtl" | "top" | "bottom"> = {
       scroll: "rtl",
       top: "top",
       bottom: "bottom",
@@ -37,7 +51,7 @@ function toComments(items: DanmakuItem[], fontScale: number): Danmaku.Comment[] 
     return {
       text: item.text,
       time: item.time_ms / 1000,
-      mode: (modeMap[item.mode] || "rtl") as Danmaku.Comment["mode"],
+      mode: modeMap[item.mode] || "rtl",
       style: {
         font: `bold ${fontSize}px sans-serif`,
         fillStyle: colorToHex(item.color),
@@ -85,7 +99,7 @@ export function DanmakuLayer({
       speed: 144,
     });
 
-    console.log("[DanmakuLayer] Instance created, stage:", dm.container?.innerHTML?.length, "chars");
+    console.log("[DanmakuLayer] Instance created, stage:", (dm as { container?: { innerHTML?: { length: number } } }).container?.innerHTML?.length, "chars");
 
     danmakuRef.current = dm;
 

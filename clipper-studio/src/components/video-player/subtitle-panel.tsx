@@ -47,7 +47,6 @@ export function SubtitlePanel({
   const [asrTask, setAsrTask] = useState<ASRTaskInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [asrHealthy, setAsrHealthy] = useState<boolean | null>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -102,10 +101,8 @@ export function SubtitlePanel({
       const health = await checkASRHealth();
       if (health.status !== "ready") {
         alert("ASR 引擎未就绪，请先在插件页面启动 ASR 服务");
-        setAsrHealthy(false);
         return;
       }
-      setAsrHealthy(true);
 
       const taskId = await submitASR(videoId, undefined, true);
       setAsrTask({
@@ -256,7 +253,7 @@ export function SubtitlePanel({
       {/* Subtitle list */}
       {displaySegments.length > 0 && (
         <div className="max-h-[400px] overflow-y-auto space-y-0.5">
-          {displaySegments.map((seg, idx) => {
+          {displaySegments.map((seg) => {
             const isActive =
               !searchQuery && segments.indexOf(seg) === activeIndex;
             const startSecs = toRelativeSecs(seg.start_ms);

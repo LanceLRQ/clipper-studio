@@ -6,6 +6,11 @@ export interface PluginConfigField {
   description: string;
 }
 
+export interface PluginFrontend {
+  entry: string;
+  target: string;
+}
+
 export interface PluginInfo {
   id: string;
   name: string;
@@ -18,6 +23,10 @@ export interface PluginInfo {
   has_config: boolean;
   /** Configuration schema (field name -> schema). Only present if has_config is true. */
   config_schema?: Record<string, PluginConfigField>;
+  /** Frontend entry for plugin UI. If present, plugin provides a custom React component. */
+  frontend?: PluginFrontend;
+  /** Plugin directory path (for external plugins to resolve frontend entry). */
+  dir?: string;
 }
 
 export async function scanPlugins(): Promise<PluginInfo[]> {

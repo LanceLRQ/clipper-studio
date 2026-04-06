@@ -163,6 +163,9 @@ impl PluginManager {
                 let full_path = meta.dir.join(exec_path);
                 Box::new(StdioTransport::new(full_path, meta.dir.clone()))
             }
+            Transport::Builtin => {
+                return Err("Builtin plugins are not loaded via this method. Use PluginRegistry.".to_string());
+            }
         };
 
         self.transports
@@ -193,6 +196,48 @@ impl PluginManager {
         }
 
         tracing::info!("Plugin unloaded: {}", plugin_id);
+        Ok(())
+    }
+
+    /// Register an externally-created transport (used by builtin plugins)
+    pub async fn register_transport(
+        &self,
+        plugin_id: &str,
+        transport: Arc<Box<dyn PluginTransport>>,
+    ) -> Result<(), String> {
+        // For builtin plugins, we may not have a PluginMeta entry
+        // So we create one if needed
+        let mut plugins = self.plugins.write().await;
+        if let Some(meta) = plugins.get_mut(plugin_id) {
+            meta.status = PluginStatus::Loaded;
+        } else {
+            // Plugin not in our list yet - this shouldn't happen for external plugins
+            tracing::warn!("Plugin {} not found in registry when registering transport", plugin_id);
+        }
+
+        self.transports
+            .write()
+            .await
+            .insert(plugin_id.to_string(), transport);
+
+        Ok(())
+    }
+
+    /// Update plugin status to Loaded (used by builtin plugins)
+    pub async fn set_loaded(&self, plugin_id: &str) -> Result<(), String> {
+        let mut plugins = self.plugins.write().await;
+        if let Some(meta) = plugins.get_mut(plugin_id) {
+            meta.status = PluginStatus::Loaded;
+        }
+        Ok(())
+    }
+
+    /// Update plugin status to Discovered (used by builtin plugins on unload)
+    pub async fn set_discovered(&self, plugin_id: &str) -> Result<(), String> {
+        let mut plugins = self.plugins.write().await;
+        if let Some(meta) = plugins.get_mut(plugin_id) {
+            meta.status = PluginStatus::Discovered;
+        }
         Ok(())
     }
 
@@ -311,6 +356,8 @@ impl PluginManager {
                     } else {
                         Some(meta.manifest.config_schema.clone())
                     },
+                    frontend: meta.manifest.frontend.clone(),
+                    dir: Some(meta.dir.to_string_lossy().to_string()),
                 }
             })
             .collect()
@@ -441,4 +488,10 @@ pub struct PluginInfo {
     /// Configuration schema (field name -> schema with type/default/description)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<std::collections::HashMap<String, serde_json::Value>>,
+    /// Frontend entry for plugin UI
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontend: Option<clipper_studio_plugin_core::PluginFrontend>,
+    /// Plugin directory path (for external plugins to resolve frontend entry)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
 }

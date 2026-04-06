@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub enum Transport {
     Http,
     Stdio,
+    /// Builtin plugin (compiled into the main application)
+    Builtin,
 }
 
 /// Plugin type classification
@@ -108,6 +110,23 @@ pub struct PluginManifest {
     /// Plugin description
     #[serde(default)]
     pub description: Option<String>,
+    /// Frontend entry for plugin UI (path relative to plugin dir)
+    #[serde(default)]
+    pub frontend: Option<PluginFrontend>,
+}
+
+/// Frontend entry configuration for plugin UI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginFrontend {
+    /// Path to the JS bundle (relative to plugin directory)
+    pub entry: String,
+    /// Target mount point in settings page
+    #[serde(default = "default_frontend_target")]
+    pub target: String,
+}
+
+fn default_frontend_target() -> String {
+    "settings".to_string()
 }
 
 fn default_api_version() -> u32 {
@@ -115,10 +134,10 @@ fn default_api_version() -> u32 {
 }
 
 /// Loaded plugin metadata (manifest + resolved path)
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct PluginMeta {
     pub manifest: PluginManifest,
-    /// Directory containing the plugin
+    /// Directory containing the plugin (empty for builtin plugins)
     pub dir: PathBuf,
     /// Current runtime status
     pub status: PluginStatus,
