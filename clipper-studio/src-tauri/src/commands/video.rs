@@ -500,6 +500,62 @@ pub async fn get_envelope(
     }
 }
 
+// ==================== FLV Repair ====================
+
+/// Check video file integrity
+#[tauri::command]
+pub async fn check_video_integrity(
+    state: State<'_, AppState>,
+    video_id: i64,
+) -> Result<ffmpeg::IntegrityResult, String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT file_path FROM videos WHERE id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let file_path: String = row.try_get("", "file_path").unwrap_or_default();
+    ffmpeg::check_integrity(&state.ffprobe_path, std::path::Path::new(&file_path))
+}
+
+/// Remux a video file to MP4 (stream copy, fixes most FLV issues)
+#[tauri::command]
+pub async fn remux_video(
+    state: State<'_, AppState>,
+    video_id: i64,
+) -> Result<String, String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT file_path FROM videos WHERE id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let file_path: String = row.try_get("", "file_path").unwrap_or_default();
+    let input = std::path::Path::new(&file_path);
+
+    // Output: same directory, same name but .mp4 extension
+    let output = input.with_extension("remux.mp4");
+    if output.exists() {
+        return Err("修复后的文件已存在".to_string());
+    }
+
+    ffmpeg::remux_to_mp4(&state.ffmpeg_path, input, &output).await?;
+
+    let output_str = output.to_string_lossy().to_string();
+    tracing::info!("Remuxed video {} -> {}", file_path, output_str);
+    Ok(output_str)
+}
+
 /// Helper: convert a query row to VideoInfo
 fn row_to_video_info(row: &sea_orm::QueryResult) -> VideoInfo {
     VideoInfo {

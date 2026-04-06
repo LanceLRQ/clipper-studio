@@ -252,6 +252,79 @@ pub async fn extract_audio_envelope(
     })
 }
 
+/// FLV integrity check result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntegrityResult {
+    /// Whether the file appears intact
+    pub is_intact: bool,
+    /// Detected issues (empty if intact)
+    pub issues: Vec<String>,
+}
+
+/// Quick integrity check for a video file using FFprobe.
+///
+/// Checks for:
+/// - Missing duration (common sign of broken FLV)
+/// - Missing video/audio streams
+/// - FFprobe failure (corrupt container)
+pub fn check_integrity(
+    ffprobe_path: &str,
+    file_path: &Path,
+) -> Result<IntegrityResult, String> {
+    let probe_result = probe(ffprobe_path, file_path)?;
+    let mut issues = Vec::new();
+
+    if probe_result.duration_ms.is_none() || probe_result.duration_ms == Some(0) {
+        issues.push("无法读取视频时长（文件可能未正常结束）".to_string());
+    }
+
+    if probe_result.video_codec.is_none() {
+        issues.push("未检测到视频流".to_string());
+    }
+
+    Ok(IntegrityResult {
+        is_intact: issues.is_empty(),
+        issues,
+    })
+}
+
+/// Remux a video file to MP4 (stream copy, no re-encoding).
+///
+/// This fixes most FLV issues: missing keyframe index, broken metadata, etc.
+/// Returns the output file path.
+pub async fn remux_to_mp4(
+    ffmpeg_path: &str,
+    input: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    use tokio::process::Command as AsyncCommand;
+
+    if ffmpeg_path.is_empty() {
+        return Err("FFmpeg not available".to_string());
+    }
+
+    let status = AsyncCommand::new(ffmpeg_path)
+        .args([
+            "-i",
+            &input.to_string_lossy(),
+            "-c", "copy",
+            "-movflags", "+faststart",
+            "-y",
+            &output.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .status()
+        .await
+        .map_err(|e| format!("Failed to start FFmpeg remux: {}", e))?;
+
+    if !status.success() {
+        return Err("FFmpeg remux failed".to_string());
+    }
+
+    Ok(())
+}
+
 /// Get FFmpeg version string
 pub fn get_version(ffmpeg_path: &str) -> Option<String> {
     if ffmpeg_path.is_empty() {

@@ -12,6 +12,8 @@ interface ClipPanelProps {
   currentTime: number;
   /** Video duration in seconds */
   duration: number;
+  /** Seek callback to control the video player */
+  onSeek?: (timeSecs: number) => void;
 }
 
 function formatTime(secs: number): string {
@@ -30,7 +32,7 @@ function parseTime(str: string): number | null {
   return null;
 }
 
-export function ClipPanel({ videoId, currentTime, duration: _duration }: ClipPanelProps) {
+export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }: ClipPanelProps) {
   const [presets, setPresets] = useState<EncodingPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
   const [startTime, setStartTime] = useState(0);
@@ -40,6 +42,7 @@ export function ClipPanel({ videoId, currentTime, duration: _duration }: ClipPan
   const [title, setTitle] = useState("");
   const [clipping, setClipping] = useState(false);
   const [taskProgress, setTaskProgress] = useState<TaskProgressEvent | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   // Load presets
   useEffect(() => {
@@ -65,6 +68,33 @@ export function ClipPanel({ videoId, currentTime, duration: _duration }: ClipPan
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  // Preview: auto-pause when reaching end time
+  useEffect(() => {
+    if (!previewing) return;
+    if (currentTime >= endTime) {
+      setPreviewing(false);
+      const videoEl = document.querySelector("video");
+      if (videoEl) videoEl.pause();
+    }
+  }, [previewing, currentTime, endTime]);
+
+  const handlePreview = () => {
+    if (!onSeek || startTime >= endTime) return;
+    onSeek(startTime);
+    setPreviewing(true);
+    // Start playback after seeking
+    requestAnimationFrame(() => {
+      const videoEl = document.querySelector("video");
+      if (videoEl) videoEl.play();
+    });
+  };
+
+  const handleStopPreview = () => {
+    setPreviewing(false);
+    const videoEl = document.querySelector("video");
+    if (videoEl) videoEl.pause();
+  };
 
   const handleSetStart = () => {
     setStartTime(currentTime);
@@ -150,8 +180,31 @@ export function ClipPanel({ videoId, currentTime, duration: _duration }: ClipPan
       </div>
 
       {clipDuration > 0 && (
-        <div className="text-xs text-muted-foreground">
-          片段时长: {formatTime(clipDuration)}
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            片段时长: {formatTime(clipDuration)}
+          </span>
+          {onSeek && (
+            previewing ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                onClick={handleStopPreview}
+              >
+                ■ 停止预览
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-xs"
+                onClick={handlePreview}
+              >
+                ▶ 预览片段
+              </Button>
+            )
+          )}
         </div>
       )}
 

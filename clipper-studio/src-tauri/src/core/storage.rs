@@ -56,7 +56,7 @@ const BILIREC_FILE_REGEX: &str =
 const BILIREC_DIR_REGEX: &str = r"^(\d+)-(.+)$";
 
 /// Video file extensions to scan
-const VIDEO_EXTENSIONS: &[&str] = &["flv", "mp4", "ts", "mkv", "avi", "mov", "webm"];
+pub const VIDEO_EXTENSIONS: &[&str] = &["flv", "mp4", "ts", "mkv", "avi", "mov", "webm"];
 
 /// Detect if a directory is a BililiveRecorder workspace
 pub fn detect_bililive_recorder(dir: &Path) -> bool {

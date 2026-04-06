@@ -5,7 +5,13 @@ import { VideoPlayer } from "@/components/video-player/player";
 import { ClipPanel } from "@/components/video-player/clip-panel";
 import { HeatmapBar } from "@/components/video-player/heatmap-bar";
 import type { VideoInfo } from "@/types/video";
-import { getVideo, getEnvelope, extractEnvelope } from "@/services/video";
+import {
+  getVideo,
+  getEnvelope,
+  extractEnvelope,
+  checkVideoIntegrity,
+  remuxVideo,
+} from "@/services/video";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -33,6 +39,8 @@ function VideoDetailPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [envelope, setEnvelope] = useState<number[] | null>(null);
   const [envelopeLoading, setEnvelopeLoading] = useState(false);
+  const [integrityIssues, setIntegrityIssues] = useState<string[] | null>(null);
+  const [remuxing, setRemuxing] = useState(false);
 
   // Track playback time from the video element
   useEffect(() => {
@@ -56,6 +64,15 @@ function VideoDetailPage() {
         setVideo(v);
         // Load envelope if available
         getEnvelope(v.id).then(setEnvelope).catch(console.error);
+        // Check integrity for FLV files
+        const ext = v.file_name.split(".").pop()?.toLowerCase();
+        if (ext === "flv" || ext === "ts") {
+          checkVideoIntegrity(v.id)
+            .then((r) => {
+              if (!r.is_intact) setIntegrityIssues(r.issues);
+            })
+            .catch(console.error);
+        }
       })
       .catch((e) => setError(String(e)));
   }, [videoId]);
@@ -71,6 +88,20 @@ function VideoDetailPage() {
       alert("音量提取失败: " + String(e));
     } finally {
       setEnvelopeLoading(false);
+    }
+  };
+
+  const handleRemux = async () => {
+    if (!video) return;
+    setRemuxing(true);
+    try {
+      const outputPath = await remuxVideo(video.id);
+      alert(`修复完成！\n输出文件: ${outputPath}`);
+      setIntegrityIssues(null);
+    } catch (e) {
+      alert("修复失败: " + String(e));
+    } finally {
+      setRemuxing(false);
     }
   };
 
@@ -173,11 +204,35 @@ function VideoDetailPage() {
             </div>
           </div>
 
+          {/* Integrity warning */}
+          {integrityIssues && integrityIssues.length > 0 && (
+            <div className="rounded-lg border border-yellow-300 bg-yellow-50 p-4 space-y-2">
+              <h3 className="font-medium text-yellow-800 text-sm">
+                文件完整性问题
+              </h3>
+              <ul className="text-xs text-yellow-700 space-y-1">
+                {integrityIssues.map((issue, i) => (
+                  <li key={i}>• {issue}</li>
+                ))}
+              </ul>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-xs"
+                onClick={handleRemux}
+                disabled={remuxing}
+              >
+                {remuxing ? "修复中..." : "转封装修复 (→ MP4)"}
+              </Button>
+            </div>
+          )}
+
           {/* Clip Panel */}
           <ClipPanel
             videoId={video.id}
             currentTime={currentTime}
             duration={durationSecs}
+            onSeek={handleSeek}
           />
         </div>
       </div>

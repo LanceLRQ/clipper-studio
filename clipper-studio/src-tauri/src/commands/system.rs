@@ -90,3 +90,28 @@ pub fn check_ffmpeg(state: State<'_, AppState>) -> Result<serde_json::Value, Str
         }
     }))
 }
+
+/// Track a local analytics event
+#[tauri::command]
+pub async fn track_event(
+    state: State<'_, AppState>,
+    event: String,
+    properties: Option<serde_json::Value>,
+) -> Result<(), String> {
+    let props_sql = properties
+        .map(|p| format!("'{}'", p.to_string().replace('\'', "''")))
+        .unwrap_or("NULL".to_string());
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "INSERT INTO analytics_events (event, properties) VALUES ('{}', {})",
+            event.replace('\'', "''"),
+            props_sql
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}

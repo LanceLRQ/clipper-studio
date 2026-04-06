@@ -118,6 +118,16 @@ pub async fn create_workspace(
         let _ = config.save(&state.config_dir);
     }
 
+    // Start file watcher for this workspace
+    if workspace.auto_scan {
+        if let Err(e) = state
+            .watcher
+            .watch(workspace.id, std::path::Path::new(&workspace.path))
+        {
+            tracing::warn!("Failed to start watcher for workspace {}: {}", workspace.id, e);
+        }
+    }
+
     tracing::info!("Workspace created: {} ({})", workspace.name, workspace.path);
     Ok(workspace)
 }
@@ -170,6 +180,9 @@ pub async fn delete_workspace(
             config.remove_recent_workspace(&path);
             let _ = config.save(&state.config_dir);
         }
+
+        // Stop file watcher
+        state.watcher.unwatch(workspace_id);
 
         tracing::info!("Workspace deleted: id={}", workspace_id);
     }

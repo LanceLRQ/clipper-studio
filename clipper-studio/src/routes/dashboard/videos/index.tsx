@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import type {
@@ -108,6 +109,16 @@ function VideosPage() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  // Auto-refresh when watcher detects new files
+  useEffect(() => {
+    const unlisten = listen("workspace-file-change", () => {
+      loadData();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
   }, []);
 
   const toggleGroup = (key: string) => {

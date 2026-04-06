@@ -23,6 +23,7 @@ use std::sync::Arc;
 use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
+use crate::core::watcher::WorkspaceWatcher;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
@@ -35,6 +36,7 @@ pub struct AppState {
     pub ffprobe_path: String,
     pub media_server_port: u16,
     pub task_queue: Arc<TaskQueue>,
+    pub watcher: Arc<WorkspaceWatcher>,
 }
 
 /// Build and configure the Tauri application
@@ -120,18 +122,46 @@ pub fn run() {
             // Initialize task queue (max 2 concurrent tasks)
             let task_queue = Arc::new(TaskQueue::new(app.handle().clone(), 2));
 
+            // Initialize workspace file watcher
+            let watcher = Arc::new(WorkspaceWatcher::new(app.handle().clone()));
+
             // Set up system tray
             shell::tray::setup_tray(app)?;
 
             // Manage application state
             app.manage(AppState {
-                db,
+                db: db.clone(),
                 config: RwLock::new(app_config),
                 config_dir: data_dir,
                 ffmpeg_path: ffmpeg_path.unwrap_or_default(),
                 ffprobe_path: ffprobe_path.unwrap_or_default(),
                 media_server_port,
                 task_queue,
+                watcher: watcher.clone(),
+            });
+
+            // Start watching existing workspaces with auto_scan enabled
+            let watcher_clone = watcher.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Ok(rows) = sea_orm::ConnectionTrait::query_all(
+                    db.conn(),
+                    sea_orm::Statement::from_string(
+                        sea_orm::DatabaseBackend::Sqlite,
+                        "SELECT id, path FROM workspaces WHERE auto_scan = 1".to_string(),
+                    ),
+                )
+                .await
+                {
+                    for row in &rows {
+                        let id: i64 = row.try_get("", "id").unwrap_or(0);
+                        let path: String = row.try_get("", "path").unwrap_or_default();
+                        if !path.is_empty() {
+                            if let Err(e) = watcher_clone.watch(id, std::path::Path::new(&path)) {
+                                tracing::warn!("Failed to watch workspace {}: {}", id, e);
+                            }
+                        }
+                    }
+                }
             });
 
             tracing::info!("ClipperStudio ready!");
@@ -140,6 +170,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_app_info,
             commands::system::check_ffmpeg,
+            commands::system::track_event,
             commands::video::import_video,
             commands::video::list_videos,
             commands::video::get_video,
@@ -148,6 +179,8 @@ pub fn run() {
             commands::video::list_streamers,
             commands::video::extract_envelope,
             commands::video::get_envelope,
+            commands::video::check_video_integrity,
+            commands::video::remux_video,
             commands::clip::create_clip,
             commands::clip::cancel_clip,
             commands::clip::list_clip_tasks,

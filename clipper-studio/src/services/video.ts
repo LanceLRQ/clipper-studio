@@ -45,3 +45,18 @@ export async function getEnvelope(
 ): Promise<number[] | null> {
   return invoke<number[] | null>("get_envelope", { videoId });
 }
+
+export interface IntegrityResult {
+  is_intact: boolean;
+  issues: string[];
+}
+
+export async function checkVideoIntegrity(
+  videoId: number
+): Promise<IntegrityResult> {
+  return invoke<IntegrityResult>("check_video_integrity", { videoId });
+}
+
+export async function remuxVideo(videoId: number): Promise<string> {
+  return invoke<string>("remux_video", { videoId });
+}
