@@ -50,7 +50,7 @@ thiserror = "2"
 blake3 = "1"
 
 # HTTP client (for ASR/LLM service calls)
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
 
 # Async utilities
 tokio-util = "0.7"

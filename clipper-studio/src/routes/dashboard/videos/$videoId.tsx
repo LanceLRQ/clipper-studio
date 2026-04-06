@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { VideoPlayer } from "@/components/video-player/player";
 import { ClipPanel } from "@/components/video-player/clip-panel";
 import { HeatmapBar } from "@/components/video-player/heatmap-bar";
+import { SubtitlePanel } from "@/components/video-player/subtitle-panel";
 import type { VideoInfo } from "@/types/video";
 import {
   getVideo,
@@ -232,6 +233,14 @@ function VideoDetailPage() {
             videoId={video.id}
             currentTime={currentTime}
             duration={durationSecs}
+            onSeek={handleSeek}
+          />
+
+          {/* Subtitle Panel */}
+          <SubtitlePanel
+            videoId={video.id}
+            currentTime={currentTime}
+            baseTimeMs={0}
             onSeek={handleSeek}
           />
         </div>

@@ -6,9 +6,7 @@ pub mod shell;
 pub mod utils;
 
 pub mod plugin;
-
-// Phase 2+
-// pub mod asr;
+pub mod asr;
 
 // Phase 5+
 // pub mod llm;
@@ -207,6 +205,12 @@ pub fn run() {
             commands::plugin::unload_plugin,
             commands::plugin::start_plugin_service,
             commands::plugin::stop_plugin_service,
+            commands::asr::submit_asr,
+            commands::asr::poll_asr,
+            commands::asr::list_asr_tasks,
+            commands::asr::list_subtitles,
+            commands::asr::search_subtitles,
+            commands::asr::check_asr_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");
