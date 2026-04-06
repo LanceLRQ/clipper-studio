@@ -32,3 +32,21 @@ export async function setActiveWorkspace(
 ): Promise<void> {
   return invoke("set_active_workspace", { workspaceId });
 }
+
+export interface ScanResult {
+  total_files: number;
+  total_sessions: number;
+  streamers: number;
+}
+
+export async function scanWorkspace(
+  workspaceId: number
+): Promise<ScanResult> {
+  return invoke<ScanResult>("scan_workspace", { workspaceId });
+}
+
+export async function detectWorkspaceAdapter(
+  path: string
+): Promise<string> {
+  return invoke<string>("detect_workspace_adapter", { path });
+}

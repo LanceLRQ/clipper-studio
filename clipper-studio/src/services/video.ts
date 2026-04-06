@@ -4,6 +4,8 @@ import type {
   ImportVideoRequest,
   ListVideosRequest,
   ListVideosResponse,
+  SessionInfo,
+  StreamerInfo,
 } from "@/types/video";
 
 export async function importVideo(req: ImportVideoRequest): Promise<VideoInfo> {
@@ -22,4 +24,24 @@ export async function getVideo(videoId: number): Promise<VideoInfo> {
 
 export async function deleteVideo(videoId: number): Promise<void> {
   return invoke("delete_video", { videoId });
+}
+
+export async function listSessions(
+  workspaceId?: number | null
+): Promise<SessionInfo[]> {
+  return invoke<SessionInfo[]>("list_sessions", { workspaceId });
+}
+
+export async function listStreamers(): Promise<StreamerInfo[]> {
+  return invoke<StreamerInfo[]>("list_streamers");
+}
+
+export async function extractEnvelope(videoId: number): Promise<number[]> {
+  return invoke<number[]>("extract_envelope", { videoId });
+}
+
+export async function getEnvelope(
+  videoId: number
+): Promise<number[] | null> {
+  return invoke<number[] | null>("get_envelope", { videoId });
 }

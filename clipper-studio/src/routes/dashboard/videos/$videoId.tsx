@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { VideoPlayer } from "@/components/video-player/player";
 import { ClipPanel } from "@/components/video-player/clip-panel";
+import { HeatmapBar } from "@/components/video-player/heatmap-bar";
 import type { VideoInfo } from "@/types/video";
-import { getVideo } from "@/services/video";
+import { getVideo, getEnvelope, extractEnvelope } from "@/services/video";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -30,10 +31,11 @@ function VideoDetailPage() {
   const [video, setVideo] = useState<VideoInfo | null>(null);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
+  const [envelope, setEnvelope] = useState<number[] | null>(null);
+  const [envelopeLoading, setEnvelopeLoading] = useState(false);
 
   // Track playback time from the video element
   useEffect(() => {
-    // Poll the video element for currentTime
     const interval = setInterval(() => {
       const videoEl = document.querySelector("video");
       if (videoEl) {
@@ -50,9 +52,34 @@ function VideoDetailPage() {
       return;
     }
     getVideo(id)
-      .then(setVideo)
+      .then((v) => {
+        setVideo(v);
+        // Load envelope if available
+        getEnvelope(v.id).then(setEnvelope).catch(console.error);
+      })
       .catch((e) => setError(String(e)));
   }, [videoId]);
+
+  const handleExtractEnvelope = async () => {
+    if (!video) return;
+    setEnvelopeLoading(true);
+    try {
+      const data = await extractEnvelope(video.id);
+      setEnvelope(data);
+    } catch (e) {
+      console.error("Envelope extraction failed:", e);
+      alert("音量提取失败: " + String(e));
+    } finally {
+      setEnvelopeLoading(false);
+    }
+  };
+
+  const handleSeek = (timeSecs: number) => {
+    const videoEl = document.querySelector("video");
+    if (videoEl) {
+      videoEl.currentTime = timeSecs;
+    }
+  };
 
   if (error) {
     return (
@@ -90,9 +117,31 @@ function VideoDetailPage() {
 
       {/* Player + Side panels */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* Player */}
-        <div className="xl:col-span-2">
+        {/* Player + Heatmap */}
+        <div className="xl:col-span-2 space-y-2">
           <VideoPlayer src={video.file_path} title={video.file_name} />
+
+          {/* Heatmap bar */}
+          {envelope ? (
+            <HeatmapBar
+              envelope={envelope}
+              duration={durationSecs}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+            />
+          ) : (
+            <div className="flex items-center justify-center h-10 bg-muted/30 rounded">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs"
+                onClick={handleExtractEnvelope}
+                disabled={envelopeLoading}
+              >
+                {envelopeLoading ? "提取中..." : "生成音量热度条"}
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* Side panel: Info + Clip */}

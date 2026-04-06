@@ -65,5 +65,11 @@ urlencoding = "2"
 # Configuration
 toml = "0.8"
 
+# Regex (for filename pattern parsing)
+regex = "1"
+
+# Hex encoding (for BLOB data)
+hex = "0.4"
+
 [dev-dependencies]
 tempfile = "3"

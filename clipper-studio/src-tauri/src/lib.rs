@@ -144,6 +144,10 @@ pub fn run() {
             commands::video::list_videos,
             commands::video::get_video,
             commands::video::delete_video,
+            commands::video::list_sessions,
+            commands::video::list_streamers,
+            commands::video::extract_envelope,
+            commands::video::get_envelope,
             commands::clip::create_clip,
             commands::clip::cancel_clip,
             commands::clip::list_clip_tasks,
@@ -153,6 +157,8 @@ pub fn run() {
             commands::workspace::delete_workspace,
             commands::workspace::get_active_workspace,
             commands::workspace::set_active_workspace,
+            commands::workspace::scan_workspace,
+            commands::workspace::detect_workspace_adapter,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");

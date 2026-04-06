@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::State;
 
 use crate::AppState;
+use crate::core::storage;
+use crate::utils::ffmpeg;
 
 #[derive(Debug, Serialize)]
 pub struct WorkspaceInfo {
@@ -227,4 +230,256 @@ pub async fn set_active_workspace(
         }
     }
     Ok(())
+}
+
+/// Scan a workspace directory and import all found videos into the database.
+/// Auto-detects adapter (BililiveRecorder, generic).
+#[tauri::command]
+pub async fn scan_workspace(
+    state: State<'_, AppState>,
+    workspace_id: i64,
+) -> Result<ScanResult, String> {
+    // Get workspace path
+    let ws_row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT path FROM workspaces WHERE id = {}", workspace_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("工作区不存在".to_string())?;
+
+    let ws_path: String = ws_row.try_get("", "path").unwrap_or_default();
+    let dir = Path::new(&ws_path);
+
+    if !dir.exists() {
+        return Err(format!("工作区目录不存在: {}", ws_path));
+    }
+
+    tracing::info!("Scanning workspace: {} (id={})", ws_path, workspace_id);
+
+    // Step 1: Clear old sessions and detach videos (SET NULL)
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "UPDATE videos SET session_id = NULL WHERE workspace_id = {}",
+            workspace_id
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "DELETE FROM recording_sessions WHERE workspace_id = {}",
+            workspace_id
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Step 2: Scan directory
+    let scan = storage::scan_workspace(dir);
+
+    // Import streamers
+    for sd in &scan.streamer_dirs {
+        let _ = sea_orm::ConnectionTrait::execute_unprepared(
+            state.db.conn(),
+            &format!(
+                "INSERT OR IGNORE INTO streamers (platform, room_id, name) VALUES ('bilibili', '{}', '{}')",
+                sd.room_id,
+                sd.name.replace('\'', "''"),
+            ),
+        )
+        .await;
+    }
+
+    // Step 3: Fill duration_ms via FFprobe before grouping (needed for accurate session merging)
+    let mut files_with_duration = scan.files.clone();
+    if !state.ffprobe_path.is_empty() {
+        for file in &mut files_with_duration {
+            if file.duration_ms.is_none() {
+                if let Ok(probe) = ffmpeg::probe(&state.ffprobe_path, &file.file_path) {
+                    file.duration_ms = probe.duration_ms;
+                }
+            }
+        }
+    }
+
+    // Step 4: Group into sessions (gap = next.start - prev.end > 1 hour)
+    let sessions = storage::group_into_sessions(&files_with_duration, 3600);
+
+    let mut new_files = 0;
+
+    for session in &sessions {
+        // Get streamer_id
+        let streamer_id: Option<i64> = sea_orm::ConnectionTrait::query_one(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!("SELECT id FROM streamers WHERE room_id = '{}'", session.room_id),
+            ),
+        )
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get("", "id").ok());
+
+        let sid_sql = streamer_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
+
+        // Insert session
+        let _ = sea_orm::ConnectionTrait::execute_unprepared(
+            state.db.conn(),
+            &format!(
+                "INSERT INTO recording_sessions (workspace_id, streamer_id, title, started_at, file_count) \
+                 VALUES ({}, {}, '{}', '{}', {})",
+                workspace_id, sid_sql,
+                session.title.replace('\'', "''"),
+                session.started_at,
+                session.files.len(),
+            ),
+        )
+        .await;
+
+        let sess_id: Option<i64> = sea_orm::ConnectionTrait::query_one(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT last_insert_rowid() as id".to_string(),
+            ),
+        )
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get("", "id").ok());
+
+        let sess_id_sql = sess_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
+
+        for file in &session.files {
+            let fp = file.file_path.to_string_lossy();
+
+            // Check if video already exists in DB
+            let existing: Option<i64> = sea_orm::ConnectionTrait::query_one(
+                state.db.conn(),
+                sea_orm::Statement::from_string(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    format!(
+                        "SELECT id FROM videos WHERE file_path = '{}'",
+                        fp.replace('\'', "''")
+                    ),
+                ),
+            )
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get("", "id").ok());
+
+            if let Some(video_id) = existing {
+                // Video exists: just re-attach to new session
+                let _ = sea_orm::ConnectionTrait::execute_unprepared(
+                    state.db.conn(),
+                    &format!(
+                        "UPDATE videos SET session_id = {}, streamer_id = {} WHERE id = {}",
+                        sess_id_sql, sid_sql, video_id
+                    ),
+                )
+                .await;
+            } else {
+                // New video: probe and insert
+                let file_size = std::fs::metadata(&file.file_path)
+                    .map(|m| m.len() as i64)
+                    .unwrap_or(0);
+
+                let dur = file.duration_ms;
+                let (w, h) = if !state.ffprobe_path.is_empty() {
+                    match ffmpeg::probe(&state.ffprobe_path, &file.file_path) {
+                        Ok(p) => (p.width, p.height),
+                        Err(_) => (None, None),
+                    }
+                } else {
+                    (None, None)
+                };
+
+                let has_danmaku = file
+                    .associated_files
+                    .iter()
+                    .any(|p| p.extension().and_then(|e| e.to_str()) == Some("xml"));
+
+                let sql = format!(
+                    "INSERT INTO videos (file_path, file_name, file_size, duration_ms, width, height, \
+                     workspace_id, streamer_id, session_id, stream_title, recorded_at, adapter_id, has_danmaku) \
+                     VALUES ('{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', {})",
+                    fp.replace('\'', "''"),
+                    file.file_name.replace('\'', "''"),
+                    file_size,
+                    dur.map(|d| d.to_string()).unwrap_or("NULL".to_string()),
+                    w.map(|v| v.to_string()).unwrap_or("NULL".to_string()),
+                    h.map(|v| v.to_string()).unwrap_or("NULL".to_string()),
+                    workspace_id,
+                    sid_sql,
+                    sess_id_sql,
+                    file.stream_title.as_deref().map(|t| format!("'{}'", t.replace('\'', "''"))).unwrap_or("NULL".to_string()),
+                    file.recorded_at.as_deref().map(|t| format!("'{}'", t)).unwrap_or("NULL".to_string()),
+                    scan.adapter_id,
+                    has_danmaku as i32,
+                );
+
+                if sea_orm::ConnectionTrait::execute_unprepared(state.db.conn(), &sql).await.is_ok()
+                {
+                    new_files += 1;
+                }
+            }
+        }
+    }
+
+    let total_video_count: i64 = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT COUNT(*) as cnt FROM videos WHERE workspace_id = {}",
+                workspace_id
+            ),
+        ),
+    )
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.try_get("", "cnt").ok())
+    .unwrap_or(0);
+
+    tracing::info!(
+        "Scan complete: {} new + {} total files, {} sessions",
+        new_files,
+        total_video_count,
+        sessions.len()
+    );
+
+    Ok(ScanResult {
+        new_files,
+        total_files: total_video_count as usize,
+        total_sessions: sessions.len(),
+        streamers: scan.streamer_dirs.len(),
+    })
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScanResult {
+    pub new_files: usize,
+    pub total_files: usize,
+    pub total_sessions: usize,
+    pub streamers: usize,
+}
+
+/// Detect adapter type for a given directory path
+#[tauri::command]
+pub fn detect_workspace_adapter(path: String) -> Result<String, String> {
+    let dir = Path::new(&path);
+    if !dir.exists() {
+        return Err("目录不存在".to_string());
+    }
+    Ok(storage::detect_adapter(dir).to_string())
 }

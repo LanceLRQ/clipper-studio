@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { WorkspaceInfo } from "@/types/workspace";
-import { listWorkspaces, deleteWorkspace } from "@/services/workspace";
+import { listWorkspaces, deleteWorkspace, scanWorkspace } from "@/services/workspace";
 
 function WorkspacesPage() {
   const navigate = useNavigate();
@@ -69,14 +69,30 @@ function WorkspacesPage() {
                   <span>创建于: {ws.created_at}</span>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-red-500 hover:text-red-600"
-                onClick={() => handleDelete(ws)}
-              >
-                删除
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const result = await scanWorkspace(ws.id);
+                      alert(`扫描完成：${result.total_files} 个视频，${result.total_sessions} 个场次`);
+                    } catch (e) {
+                      alert("扫描失败: " + String(e));
+                    }
+                  }}
+                >
+                  重新扫描
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-500 hover:text-red-600"
+                  onClick={() => handleDelete(ws)}
+                >
+                  删除
+                </Button>
+              </div>
             </div>
           ))}
         </div>

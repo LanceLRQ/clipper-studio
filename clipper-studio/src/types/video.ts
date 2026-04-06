@@ -14,6 +14,9 @@ export interface VideoInfo {
   has_danmaku: boolean;
   has_envelope: boolean;
   workspace_id: number | null;
+  session_id: number | null;
+  streamer_id: number | null;
+  streamer_name: string | null;
   stream_title: string | null;
   recorded_at: string | null;
   created_at: string;
@@ -35,4 +38,23 @@ export interface ListVideosResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface SessionInfo {
+  id: number;
+  workspace_id: number;
+  streamer_id: number | null;
+  streamer_name: string | null;
+  title: string | null;
+  started_at: string | null;
+  file_count: number;
+  videos: VideoInfo[];
+}
+
+export interface StreamerInfo {
+  id: number;
+  platform: string;
+  room_id: string | null;
+  name: string;
+  video_count: number;
 }

@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -158,6 +159,96 @@ pub fn probe(ffprobe_path: &str, file_path: &std::path::Path) -> Result<ProbeRes
         audio_codec,
         format_name,
         file_size,
+    })
+}
+
+/// Audio envelope data (volume heatmap)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioEnvelope {
+    pub window_ms: u32,
+    /// Normalized volume values (0.0 ~ 1.0) per time window
+    pub values: Vec<f32>,
+}
+
+/// Extract audio volume envelope from a video file.
+///
+/// Uses FFmpeg to decode audio to PCM, then computes RMS per time window.
+/// For a 3-hour video at 500ms windows, this produces ~21,600 values (~86KB).
+pub async fn extract_audio_envelope(
+    ffmpeg_path: &str,
+    file_path: &std::path::Path,
+    window_ms: u32,
+) -> Result<AudioEnvelope, String> {
+    use tokio::io::AsyncReadExt;
+    use tokio::process::Command as AsyncCommand;
+
+    if ffmpeg_path.is_empty() {
+        return Err("FFmpeg not available".to_string());
+    }
+
+    // FFmpeg: decode audio to raw f32le PCM at 8000 Hz mono
+    let sample_rate: u32 = 8000;
+    let mut child = AsyncCommand::new(ffmpeg_path)
+        .args([
+            "-i",
+            &file_path.to_string_lossy(),
+            "-ac", "1",           // mono
+            "-ar", &sample_rate.to_string(),
+            "-f", "f32le",        // raw float32 little-endian
+            "-v", "quiet",
+            "pipe:1",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Failed to start FFmpeg: {}", e))?;
+
+    let mut stdout = child.stdout.take().unwrap();
+
+    // Read all PCM data
+    let mut pcm_data = Vec::new();
+    let mut buf = vec![0u8; 65536];
+    loop {
+        let n = stdout.read(&mut buf).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        pcm_data.extend_from_slice(&buf[..n]);
+    }
+
+    let _ = child.wait().await;
+
+    // Convert bytes to f32 samples
+    let samples: Vec<f32> = pcm_data
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    if samples.is_empty() {
+        return Err("No audio data extracted".to_string());
+    }
+
+    // Compute RMS per window
+    let samples_per_window = (sample_rate * window_ms / 1000) as usize;
+    let mut rms_values: Vec<f32> = Vec::new();
+
+    for chunk in samples.chunks(samples_per_window) {
+        let sum_sq: f64 = chunk.iter().map(|&s| (s as f64) * (s as f64)).sum();
+        let rms = (sum_sq / chunk.len() as f64).sqrt() as f32;
+        rms_values.push(rms);
+    }
+
+    // Normalize to 0.0 ~ 1.0
+    let max_rms = rms_values.iter().cloned().fold(f32::MIN, f32::max);
+    if max_rms > 0.0 {
+        for v in &mut rms_values {
+            *v /= max_rms;
+        }
+    }
+
+    Ok(AudioEnvelope {
+        window_ms,
+        values: rms_values,
     })
 }
 

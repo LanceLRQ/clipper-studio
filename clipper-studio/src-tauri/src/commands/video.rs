@@ -2,7 +2,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppState;
-use crate::utils::{ffmpeg, hash};
+use crate::utils::ffmpeg;
+use crate::utils::hash;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VideoInfo {
@@ -21,6 +22,9 @@ pub struct VideoInfo {
     pub has_danmaku: bool,
     pub has_envelope: bool,
     pub workspace_id: Option<i64>,
+    pub session_id: Option<i64>,
+    pub streamer_id: Option<i64>,
+    pub streamer_name: Option<String>,
     pub stream_title: Option<String>,
     pub recorded_at: Option<String>,
     pub created_at: String,
@@ -168,7 +172,9 @@ pub async fn import_video(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT * FROM videos WHERE file_path = '{}'",
+                "SELECT v.*, st.name as streamer_name FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 WHERE v.file_path = '{}'",
                 req.file_path.replace('\'', "''")
             ),
         ),
@@ -202,7 +208,7 @@ pub async fn list_videos(
     let offset = (page - 1) * page_size;
 
     let where_clause = match req.workspace_id {
-        Some(id) => format!("WHERE workspace_id = {}", id),
+        Some(id) => format!("WHERE v.workspace_id = {}", id),
         None => String::new(),
     };
 
@@ -211,7 +217,7 @@ pub async fn list_videos(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT COUNT(*) as cnt FROM videos {}", where_clause),
+            format!("SELECT COUNT(*) as cnt FROM videos v {}", where_clause),
         ),
     )
     .await
@@ -227,7 +233,9 @@ pub async fn list_videos(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT * FROM videos {} ORDER BY created_at DESC LIMIT {} OFFSET {}",
+                "SELECT v.*, st.name as streamer_name FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 {} ORDER BY v.created_at DESC LIMIT {} OFFSET {}",
                 where_clause, page_size, offset
             ),
         ),
@@ -255,7 +263,12 @@ pub async fn get_video(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT * FROM videos WHERE id = {}", video_id),
+            format!(
+                "SELECT v.*, st.name as streamer_name FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 WHERE v.id = {}",
+                video_id
+            ),
         ),
     )
     .await
@@ -282,6 +295,211 @@ pub async fn delete_video(
     Ok(())
 }
 
+// ==================== Session & Streamer queries ====================
+
+#[derive(Debug, Serialize)]
+pub struct SessionInfo {
+    pub id: i64,
+    pub workspace_id: i64,
+    pub streamer_id: Option<i64>,
+    pub streamer_name: Option<String>,
+    pub title: Option<String>,
+    pub started_at: Option<String>,
+    pub file_count: i32,
+    pub videos: Vec<VideoInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StreamerInfo {
+    pub id: i64,
+    pub platform: String,
+    pub room_id: Option<String>,
+    pub name: String,
+    pub video_count: i64,
+}
+
+/// List videos grouped by recording sessions
+#[tauri::command]
+pub async fn list_sessions(
+    state: State<'_, AppState>,
+    workspace_id: Option<i64>,
+) -> Result<Vec<SessionInfo>, String> {
+    let ws_filter = workspace_id
+        .map(|id| format!("WHERE s.workspace_id = {}", id))
+        .unwrap_or_default();
+
+    let session_rows = sea_orm::ConnectionTrait::query_all(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT s.*, st.name as streamer_name FROM recording_sessions s \
+                 LEFT JOIN streamers st ON s.streamer_id = st.id \
+                 {} ORDER BY s.started_at DESC",
+                ws_filter
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut sessions = Vec::new();
+
+    for srow in &session_rows {
+        let session_id: i64 = srow.try_get("", "id").unwrap_or(0);
+
+        // Get videos in this session
+        let video_rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT v.*, st.name as streamer_name FROM videos v \
+                     LEFT JOIN streamers st ON v.streamer_id = st.id \
+                     WHERE v.session_id = {} ORDER BY v.recorded_at ASC",
+                    session_id
+                ),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let videos: Vec<VideoInfo> = video_rows.iter().map(row_to_video_info).collect();
+
+        sessions.push(SessionInfo {
+            id: session_id,
+            workspace_id: srow.try_get("", "workspace_id").unwrap_or(0),
+            streamer_id: srow.try_get("", "streamer_id").ok(),
+            streamer_name: srow.try_get("", "streamer_name").ok(),
+            title: srow.try_get("", "title").ok(),
+            started_at: srow.try_get("", "started_at").ok(),
+            file_count: srow.try_get("", "file_count").unwrap_or(0),
+            videos,
+        });
+    }
+
+    Ok(sessions)
+}
+
+/// List all streamers
+#[tauri::command]
+pub async fn list_streamers(
+    state: State<'_, AppState>,
+) -> Result<Vec<StreamerInfo>, String> {
+    let rows = sea_orm::ConnectionTrait::query_all(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT st.*, COUNT(v.id) as video_count FROM streamers st \
+             LEFT JOIN videos v ON st.id = v.streamer_id \
+             GROUP BY st.id ORDER BY st.name"
+                .to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let streamers = rows
+        .iter()
+        .map(|row| StreamerInfo {
+            id: row.try_get("", "id").unwrap_or(0),
+            platform: row.try_get("", "platform").unwrap_or_default(),
+            room_id: row.try_get("", "room_id").ok(),
+            name: row.try_get("", "name").unwrap_or_default(),
+            video_count: row.try_get("", "video_count").unwrap_or(0),
+        })
+        .collect();
+
+    Ok(streamers)
+}
+
+// ==================== Audio Envelope ====================
+
+/// Extract audio volume envelope for a video and store in database
+#[tauri::command]
+pub async fn extract_envelope(
+    state: State<'_, AppState>,
+    video_id: i64,
+) -> Result<Vec<f32>, String> {
+    // Get video path
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT file_path FROM videos WHERE id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let file_path: String = row.try_get("", "file_path").unwrap_or_default();
+    let path = std::path::Path::new(&file_path);
+
+    // Extract envelope (500ms windows)
+    let envelope = ffmpeg::extract_audio_envelope(&state.ffmpeg_path, path, 500).await?;
+
+    // Serialize values to binary blob
+    let data_bytes: Vec<u8> = envelope
+        .values
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+
+    // Store in database
+    let data_hex = hex::encode(&data_bytes);
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "INSERT OR REPLACE INTO audio_envelopes (video_id, window_ms, data) VALUES ({}, {}, X'{}')",
+            video_id, envelope.window_ms, data_hex
+        ),
+    )
+    .await
+    .map_err(|e| format!("存储音量数据失败: {}", e))?;
+
+    // Mark video as having envelope
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("UPDATE videos SET has_envelope = 1 WHERE id = {}", video_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tracing::info!("Audio envelope extracted: video_id={}, {} points", video_id, envelope.values.len());
+
+    Ok(envelope.values)
+}
+
+/// Get stored audio envelope for a video
+#[tauri::command]
+pub async fn get_envelope(
+    state: State<'_, AppState>,
+    video_id: i64,
+) -> Result<Option<Vec<f32>>, String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT data FROM audio_envelopes WHERE video_id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    match row {
+        Some(row) => {
+            let data: Vec<u8> = row.try_get("", "data").unwrap_or_default();
+            let values: Vec<f32> = data
+                .chunks_exact(4)
+                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                .collect();
+            Ok(Some(values))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Helper: convert a query row to VideoInfo
 fn row_to_video_info(row: &sea_orm::QueryResult) -> VideoInfo {
     VideoInfo {
@@ -300,6 +518,9 @@ fn row_to_video_info(row: &sea_orm::QueryResult) -> VideoInfo {
         has_danmaku: row.try_get::<bool>("", "has_danmaku").unwrap_or(false),
         has_envelope: row.try_get::<bool>("", "has_envelope").unwrap_or(false),
         workspace_id: row.try_get("", "workspace_id").ok(),
+        session_id: row.try_get("", "session_id").ok(),
+        streamer_id: row.try_get("", "streamer_id").ok(),
+        streamer_name: row.try_get("", "streamer_name").ok(),
         stream_title: row.try_get("", "stream_title").ok(),
         recorded_at: row.try_get("", "recorded_at").ok(),
         created_at: row.try_get("", "created_at").unwrap_or_default(),

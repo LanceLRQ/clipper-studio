@@ -4,7 +4,11 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { createWorkspace } from "@/services/workspace";
+import {
+  createWorkspace,
+  scanWorkspace,
+  detectWorkspaceAdapter,
+} from "@/services/workspace";
 
 type WizardStep = "choose" | "import" | "create";
 
@@ -41,10 +45,25 @@ function WelcomePage() {
     setLoading(true);
     setError("");
     try {
-      // TODO: auto-detect adapter (BililiveRecorder, etc.)
-      const adapterId = step === "import" ? "bililive-recorder" : "generic";
-      await createWorkspace({ name: name.trim(), path: path.trim(), adapter_id: adapterId });
-      navigate({ to: "/dashboard" });
+      // Auto-detect adapter type
+      const adapterId = await detectWorkspaceAdapter(path.trim());
+      const ws = await createWorkspace({
+        name: name.trim(),
+        path: path.trim(),
+        adapter_id: adapterId,
+      });
+
+      // Auto-scan after creation (for "import" mode)
+      if (step === "import") {
+        try {
+          const result = await scanWorkspace(ws.id);
+          console.log("Scan result:", result);
+        } catch (scanErr) {
+          console.warn("Scan failed (non-fatal):", scanErr);
+        }
+      }
+
+      navigate({ to: "/dashboard/videos" });
     } catch (e) {
       setError(String(e));
     } finally {
