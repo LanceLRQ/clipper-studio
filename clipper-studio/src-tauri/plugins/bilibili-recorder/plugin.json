@@ -18,6 +18,16 @@
       "default": "",
       "description": "录播姬 API 密钥（可选）"
     },
+    "basic_user": {
+      "type": "string",
+      "default": "",
+      "description": "HTTP Basic 认证用户名（留空关闭）"
+    },
+    "basic_pass": {
+      "type": "string",
+      "default": "",
+      "description": "HTTP Basic 认证密码"
+    },
     "webhook_secret": {
       "type": "string",
       "default": "",

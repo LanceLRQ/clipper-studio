@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export interface PluginConfigField {
+  type: "string" | "boolean";
+  default: string | boolean;
+  description: string;
+}
+
 export interface PluginInfo {
   id: string;
   name: string;
@@ -10,6 +16,8 @@ export interface PluginInfo {
   status: string;
   description: string | null;
   has_config: boolean;
+  /** Configuration schema (field name -> schema). Only present if has_config is true. */
+  config_schema?: Record<string, PluginConfigField>;
 }
 
 export async function scanPlugins(): Promise<PluginInfo[]> {
@@ -42,6 +50,22 @@ export async function callPlugin(
   payload: Record<string, unknown> = {}
 ): Promise<unknown> {
   return invoke("call_plugin", { pluginId, action, payload });
+}
+
+/** Get all saved config values for a plugin */
+export async function getPluginConfig(
+  pluginId: string
+): Promise<Record<string, string>> {
+  return invoke<Record<string, string>>("get_plugin_config", { pluginId });
+}
+
+/** Set a single config value for a plugin */
+export async function setPluginConfig(
+  pluginId: string,
+  key: string,
+  value: string
+): Promise<void> {
+  return invoke("set_plugin_config", { pluginId, key, value });
 }
 
 export interface RecorderRoom {

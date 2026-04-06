@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { PluginInfo, RecorderRoom } from "@/services/plugin";
 import {
   scanPlugins,
@@ -11,6 +10,7 @@ import {
   startPluginService,
   stopPluginService,
   callPlugin,
+  getPluginConfig,
 } from "@/services/plugin";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -37,12 +37,6 @@ const TYPE_LABELS: Record<string, string> = {
 
 // ===== Recorder Panel =====
 function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
-  const [config, setConfig] = useState<Record<string, string>>({
-    api_url: "http://127.0.0.1:2007",
-    api_key: "",
-    webhook_secret: "",
-    auto_sync: "false",
-  });
   const [status, setStatus] = useState<{
     connected: boolean;
     rooms: RecorderRoom[];
@@ -53,7 +47,17 @@ function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
   const loadStatus = async () => {
     setLoading(true);
     try {
-      const result = await callPlugin(plugin.id, "status", config) as {
+      const cfg = await getPluginConfig(plugin.id);
+      const payload: Record<string, string> = {
+        base_url: cfg.api_url || "http://127.0.0.1:2007",
+      };
+      if (cfg.api_key) payload.api_key = cfg.api_key;
+      if (cfg.basic_user && cfg.basic_pass) {
+        payload.basic_user = cfg.basic_user;
+        payload.basic_pass = cfg.basic_pass;
+      }
+
+      const result = await callPlugin(plugin.id, "status", payload) as {
         connected: boolean;
         rooms: RecorderRoom[];
       };
@@ -65,22 +69,20 @@ function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
     }
   };
 
-  const handleConnect = async () => {
-    setLoading(true);
-    try {
-      await callPlugin(plugin.id, "connect", config);
-      await loadStatus();
-    } catch (e) {
-      setStatus((prev) => ({ ...prev, error: String(e) }));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSync = async () => {
     setLoading(true);
     try {
-      await callPlugin(plugin.id, "sync_files", {});
+      const cfg = await getPluginConfig(plugin.id);
+      const payload: Record<string, string> = {
+        base_url: cfg.api_url || "http://127.0.0.1:2007",
+      };
+      if (cfg.api_key) payload.api_key = cfg.api_key;
+      if (cfg.basic_user && cfg.basic_pass) {
+        payload.basic_user = cfg.basic_user;
+        payload.basic_pass = cfg.basic_pass;
+      }
+
+      await callPlugin(plugin.id, "sync_files", payload);
       await loadStatus();
     } catch (e) {
       setStatus((prev) => ({ ...prev, error: String(e) }));
@@ -104,50 +106,14 @@ function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
             {status.connected ? "已连接" : "未连接"}
           </span>
           <Button size="sm" variant="outline" onClick={loadStatus} disabled={loading}>
-            刷新
+            刷新状态
           </Button>
         </div>
       </div>
 
-      {/* Config fields */}
-      <div className="grid grid-cols-2 gap-3 text-sm">
-        <div>
-          <label className="text-xs text-muted-foreground">API 地址</label>
-          <Input
-            value={config.api_url}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, api_url: e.target.value }))
-            }
-            placeholder="http://127.0.0.1:2007"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground">API 密钥</label>
-          <Input
-            type="password"
-            value={config.api_key}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, api_key: e.target.value }))
-            }
-            placeholder="留空则无认证"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-muted-foreground">Webhook 密钥</label>
-          <Input
-            value={config.webhook_secret}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, webhook_secret: e.target.value }))
-            }
-            placeholder="用于验证回调来源"
-          />
-        </div>
-        <div className="flex items-end">
-          <Button size="sm" onClick={handleConnect} disabled={loading}>
-            {status.connected ? "重新连接" : "连接"}
-          </Button>
-        </div>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        录播姬地址和认证在「设置」页面中配置
+      </p>
 
       {status.error && (
         <div className="text-xs text-red-500 bg-red-50 rounded p-2">
@@ -159,27 +125,29 @@ function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
       {status.rooms.length > 0 && (
         <div>
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">房间列表</span>
+            <span className="text-sm font-medium">房间列表（{status.rooms.length}）</span>
             <Button size="sm" variant="outline" onClick={handleSync} disabled={loading}>
               同步文件
             </Button>
           </div>
-          <div className="space-y-1 max-h-48 overflow-y-auto">
+          <div className="space-y-1 max-h-60 overflow-y-auto">
             {status.rooms.map((room) => (
               <div
                 key={room.roomId}
                 className="flex items-center gap-3 text-xs bg-muted/30 rounded p-2"
               >
                 <span className="font-medium">{room.name}</span>
-                <span className="text-muted-foreground">/ {room.title}</span>
-                <div className="ml-auto flex items-center gap-2">
+                <span className="text-muted-foreground truncate max-w-[200px]">
+                  / {room.title}
+                </span>
+                <div className="ml-auto flex items-center gap-2 shrink-0">
                   {room.recording && (
                     <span className="text-red-500 text-[10px]">录制中</span>
                   )}
                   {room.streaming && (
                     <span className="text-green-500 text-[10px]">直播中</span>
                   )}
-                  <span className="text-muted-foreground">
+                  <span className="text-muted-foreground text-[10px]">
                     {room.areaNameParent} / {room.areaNameChild}
                   </span>
                 </div>

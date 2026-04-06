@@ -141,7 +141,7 @@ pub fn run() {
             // Initialize plugin manager
             let plugin_dir = data_dir.join("plugins");
             let _ = std::fs::create_dir_all(&plugin_dir);
-            let plugin_manager = Arc::new(PluginManager::new(plugin_dir));
+            let plugin_manager = Arc::new(PluginManager::new());
 
             // Initialize workspace file watcher
             let watcher = Arc::new(WorkspaceWatcher::new(app.handle().clone()));
@@ -226,6 +226,8 @@ pub fn run() {
             commands::plugin::start_plugin_service,
             commands::plugin::stop_plugin_service,
             commands::plugin::call_plugin,
+            commands::plugin::get_plugin_config,
+            commands::plugin::set_plugin_config,
             commands::asr::submit_asr,
             commands::asr::poll_asr,
             commands::asr::list_asr_tasks,

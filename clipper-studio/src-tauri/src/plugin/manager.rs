@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -35,33 +34,31 @@ pub struct PluginManager {
     transports: RwLock<HashMap<String, Arc<Box<dyn PluginTransport>>>>,
     /// Service managers for managed plugins (id → service)
     services: RwLock<HashMap<String, Arc<ServiceManager>>>,
-    /// Plugin search directory
-    plugin_dir: PathBuf,
 }
 
 impl PluginManager {
-    pub fn new(plugin_dir: PathBuf) -> Self {
+    pub fn new() -> Self {
         Self {
             plugins: RwLock::new(HashMap::new()),
             transports: RwLock::new(HashMap::new()),
             services: RwLock::new(HashMap::new()),
-            plugin_dir,
         }
     }
 
     /// Scan plugin directory for all plugin.json manifests
-    pub async fn scan(&self) -> Vec<PluginScanResult> {
+    /// Uses the provided plugin_dir (call resolve_plugin_dir first to respect settings)
+    pub async fn scan(&self, plugin_dir: &std::path::Path) -> Vec<PluginScanResult> {
         let mut results = Vec::new();
 
-        if !self.plugin_dir.exists() {
+        if !plugin_dir.exists() {
             tracing::debug!(
                 "Plugin directory does not exist: {}",
-                self.plugin_dir.display()
+                plugin_dir.display()
             );
             return results;
         }
 
-        let entries = match std::fs::read_dir(&self.plugin_dir) {
+        let entries = match std::fs::read_dir(plugin_dir) {
             Ok(e) => e,
             Err(e) => {
                 tracing::warn!("Failed to read plugin directory: {}", e);
@@ -309,6 +306,11 @@ impl PluginManager {
                     },
                     description: meta.manifest.description.clone(),
                     has_config: !meta.manifest.config_schema.is_empty(),
+                    config_schema: if meta.manifest.config_schema.is_empty() {
+                        None
+                    } else {
+                        Some(meta.manifest.config_schema.clone())
+                    },
                 }
             })
             .collect()
@@ -330,6 +332,39 @@ impl PluginManager {
             tracing::info!("Shutting down plugin service: {}", id);
             let _ = svc.stop().await;
         }
+    }
+
+    /// Get plugin directory (resolves from settings or returns default)
+    /// Callers pass the db connection so this can stay in manager.rs
+    pub async fn resolve_plugin_dir(
+        &self,
+        db: &sea_orm::DatabaseConnection,
+        data_dir: &std::path::Path,
+    ) -> std::path::PathBuf {
+        let key = "plugin_dir";
+        let row = sea_orm::ConnectionTrait::query_one(
+            db,
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT value FROM settings_kv WHERE key = '{}'",
+                    key.replace('\'', "''")
+                ),
+            ),
+        )
+        .await;
+
+        if let Ok(Some(row)) = row {
+            if let Ok(val) = row.try_get::<String>("", "value") {
+                let path = std::path::PathBuf::from(&val);
+                if path.is_absolute() {
+                    return path;
+                }
+                tracing::warn!("plugin_dir setting must be absolute, using default");
+            }
+        }
+
+        data_dir.join("plugins")
     }
 
     // ====== Internal helpers ======
@@ -403,4 +438,7 @@ pub struct PluginInfo {
     pub status: String,
     pub description: Option<String>,
     pub has_config: bool,
+    /// Configuration schema (field name -> schema with type/default/description)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config_schema: Option<std::collections::HashMap<String, serde_json::Value>>,
 }

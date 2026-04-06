@@ -1,14 +1,179 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { getSettings, setSetting } from "@/services/settings";
 import { checkASRHealth, type ASRHealthInfo } from "@/services/asr";
 import { getAppInfo } from "@/services/workspace";
+import {
+  listPlugins,
+  type PluginInfo,
+  type PluginConfigField,
+  getPluginConfig,
+  setPluginConfig,
+} from "@/services/plugin";
 
 type ASRMode = "local" | "remote" | "disabled";
 
+// ===== Plugin Config Section =====
+interface PluginConfigState {
+  values: Record<string, string>;
+  loaded: boolean;
+}
+
+function PluginConfigPanel({ plugin }: { plugin: PluginInfo }) {
+  const [configs, setConfigs] = useState<PluginConfigState>({
+    values: {},
+    loaded: false,
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const schema = plugin.config_schema ?? {};
+
+  useEffect(() => {
+    if (!plugin.has_config) return;
+    getPluginConfig(plugin.id)
+      .then((vals) => {
+        const filled: Record<string, string> = {};
+        for (const [k, field] of Object.entries(schema)) {
+          filled[k] = vals[k] ?? String(field.default ?? "");
+        }
+        setConfigs({ values: filled, loaded: true });
+      })
+      .catch(console.error);
+  }, [plugin.id, plugin.has_config, schema]);
+
+  const handleChange = useCallback(
+    (key: string, value: string) => {
+      setConfigs((prev) => ({
+        ...prev,
+        values: { ...prev.values, [key]: value },
+      }));
+    },
+    []
+  );
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      for (const [key, value] of Object.entries(configs.values)) {
+        await setPluginConfig(plugin.id, key, value);
+      }
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      alert(`保存失败: ${String(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!plugin.has_config || !configs.loaded) return null;
+
+  return (
+    <section className="rounded-lg border p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="font-medium text-lg">{plugin.name}</h3>
+          <p className="text-xs text-muted-foreground">
+            {plugin.description ?? `插件配置`}
+          </p>
+        </div>
+        <span
+          className={`text-xs px-2 py-0.5 rounded ${
+            plugin.status === "loaded" || plugin.status === "running"
+              ? "bg-green-100 text-green-700"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          {plugin.status === "loaded"
+            ? "已加载"
+            : plugin.status === "running"
+              ? "运行中"
+              : plugin.status === "discovered"
+                ? "未加载"
+                : plugin.status}
+        </span>
+      </div>
+
+      <div className="space-y-3 text-sm">
+        {Object.entries(schema).map(([key, field]) => (
+          <ConfigField
+            key={key}
+            fieldKey={key}
+            field={field}
+            value={configs.values[key] ?? String(field.default ?? "")}
+            onChange={handleChange}
+          />
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3 pt-2">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? "保存中..." : saved ? "已保存 ✓" : "保存配置"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+function ConfigField({
+  fieldKey,
+  field,
+  value,
+  onChange,
+}: {
+  fieldKey: string;
+  field: PluginConfigField;
+  value: string;
+  onChange: (key: string, value: string) => void;
+}) {
+  if (field.type === "boolean") {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-3">
+          <select
+            value={value === "true" ? "true" : "false"}
+            onChange={(e) => onChange(fieldKey, e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+          >
+            <option value="true">是</option>
+            <option value="false">否</option>
+          </select>
+          <Label className="text-sm cursor-pointer">{fieldKey}</Label>
+        </div>
+        {field.description && (
+          <p className="text-xs text-muted-foreground pl-2">{field.description}</p>
+        )}
+      </div>
+    );
+  }
+
+  const isPassword = fieldKey.toLowerCase().includes("pass") ||
+    fieldKey.toLowerCase().includes("secret") ||
+    fieldKey.toLowerCase().includes("key");
+
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{fieldKey}</Label>
+      <Input
+        value={value}
+        onChange={(e) => onChange(fieldKey, e.target.value)}
+        placeholder={String(field.default ?? "")}
+        type={isPassword ? "password" : "text"}
+        className="text-sm h-8"
+      />
+      {field.description && (
+        <p className="text-xs text-muted-foreground">{field.description}</p>
+      )}
+    </div>
+  );
+}
+
+// ===== Main Settings Page =====
 function SettingsPage() {
   // ASR settings
   const [asrMode, setAsrMode] = useState<ASRMode>("local");
@@ -19,6 +184,14 @@ function SettingsPage() {
   const [asrChecking, setAsrChecking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // Plugin directory
+  const [pluginDir, setPluginDir] = useState("");
+  const [pluginDirLoaded, setPluginDirLoaded] = useState(false);
+
+  // Plugin configs
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginsLoading, setPluginsLoading] = useState(false);
 
   // App info
   const [appInfo, setAppInfo] = useState<{
@@ -32,21 +205,51 @@ function SettingsPage() {
 
   useEffect(() => {
     // Load settings
-    getSettings(["asr_mode", "asr_port", "asr_url", "asr_api_key"])
+    getSettings([
+      "asr_mode",
+      "asr_port",
+      "asr_url",
+      "asr_api_key",
+      "plugin_dir",
+    ])
       .then((settings) => {
         if (settings.asr_mode)
           setAsrMode(settings.asr_mode as ASRMode);
         if (settings.asr_port) setAsrPort(settings.asr_port);
         if (settings.asr_url) setAsrUrl(settings.asr_url);
         if (settings.asr_api_key) setAsrApiKey(settings.asr_api_key);
+        if (settings.plugin_dir) {
+          setPluginDir(settings.plugin_dir);
+        } else if (appInfo) {
+          // Default: data_dir/plugins
+          setPluginDir(`${appInfo.data_dir}/plugins`);
+        }
+        setPluginDirLoaded(true);
       })
       .catch(console.error);
 
-    // Load app info
+    // Load app info (used for default plugin_dir)
     getAppInfo()
       .then(setAppInfo)
       .catch(console.error);
+
+    // Load plugins for config rendering
+    setPluginsLoading(true);
+    listPlugins()
+      .then((list) => {
+        // Only show plugins that have config and are loaded/running
+        setPlugins(list.filter((p) => p.has_config));
+      })
+      .catch(console.error)
+      .finally(() => setPluginsLoading(false));
   }, []);
+
+  // Update plugin_dir default after appInfo loads
+  useEffect(() => {
+    if (appInfo && pluginDirLoaded && !pluginDir) {
+      setPluginDir(`${appInfo.data_dir}/plugins`);
+    }
+  }, [appInfo, pluginDirLoaded, pluginDir]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -56,6 +259,7 @@ function SettingsPage() {
       await setSetting("asr_port", asrPort);
       if (asrUrl) await setSetting("asr_url", asrUrl);
       if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
+      if (pluginDir) await setSetting("plugin_dir", pluginDir);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) {
@@ -185,6 +389,44 @@ function SettingsPage() {
           )}
         </div>
       </section>
+
+      {/* ===== Plugin Directory ===== */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">插件目录</h3>
+        <div className="space-y-1">
+          <Label className="text-xs">自定义插件目录（绝对路径）</Label>
+          <Input
+            value={pluginDir}
+            onChange={(e) => setPluginDir(e.target.value)}
+            placeholder="留空使用默认目录"
+            className="text-sm h-8 font-mono"
+          />
+          <p className="text-xs text-muted-foreground">
+            修改后需在「插件管理」页点击「扫描插件」生效。默认：
+            {appInfo ? `${appInfo.data_dir}/plugins` : "加载中..."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 pt-2">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存"}
+          </Button>
+        </div>
+      </section>
+
+      {/* ===== Plugin Configs (dynamic) ===== */}
+      {pluginsLoading ? (
+        <div className="text-muted-foreground text-sm">加载插件配置...</div>
+      ) : plugins.length > 0 ? (
+        <section className="space-y-4">
+          <h3 className="font-medium text-lg">插件配置</h3>
+          <p className="text-xs text-muted-foreground">
+            以下插件提供了配置选项。需先在「插件管理」页加载插件后才能修改配置。
+          </p>
+          {plugins.map((plugin) => (
+            <PluginConfigPanel key={plugin.id} plugin={plugin} />
+          ))}
+        </section>
+      ) : null}
 
       {/* ===== App Info ===== */}
       {appInfo && (
