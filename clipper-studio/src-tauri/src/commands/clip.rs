@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::AppState;
 use crate::core::clipper::{self, PresetOptions};
@@ -46,14 +46,21 @@ pub struct ClipOutputInfo {
 #[tauri::command]
 pub async fn create_clip(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
     req: CreateClipRequest,
 ) -> Result<ClipTaskInfo, String> {
-    // Get video info
+    // Get video info with streamer name
     let video_row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT file_path, file_name FROM videos WHERE id = {}", req.video_id),
+            format!(
+                "SELECT v.file_path, v.file_name, v.stream_title, v.recorded_at, \
+                 st.name as streamer_name \
+                 FROM videos v LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 WHERE v.id = {}",
+                req.video_id
+            ),
         ),
     )
     .await
@@ -62,6 +69,9 @@ pub async fn create_clip(
 
     let video_path: String = video_row.try_get("", "file_path").unwrap_or_default();
     let video_name: String = video_row.try_get("", "file_name").unwrap_or_default();
+    let streamer_name: Option<String> = video_row.try_get("", "streamer_name").ok();
+    let stream_title: Option<String> = video_row.try_get("", "stream_title").ok();
+    let recorded_at: Option<String> = video_row.try_get("", "recorded_at").ok();
 
     // Load preset options
     let preset_options = if let Some(pid) = req.preset_id {
@@ -92,8 +102,14 @@ pub async fn create_clip(
     };
 
     let clip_title = req.title.clone().unwrap_or_else(|| {
-        let stem = video_name.rsplit('.').last().unwrap_or(&video_name);
-        format!("{}_{}-{}", stem, req.start_ms, req.end_ms)
+        build_clip_name(
+            streamer_name.as_deref(),
+            stream_title.as_deref(),
+            recorded_at.as_deref(),
+            req.start_ms,
+            req.end_ms,
+            &video_name,
+        )
     });
 
     let output_filename = format!("{}.{}", sanitize_filename(&clip_title), ext);
@@ -138,6 +154,8 @@ pub async fn create_clip(
     let start_ms = req.start_ms;
     let end_ms = req.end_ms;
     let video_id = req.video_id;
+    let app = app_handle.clone();
+    let clip_title_for_notify = clip_title.clone();
 
     state
         .task_queue
@@ -191,6 +209,14 @@ pub async fn create_clip(
                     .await;
 
                     let _ = update_task_status(&db, task_id, "completed", None).await;
+
+                    // Notify frontend
+                    let _ = app.emit("clip-completed", serde_json::json!({
+                        "task_id": task_id,
+                        "title": clip_title_for_notify,
+                        "output_path": output.to_string_lossy(),
+                        "file_size": file_size,
+                    }));
                 }
                 Err(e) => {
                     let status = if e == "Task cancelled" { "cancelled" } else { "failed" };
@@ -351,6 +377,57 @@ async fn update_task_status(
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Build clip filename: {主播}_{日期}_{标题}_{时间段}
+fn build_clip_name(
+    streamer: Option<&str>,
+    title: Option<&str>,
+    recorded_at: Option<&str>,
+    start_ms: i64,
+    end_ms: i64,
+    fallback_name: &str,
+) -> String {
+    let mut parts = Vec::new();
+
+    if let Some(name) = streamer {
+        parts.push(name.to_string());
+    }
+
+    // Extract date from recorded_at "yyyy-MM-dd HH:mm:ss" → "yyyyMMdd"
+    if let Some(ts) = recorded_at {
+        let date_part: String = ts.chars().take(10).filter(|c| *c != '-').collect();
+        if date_part.len() == 8 {
+            parts.push(date_part);
+        }
+    }
+
+    if let Some(t) = title {
+        // Truncate long titles
+        let truncated = if t.chars().count() > 20 {
+            format!("{}...", t.chars().take(20).collect::<String>())
+        } else {
+            t.to_string()
+        };
+        parts.push(truncated);
+    }
+
+    // Time range: HH:mm:ss-HH:mm:ss
+    let fmt_time = |ms: i64| -> String {
+        let total_s = ms / 1000;
+        let h = total_s / 3600;
+        let m = (total_s % 3600) / 60;
+        let s = total_s % 60;
+        format!("{:02}{:02}{:02}", h, m, s)
+    };
+    parts.push(format!("{}-{}", fmt_time(start_ms), fmt_time(end_ms)));
+
+    if parts.is_empty() {
+        let stem = fallback_name.rsplit('.').last().unwrap_or(fallback_name);
+        return format!("{}_{}-{}", stem, start_ms, end_ms);
+    }
+
+    parts.join("_")
 }
 
 fn sanitize_filename(name: &str) -> String {
