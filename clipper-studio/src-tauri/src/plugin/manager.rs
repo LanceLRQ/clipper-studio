@@ -274,6 +274,14 @@ impl PluginManager {
         transport.request(action, payload).await
     }
 
+    /// Get a transport by plugin_id (for custom HTTP calls)
+    pub async fn get_transport(
+        &self,
+        plugin_id: &str,
+    ) -> Option<Arc<Box<dyn PluginTransport>>> {
+        self.transports.read().await.get(plugin_id).cloned()
+    }
+
     /// List all discovered plugins
     pub async fn list(&self) -> Vec<PluginInfo> {
         let plugins = self.plugins.read().await;

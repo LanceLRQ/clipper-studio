@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { PluginInfo } from "@/services/plugin";
+import { Input } from "@/components/ui/input";
+import type { PluginInfo, RecorderRoom } from "@/services/plugin";
 import {
   scanPlugins,
   listPlugins,
@@ -9,6 +10,7 @@ import {
   unloadPlugin,
   startPluginService,
   stopPluginService,
+  callPlugin,
 } from "@/services/plugin";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -33,6 +35,164 @@ const TYPE_LABELS: Record<string, string> = {
   StorageProvider: "存储提供者",
 };
 
+// ===== Recorder Panel =====
+function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
+  const [config, setConfig] = useState<Record<string, string>>({
+    api_url: "http://127.0.0.1:2007",
+    api_key: "",
+    webhook_secret: "",
+    auto_sync: "false",
+  });
+  const [status, setStatus] = useState<{
+    connected: boolean;
+    rooms: RecorderRoom[];
+    error: string | null;
+  }>({ connected: false, rooms: [], error: null });
+  const [loading, setLoading] = useState(false);
+
+  const loadStatus = async () => {
+    setLoading(true);
+    try {
+      const result = await callPlugin(plugin.id, "status", config) as {
+        connected: boolean;
+        rooms: RecorderRoom[];
+      };
+      setStatus({ connected: result.connected, rooms: result.rooms, error: null });
+    } catch (e) {
+      setStatus((prev) => ({ ...prev, connected: false, error: String(e) }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      await callPlugin(plugin.id, "connect", config);
+      await loadStatus();
+    } catch (e) {
+      setStatus((prev) => ({ ...prev, error: String(e) }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSync = async () => {
+    setLoading(true);
+    try {
+      await callPlugin(plugin.id, "sync_files", {});
+      await loadStatus();
+    } catch (e) {
+      setStatus((prev) => ({ ...prev, error: String(e) }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">{plugin.name} - 录播姬控制台</h3>
+        <div className="flex items-center gap-2">
+          <span
+            className={`text-xs px-2 py-0.5 rounded ${
+              status.connected
+                ? "bg-green-100 text-green-700"
+                : "bg-gray-100 text-gray-500"
+            }`}
+          >
+            {status.connected ? "已连接" : "未连接"}
+          </span>
+          <Button size="sm" variant="outline" onClick={loadStatus} disabled={loading}>
+            刷新
+          </Button>
+        </div>
+      </div>
+
+      {/* Config fields */}
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <label className="text-xs text-muted-foreground">API 地址</label>
+          <Input
+            value={config.api_url}
+            onChange={(e) =>
+              setConfig((c) => ({ ...c, api_url: e.target.value }))
+            }
+            placeholder="http://127.0.0.1:2007"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">API 密钥</label>
+          <Input
+            type="password"
+            value={config.api_key}
+            onChange={(e) =>
+              setConfig((c) => ({ ...c, api_key: e.target.value }))
+            }
+            placeholder="留空则无认证"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-muted-foreground">Webhook 密钥</label>
+          <Input
+            value={config.webhook_secret}
+            onChange={(e) =>
+              setConfig((c) => ({ ...c, webhook_secret: e.target.value }))
+            }
+            placeholder="用于验证回调来源"
+          />
+        </div>
+        <div className="flex items-end">
+          <Button size="sm" onClick={handleConnect} disabled={loading}>
+            {status.connected ? "重新连接" : "连接"}
+          </Button>
+        </div>
+      </div>
+
+      {status.error && (
+        <div className="text-xs text-red-500 bg-red-50 rounded p-2">
+          {status.error}
+        </div>
+      )}
+
+      {/* Room list */}
+      {status.rooms.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">房间列表</span>
+            <Button size="sm" variant="outline" onClick={handleSync} disabled={loading}>
+              同步文件
+            </Button>
+          </div>
+          <div className="space-y-1 max-h-48 overflow-y-auto">
+            {status.rooms.map((room) => (
+              <div
+                key={room.roomId}
+                className="flex items-center gap-3 text-xs bg-muted/30 rounded p-2"
+              >
+                <span className="font-medium">{room.name}</span>
+                <span className="text-muted-foreground">/ {room.title}</span>
+                <div className="ml-auto flex items-center gap-2">
+                  {room.recording && (
+                    <span className="text-red-500 text-[10px]">录制中</span>
+                  )}
+                  {room.streaming && (
+                    <span className="text-green-500 text-[10px]">直播中</span>
+                  )}
+                  <span className="text-muted-foreground">
+                    {room.areaNameParent} / {room.areaNameChild}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===== Main Plugins Page =====
 function PluginsPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,6 +254,8 @@ function PluginsPage() {
     }
   };
 
+  const recorderPlugins = plugins.filter((p) => p.plugin_type === "Recorder");
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -109,6 +271,13 @@ function PluginsPage() {
           {loading ? "扫描中..." : "扫描插件"}
         </Button>
       </div>
+
+      {/* Recorder panels */}
+      {recorderPlugins.map((plugin) =>
+        plugin.status === "loaded" || plugin.status === "running" ? (
+          <RecorderPanel key={plugin.id} plugin={plugin} />
+        ) : null
+      )}
 
       {loading && plugins.length === 0 ? (
         <div className="text-muted-foreground">加载中...</div>

@@ -35,3 +35,30 @@ export async function startPluginService(pluginId: string): Promise<void> {
 export async function stopPluginService(pluginId: string): Promise<void> {
   return invoke("stop_plugin_service", { pluginId });
 }
+
+export async function callPlugin(
+  pluginId: string,
+  action: string,
+  payload: Record<string, unknown> = {}
+): Promise<unknown> {
+  return invoke("call_plugin", { pluginId, action, payload });
+}
+
+export interface RecorderRoom {
+  roomId: number;
+  shortId: number;
+  name: string;
+  title: string;
+  areaNameParent: string;
+  areaNameChild: string;
+  recording: boolean;
+  streaming: boolean;
+  danmakuConnected: boolean;
+  autoRecord: boolean;
+}
+
+export interface RecorderStatus {
+  connected: boolean;
+  version: string | null;
+  rooms: RecorderRoom[];
+}

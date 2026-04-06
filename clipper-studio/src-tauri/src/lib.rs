@@ -225,6 +225,7 @@ pub fn run() {
             commands::plugin::unload_plugin,
             commands::plugin::start_plugin_service,
             commands::plugin::stop_plugin_service,
+            commands::plugin::call_plugin,
             commands::asr::submit_asr,
             commands::asr::poll_asr,
             commands::asr::list_asr_tasks,
