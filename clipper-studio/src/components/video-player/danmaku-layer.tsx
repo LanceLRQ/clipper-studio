@@ -15,10 +15,6 @@ interface DanmakuLayerProps {
   currentTime: number;
   /** Video duration in seconds */
   duration: number;
-  /** Container width */
-  width: number;
-  /** Container height */
-  height: number;
   /** Whether danmaku is enabled */
   enabled?: boolean;
   /** Opacity 0.0~1.0 */
@@ -38,14 +34,33 @@ export function DanmakuLayer({
   items,
   currentTime,
   duration,
-  width,
-  height,
   enabled = true,
   opacity = 0.8,
   fontScale = 1.0,
 }: DanmakuLayerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const lastTimeRef = useRef(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  // Self-measure container size
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setSize((prev) => {
+          if (prev.width === width && prev.height === height) return prev;
+          return { width, height };
+        });
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const { width, height } = size;
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -141,11 +156,15 @@ export function DanmakuLayer({
   if (!enabled) return null;
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 pointer-events-none"
-      style={{ width, height }}
-    />
+    <div
+      ref={containerRef}
+      style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+    >
+      <canvas
+        ref={canvasRef}
+        style={{ width: "100%", height: "100%" }}
+      />
+    </div>
   );
 }
 

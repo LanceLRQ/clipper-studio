@@ -63,9 +63,6 @@ function VideoDetailPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
   const [danmakuItems, setDanmakuItems] = useState<DanmakuItem[]>([]);
   const [danmakuEnabled, setDanmakuEnabled] = useState(true);
-  const monitorRef = useRef<HTMLDivElement>(null);
-  const [monitorSize, setMonitorSize] = useState({ width: 0, height: 0 });
-
   // Multi-clip state
   const [clips, setClips] = useState<ClipRegion[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -76,22 +73,6 @@ function VideoDetailPage() {
     () => clips.find((c) => c.id === selectedClipId) ?? null,
     [clips, selectedClipId]
   );
-
-  // Track monitor area size for danmaku overlay
-  useEffect(() => {
-    const el = monitorRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setMonitorSize({
-          width: entry.contentRect.width,
-          height: entry.contentRect.height,
-        });
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   // Track playback time
   useEffect(() => {
@@ -113,10 +94,15 @@ function VideoDetailPage() {
       .then((v) => {
         setVideo(v);
         getEnvelope(v.id).then(setEnvelope).catch(console.error);
-        // Load danmaku if available
-        if (v.has_danmaku) {
-          loadDanmaku(v.id).then(setDanmakuItems).catch(console.error);
-        }
+        // Try to load danmaku (silently ignore if no XML found)
+        loadDanmaku(v.id)
+          .then((items) => {
+            console.log("[Danmaku] Loaded", items.length, "items", items.slice(0, 3));
+            setDanmakuItems(items);
+          })
+          .catch((e) => {
+            console.warn("[Danmaku] Load failed:", e);
+          });
         const ext = v.file_name.split(".").pop()?.toLowerCase();
         if (ext === "flv" || ext === "ts") {
           checkVideoIntegrity(v.id)
@@ -249,31 +235,42 @@ function VideoDetailPage() {
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {/* Monitor area: black bg, video centered, fills remaining space */}
           <div
-            ref={monitorRef}
-            className="flex-1 min-h-0 bg-black rounded-lg flex items-center justify-center overflow-hidden relative"
+            className="flex-1 min-h-0 bg-black rounded-lg overflow-hidden"
+            style={{ position: "relative" }}
           >
-            <div className="w-full max-h-full">
-              <VideoPlayer src={video.file_path} title={video.file_name} />
+            <div className="w-full h-full flex items-center justify-center">
+              <div className="w-full max-h-full">
+                <VideoPlayer src={video.file_path} title={video.file_name} />
+              </div>
             </div>
-            {/* Danmaku overlay */}
+            {/* Danmaku overlay — isolated stacking context above video */}
             {danmakuItems.length > 0 && (
-              <>
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 2147483647,
+                  pointerEvents: "none",
+                }}
+              >
                 <DanmakuLayer
                   items={danmakuItems}
                   currentTime={currentTime}
                   duration={durationSecs}
-                  width={monitorSize.width}
-                  height={monitorSize.height}
                   enabled={danmakuEnabled}
                   opacity={0.8}
                 />
-                <button
-                  className="absolute top-2 right-2 z-30 px-2 py-1 rounded text-xs bg-black/50 text-white hover:bg-black/70 transition-colors"
-                  onClick={() => setDanmakuEnabled((v) => !v)}
-                >
-                  {danmakuEnabled ? "弹幕 ON" : "弹幕 OFF"}
-                </button>
-              </>
+              </div>
+            )}
+            {/* Danmaku toggle button */}
+            {danmakuItems.length > 0 && (
+              <button
+                style={{ position: "absolute", top: 8, right: 8, zIndex: 2147483647 }}
+                className="px-2 py-1 rounded text-xs bg-black/50 text-white hover:bg-black/70 transition-colors"
+                onClick={() => setDanmakuEnabled((v) => !v)}
+              >
+                {danmakuEnabled ? "弹幕 ON" : "弹幕 OFF"}
+              </button>
             )}
           </div>
 
