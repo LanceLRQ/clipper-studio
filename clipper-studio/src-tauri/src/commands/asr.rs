@@ -4,28 +4,58 @@ use tauri::State;
 
 use crate::asr::local::LocalASRProvider;
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
+use crate::asr::remote::RemoteASRProvider;
 use crate::asr::service::{self, ASRTaskInfo, SubtitleSegment};
 use crate::AppState;
 
-/// Get or create ASR provider based on settings
-async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> {
-    // For now, use local provider with default port
-    // TODO: Read ASR config from settings_kv to determine provider type and port
-    let port: u16 = sea_orm::ConnectionTrait::query_one(
+/// Helper: read a setting from settings_kv
+async fn read_setting(state: &AppState, key: &str) -> Option<String> {
+    sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT value FROM settings_kv WHERE key = 'asr_port'".to_string(),
+            format!(
+                "SELECT value FROM settings_kv WHERE key = '{}'",
+                key
+            ),
         ),
     )
     .await
     .ok()
     .flatten()
     .and_then(|r| r.try_get::<String>("", "value").ok())
-    .and_then(|v| v.parse::<u16>().ok())
-    .unwrap_or(8765);
+}
 
-    Ok(Arc::new(LocalASRProvider::new(port)))
+/// Get or create ASR provider based on settings_kv configuration.
+///
+/// Settings keys:
+/// - `asr_mode`: "local" (default) | "remote" | "disabled"
+/// - `asr_port`: local ASR port (default 8765)
+/// - `asr_url`: remote ASR base URL
+/// - `asr_api_key`: remote ASR API key
+async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> {
+    let mode = read_setting(state, "asr_mode")
+        .await
+        .unwrap_or("local".to_string());
+
+    match mode.as_str() {
+        "disabled" => Err("ASR 功能已禁用，请在设置中启用".to_string()),
+        "remote" => {
+            let url = read_setting(state, "asr_url")
+                .await
+                .ok_or("请先在设置中配置远程 ASR 地址")?;
+            let api_key = read_setting(state, "asr_api_key").await;
+            Ok(Arc::new(RemoteASRProvider::new(&url, api_key)))
+        }
+        _ => {
+            // "local" or default
+            let port: u16 = read_setting(state, "asr_port")
+                .await
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(8765);
+            Ok(Arc::new(LocalASRProvider::new(port)))
+        }
+    }
 }
 
 /// Submit an ASR task for a video

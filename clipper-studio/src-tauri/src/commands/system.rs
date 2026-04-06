@@ -115,3 +115,76 @@ pub async fn track_event(
 
     Ok(())
 }
+
+/// Get a setting value from settings_kv
+#[tauri::command]
+pub async fn get_setting(
+    state: State<'_, AppState>,
+    key: String,
+) -> Result<Option<String>, String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT value FROM settings_kv WHERE key = '{}'",
+                key.replace('\'', "''")
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(row.and_then(|r| r.try_get::<String>("", "value").ok()))
+}
+
+/// Set a setting value in settings_kv
+#[tauri::command]
+pub async fn set_setting(
+    state: State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('{}', '{}')",
+            key.replace('\'', "''"),
+            value.replace('\'', "''"),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Get multiple settings at once (batch read)
+#[tauri::command]
+pub async fn get_settings(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut result = std::collections::HashMap::new();
+    for key in &keys {
+        let row = sea_orm::ConnectionTrait::query_one(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT value FROM settings_kv WHERE key = '{}'",
+                    key.replace('\'', "''")
+                ),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        if let Some(row) = row {
+            if let Ok(val) = row.try_get::<String>("", "value") {
+                result.insert(key.clone(), val);
+            }
+        }
+    }
+    Ok(result)
+}
