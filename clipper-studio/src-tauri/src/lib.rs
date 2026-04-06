@@ -195,6 +195,7 @@ pub fn run() {
             commands::clip::cancel_clip,
             commands::clip::list_clip_tasks,
             commands::clip::list_presets,
+            commands::clip::create_batch_clips,
             commands::workspace::list_workspaces,
             commands::workspace::create_workspace,
             commands::workspace::delete_workspace,

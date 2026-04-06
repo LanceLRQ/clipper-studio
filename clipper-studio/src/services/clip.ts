@@ -24,3 +24,11 @@ export async function listClipTasks(
 export async function listPresets(): Promise<EncodingPreset[]> {
   return invoke<EncodingPreset[]>("list_presets");
 }
+
+import type { BatchClipRequest } from "@/types/multi-clip";
+
+export async function createBatchClips(
+  req: BatchClipRequest
+): Promise<ClipTaskInfo[]> {
+  return invoke<ClipTaskInfo[]>("create_batch_clips", { req });
+}

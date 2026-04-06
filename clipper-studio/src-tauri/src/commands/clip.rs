@@ -101,16 +101,15 @@ pub async fn create_clip(
         }
     };
 
-    let clip_title = req.title.clone().unwrap_or_else(|| {
-        build_clip_name(
-            streamer_name.as_deref(),
-            stream_title.as_deref(),
-            recorded_at.as_deref(),
-            req.start_ms,
-            req.end_ms,
-            &video_name,
-        )
-    });
+    let clip_title = build_clip_name(
+        streamer_name.as_deref(),
+        stream_title.as_deref(),
+        req.title.as_deref(),
+        recorded_at.as_deref(),
+        req.start_ms,
+        req.end_ms,
+        &video_name,
+    );
 
     let output_filename = format!("{}.{}", sanitize_filename(&clip_title), ext);
     let output_path = output_dir.join(&output_filename);
@@ -379,10 +378,15 @@ async fn update_task_status(
     Ok(())
 }
 
-/// Build clip filename: {主播}_{日期}_{标题}_{时间段}
+/// Build clip display name: {主播}-{直播标题}-{片段名}-{开始绝对时间}-{结束绝对时间}
+///
+/// Time format: yyMMdd-HHmm (e.g. "260101-2130")
+/// `clip_name` is the user-facing name like "片段1"
+/// `recorded_at` is "yyyy-MM-dd HH:mm:ss", used as base for absolute time calculation
 fn build_clip_name(
     streamer: Option<&str>,
-    title: Option<&str>,
+    stream_title: Option<&str>,
+    clip_name: Option<&str>,
     recorded_at: Option<&str>,
     start_ms: i64,
     end_ms: i64,
@@ -394,16 +398,7 @@ fn build_clip_name(
         parts.push(name.to_string());
     }
 
-    // Extract date from recorded_at "yyyy-MM-dd HH:mm:ss" → "yyyyMMdd"
-    if let Some(ts) = recorded_at {
-        let date_part: String = ts.chars().take(10).filter(|c| *c != '-').collect();
-        if date_part.len() == 8 {
-            parts.push(date_part);
-        }
-    }
-
-    if let Some(t) = title {
-        // Truncate long titles
+    if let Some(t) = stream_title {
         let truncated = if t.chars().count() > 20 {
             format!("{}...", t.chars().take(20).collect::<String>())
         } else {
@@ -412,22 +407,62 @@ fn build_clip_name(
         parts.push(truncated);
     }
 
-    // Time range: HH:mm:ss-HH:mm:ss
-    let fmt_time = |ms: i64| -> String {
-        let total_s = ms / 1000;
-        let h = total_s / 3600;
-        let m = (total_s % 3600) / 60;
-        let s = total_s % 60;
-        format!("{:02}{:02}{:02}", h, m, s)
-    };
-    parts.push(format!("{}-{}", fmt_time(start_ms), fmt_time(end_ms)));
+    if let Some(cn) = clip_name {
+        parts.push(cn.to_string());
+    }
+
+    // Compute absolute start/end time from recorded_at + offset
+    // Format: yyMMdd-HHmm (e.g. "260405-2130")
+    if let Some(ts) = recorded_at {
+        // Parse "yyyy-MM-dd HH:mm:ss" into components
+        let ts_parts: Vec<&str> = ts.split(&['-', ' ', ':'][..]).collect();
+        if ts_parts.len() >= 6 {
+            if let (Ok(y), Ok(mo), Ok(d), Ok(h), Ok(mi), Ok(s)) = (
+                ts_parts[0].parse::<i64>(),
+                ts_parts[1].parse::<i64>(),
+                ts_parts[2].parse::<i64>(),
+                ts_parts[3].parse::<i64>(),
+                ts_parts[4].parse::<i64>(),
+                ts_parts[5].parse::<i64>(),
+            ) {
+                let base_secs = h * 3600 + mi * 60 + s;
+                let fmt_absolute = |offset_ms: i64| -> String {
+                    let offset_s = offset_ms / 1000;
+                    let total_s = base_secs + offset_s;
+                    // Handle day overflow simply
+                    let extra_days = total_s / 86400;
+                    let day_s = total_s % 86400;
+                    let ah = day_s / 3600;
+                    let am = (day_s % 3600) / 60;
+                    // Simple day offset (not calendar-accurate, good enough for display)
+                    let ad = d + extra_days;
+                    format!(
+                        "{:02}{:02}{:02}-{:02}{:02}",
+                        y % 100, mo, ad, ah, am
+                    )
+                };
+                parts.push(fmt_absolute(start_ms));
+                parts.push(fmt_absolute(end_ms));
+            }
+        }
+    } else {
+        // No recorded_at: use file-relative time
+        let fmt_relative = |ms: i64| -> String {
+            let total_s = ms / 1000;
+            let h = total_s / 3600;
+            let m = (total_s % 3600) / 60;
+            let s = total_s % 60;
+            format!("{:02}{:02}{:02}", h, m, s)
+        };
+        parts.push(format!("{}-{}", fmt_relative(start_ms), fmt_relative(end_ms)));
+    }
 
     if parts.is_empty() {
         let stem = fallback_name.rsplit('.').last().unwrap_or(fallback_name);
         return format!("{}_{}-{}", stem, start_ms, end_ms);
     }
 
-    parts.join("_")
+    parts.join("-")
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -437,6 +472,79 @@ fn sanitize_filename(name: &str) -> String {
             _ => c,
         })
         .collect()
+}
+
+// ====== Batch Clip Creation ======
+
+#[derive(Debug, Deserialize)]
+pub struct BatchClipItem {
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub title: Option<String>,
+    pub preset_id: Option<i64>,
+    pub offset_before_ms: i64,
+    pub offset_after_ms: i64,
+    pub audio_only: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateBatchClipsRequest {
+    pub video_id: i64,
+    pub clips: Vec<BatchClipItem>,
+}
+
+/// Create multiple clip tasks at once
+#[tauri::command]
+pub async fn create_batch_clips(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    req: CreateBatchClipsRequest,
+) -> Result<Vec<ClipTaskInfo>, String> {
+    let mut results = Vec::new();
+
+    for item in &req.clips {
+        // Apply offsets
+        let effective_start = (item.start_ms - item.offset_before_ms).max(0);
+        let effective_end = item.end_ms + item.offset_after_ms;
+
+        // Determine preset: if audio_only, use audio-only preset; else use specified or default
+        let preset_id = if item.audio_only {
+            // Find the audio-only builtin preset
+            sea_orm::ConnectionTrait::query_one(
+                state.db.conn(),
+                sea_orm::Statement::from_string(
+                    sea_orm::DatabaseBackend::Sqlite,
+                    "SELECT id FROM encoding_presets WHERE name = '仅音频' AND is_builtin = 1"
+                        .to_string(),
+                ),
+            )
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get::<i64>("", "id").ok())
+        } else {
+            item.preset_id
+        };
+
+        let clip_req = CreateClipRequest {
+            video_id: req.video_id,
+            start_ms: effective_start,
+            end_ms: effective_end,
+            title: item.title.clone(),
+            preset_id,
+            output_dir: None,
+        };
+
+        match create_clip(state.clone(), app_handle.clone(), clip_req).await {
+            Ok(info) => results.push(info),
+            Err(e) => {
+                tracing::warn!("Batch clip item failed: {}", e);
+                // Continue with remaining clips
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 fn chrono_now() -> String {
