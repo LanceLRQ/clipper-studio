@@ -21,6 +21,7 @@
     "@vidstack/react": "1.12.13",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "danmaku": "^2.0.9",
     "lucide-react": "^1.7.0",
     "mpegts.js": "^1.8.0",
     "react": "^19.2.4",

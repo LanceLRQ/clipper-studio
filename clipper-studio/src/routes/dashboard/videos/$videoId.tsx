@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { VideoPlayer } from "@/components/video-player/player";
@@ -63,6 +63,15 @@ function VideoDetailPage() {
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null);
   const [danmakuItems, setDanmakuItems] = useState<DanmakuItem[]>([]);
   const [danmakuEnabled, setDanmakuEnabled] = useState(true);
+  const [danmakuContainer, setDanmakuContainer] = useState<HTMLDivElement | null>(null);
+  const [mediaEl, setMediaEl] = useState<HTMLVideoElement | null>(null);
+
+  // Callback ref for video element from VideoPlayer
+  const handleVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    console.log("[VideoDetail] handleVideoRef:", !!el);
+    setMediaEl(el);
+  }, []);
+
   // Multi-clip state
   const [clips, setClips] = useState<ClipRegion[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -240,38 +249,36 @@ function VideoDetailPage() {
           >
             <div className="w-full h-full flex items-center justify-center">
               <div className="w-full max-h-full">
-                <VideoPlayer src={video.file_path} title={video.file_name} />
+                <VideoPlayer src={video.file_path} title={video.file_name} onVideoRef={handleVideoRef} />
               </div>
             </div>
-            {/* Danmaku overlay — isolated stacking context above video */}
-            {danmakuItems.length > 0 && (
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  zIndex: 2147483647,
-                  pointerEvents: "none",
-                }}
-              >
-                <DanmakuLayer
-                  items={danmakuItems}
-                  currentTime={currentTime}
-                  duration={durationSecs}
-                  enabled={danmakuEnabled}
-                  opacity={0.8}
-                />
-              </div>
-            )}
+            {/* Danmaku overlay container — library appends its canvas here */}
+            <div
+              ref={setDanmakuContainer}
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2147483647,
+                pointerEvents: "none",
+              }}
+            />
             {/* Danmaku toggle button */}
             {danmakuItems.length > 0 && (
               <button
                 style={{ position: "absolute", top: 8, right: 8, zIndex: 2147483647 }}
-                className="px-2 py-1 rounded text-xs bg-black/50 text-white hover:bg-black/70 transition-colors"
+                className="px-2 py-1 rounded text-xs bg-black/50 text-white hover:bg-black/70 transition-colors pointer-events-auto"
                 onClick={() => setDanmakuEnabled((v) => !v)}
               >
                 {danmakuEnabled ? "弹幕 ON" : "弹幕 OFF"}
               </button>
             )}
+            {/* Danmaku logic (no visual output, manages library instance) */}
+            <DanmakuLayer
+              container={danmakuContainer}
+              media={mediaEl}
+              items={danmakuItems}
+              enabled={danmakuEnabled && danmakuItems.length > 0}
+            />
           </div>
 
           {/* Bottom fixed: Heatmap + Timeline */}

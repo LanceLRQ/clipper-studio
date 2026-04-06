@@ -12,6 +12,8 @@ import "@vidstack/react/player/styles/default/layouts/video.css";
 interface VideoPlayerProps {
   src: string;
   title?: string;
+  /** Callback when the underlying <video> element is mounted */
+  onVideoRef?: (el: HTMLVideoElement | null) => void;
 }
 
 function getExtension(filePath: string): string {
@@ -61,9 +63,16 @@ function MpegtsPlayer({
   src,
   title,
   mediaUrl,
+  onVideoRef,
 }: VideoPlayerProps & { mediaUrl: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<mpegts.Player | null>(null);
+
+  // Notify parent of video element mount/unmount
+  useEffect(() => {
+    onVideoRef?.(videoRef.current ?? null);
+    return () => onVideoRef?.(null);
+  }, [onVideoRef]);
 
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -124,26 +133,38 @@ function VidstackPlayer({
   title,
   mediaUrl,
   ext,
+  onVideoRef,
 }: {
   title?: string;
   mediaUrl: string;
   ext: string;
+  onVideoRef?: (el: HTMLVideoElement | null) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const mimeType = getMimeType(ext);
   const mediaSrc = useMemo(
     () => ({ src: mediaUrl, type: mimeType }),
     [mediaUrl, mimeType]
   );
 
+  // Find and forward the underlying <video> element
+  useEffect(() => {
+    const el = containerRef.current?.querySelector("video") ?? null;
+    onVideoRef?.(el);
+    return () => onVideoRef?.(null);
+  }, [onVideoRef]);
+
   return (
-    <MediaPlayer
-      title={title}
-      src={mediaSrc as any}
-      className="w-full aspect-video bg-black rounded-lg overflow-hidden"
-    >
-      <MediaProvider />
-      <DefaultVideoLayout icons={defaultLayoutIcons} />
-    </MediaPlayer>
+    <div ref={containerRef}>
+      <MediaPlayer
+        title={title}
+        src={mediaSrc as any}
+        className="w-full aspect-video bg-black rounded-lg overflow-hidden"
+      >
+        <MediaProvider />
+        <DefaultVideoLayout icons={defaultLayoutIcons} />
+      </MediaPlayer>
+    </div>
   );
 }
 
@@ -153,7 +174,7 @@ function VidstackPlayer({
  * - FLV/TS → mpegts.js demuxer
  * - MP4/WebM/MKV → vidstack
  */
-export function VideoPlayer({ src, title }: VideoPlayerProps) {
+export function VideoPlayer({ src, title, onVideoRef }: VideoPlayerProps) {
   const port = useMediaServerPort();
   const ext = getExtension(src);
 
@@ -168,8 +189,22 @@ export function VideoPlayer({ src, title }: VideoPlayerProps) {
   const mediaUrl = buildMediaUrl(port, src);
 
   if (needsMpegts(ext)) {
-    return <MpegtsPlayer src={src} title={title} mediaUrl={mediaUrl} />;
+    return (
+      <MpegtsPlayer
+        src={src}
+        title={title}
+        mediaUrl={mediaUrl}
+        onVideoRef={onVideoRef}
+      />
+    );
   }
 
-  return <VidstackPlayer title={title} mediaUrl={mediaUrl} ext={ext} />;
+  return (
+    <VidstackPlayer
+      title={title}
+      mediaUrl={mediaUrl}
+      ext={ext}
+      onVideoRef={onVideoRef}
+    />
+  );
 }
