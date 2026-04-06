@@ -5,9 +5,10 @@ pub mod db;
 pub mod shell;
 pub mod utils;
 
+pub mod plugin;
+
 // Phase 2+
 // pub mod asr;
-// pub mod plugin;
 
 // Phase 5+
 // pub mod llm;
@@ -24,6 +25,7 @@ use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
 use crate::core::watcher::WorkspaceWatcher;
+use crate::plugin::manager::PluginManager;
 use crate::db::Database;
 use crate::utils::ffmpeg;
 
@@ -37,6 +39,7 @@ pub struct AppState {
     pub media_server_port: u16,
     pub task_queue: Arc<TaskQueue>,
     pub watcher: Arc<WorkspaceWatcher>,
+    pub plugin_manager: Arc<PluginManager>,
 }
 
 /// Build and configure the Tauri application
@@ -122,6 +125,11 @@ pub fn run() {
             // Initialize task queue (max 2 concurrent tasks)
             let task_queue = Arc::new(TaskQueue::new(app.handle().clone(), 2));
 
+            // Initialize plugin manager
+            let plugin_dir = data_dir.join("plugins");
+            let _ = std::fs::create_dir_all(&plugin_dir);
+            let plugin_manager = Arc::new(PluginManager::new(plugin_dir));
+
             // Initialize workspace file watcher
             let watcher = Arc::new(WorkspaceWatcher::new(app.handle().clone()));
 
@@ -138,6 +146,7 @@ pub fn run() {
                 media_server_port,
                 task_queue,
                 watcher: watcher.clone(),
+                plugin_manager: plugin_manager.clone(),
             });
 
             // Start watching existing workspaces with auto_scan enabled
@@ -192,6 +201,12 @@ pub fn run() {
             commands::workspace::set_active_workspace,
             commands::workspace::scan_workspace,
             commands::workspace::detect_workspace_adapter,
+            commands::plugin::scan_plugins,
+            commands::plugin::list_plugins,
+            commands::plugin::load_plugin,
+            commands::plugin::unload_plugin,
+            commands::plugin::start_plugin_service,
+            commands::plugin::stop_plugin_service,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");

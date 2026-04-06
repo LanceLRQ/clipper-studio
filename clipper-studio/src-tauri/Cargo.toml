@@ -71,6 +71,9 @@ regex = "1"
 # Hex encoding (for BLOB data)
 hex = "0.4"
 
+# Async trait support (for plugin transport)
+async-trait = "0.1"
+
 # File system monitoring
 notify = "7"
 notify-debouncer-full = "0.4"

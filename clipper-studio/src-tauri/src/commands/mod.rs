@@ -4,8 +4,8 @@ pub mod video;
 pub mod workspace;
 // Phase 1 后续
 // pub mod task;
+pub mod plugin;
 // Phase 2+
 // pub mod asr;
 // pub mod danmaku;
-// pub mod plugin;
 // pub mod settings;

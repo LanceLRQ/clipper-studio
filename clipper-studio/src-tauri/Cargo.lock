@@ -634,6 +634,7 @@ name = "clipper-studio"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "blake3",
  "hex",

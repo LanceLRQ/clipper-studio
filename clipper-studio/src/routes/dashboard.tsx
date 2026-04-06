@@ -18,6 +18,7 @@ function DashboardLayout() {
     { to: "/dashboard/videos" as const, label: "视频列表" },
     { to: "/dashboard/tasks" as const, label: "任务中心" },
     { to: "/dashboard/workspaces" as const, label: "工作区" },
+    { to: "/dashboard/plugins" as const, label: "插件" },
     { to: "/dashboard/settings" as const, label: "设置" },
   ];
 
