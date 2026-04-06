@@ -16,6 +16,7 @@ import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardWorkspacesRouteImport } from './routes/dashboard/workspaces'
 import { Route as DashboardTasksRouteImport } from './routes/dashboard/tasks'
 import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settings'
+import { Route as DashboardPluginsRouteImport } from './routes/dashboard/plugins'
 import { Route as DashboardVideosIndexRouteImport } from './routes/dashboard/videos/index'
 import { Route as DashboardVideosVideoIdRouteImport } from './routes/dashboard/videos/$videoId'
 
@@ -54,6 +55,11 @@ const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardPluginsRoute = DashboardPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
+  getParentRoute: () => DashboardRoute,
+} as any)
 const DashboardVideosIndexRoute = DashboardVideosIndexRouteImport.update({
   id: '/videos/',
   path: '/videos/',
@@ -69,6 +75,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/welcome': typeof WelcomeRoute
+  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
@@ -79,6 +86,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/welcome': typeof WelcomeRoute
+  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
@@ -91,6 +99,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/welcome': typeof WelcomeRoute
+  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
@@ -104,6 +113,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/welcome'
+    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/welcome'
+    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/welcome'
+    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
@@ -190,6 +202,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardSettingsRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/plugins': {
+      id: '/dashboard/plugins'
+      path: '/plugins'
+      fullPath: '/dashboard/plugins'
+      preLoaderRoute: typeof DashboardPluginsRouteImport
+      parentRoute: typeof DashboardRoute
+    }
     '/dashboard/videos/': {
       id: '/dashboard/videos/'
       path: '/videos'
@@ -208,6 +227,7 @@ declare module '@tanstack/react-router' {
 }
 
 interface DashboardRouteChildren {
+  DashboardPluginsRoute: typeof DashboardPluginsRoute
   DashboardSettingsRoute: typeof DashboardSettingsRoute
   DashboardTasksRoute: typeof DashboardTasksRoute
   DashboardWorkspacesRoute: typeof DashboardWorkspacesRoute
@@ -217,6 +237,7 @@ interface DashboardRouteChildren {
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
+  DashboardPluginsRoute: DashboardPluginsRoute,
   DashboardSettingsRoute: DashboardSettingsRoute,
   DashboardTasksRoute: DashboardTasksRoute,
   DashboardWorkspacesRoute: DashboardWorkspacesRoute,
