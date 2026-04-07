@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import type {
   VideoInfo,
@@ -150,7 +150,7 @@ function VideosPage() {
       alert("请至少选择 2 个视频");
       return;
     }
-    if (!confirm(`将合并 ${ids.length} 个视频（${mergeMode === "virtual" ? "快速合并" : "重编码合并"}），确认？`))
+    if (!(await ask(`将合并 ${ids.length} 个视频（${mergeMode === "virtual" ? "快速合并" : "重编码合并"}），确认？`, { title: "合并视频" })))
       return;
 
     setMerging(true);
@@ -212,9 +212,10 @@ function VideosPage() {
   const handleDelete = async (video: VideoInfo, e: React.MouseEvent) => {
     e.stopPropagation();
     if (
-      !confirm(
-        `确定要删除「${video.file_name}」吗？\n\n注意：仅删除记录，不会删除磁盘文件。`
-      )
+      !(await ask(
+        `确定要删除「${video.file_name}」吗？\n\n注意：仅删除记录，不会删除磁盘文件。`,
+        { title: "删除视频", kind: "warning" },
+      ))
     )
       return;
     try {

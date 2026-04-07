@@ -22,6 +22,12 @@ pub struct CreateClipRequest {
     /// Burn subtitle overlay into the output video
     #[serde(default)]
     pub include_subtitle: bool,
+    /// Batch ID for grouping multiple clips (auto-generated for batch operations)
+    #[serde(default)]
+    pub batch_id: Option<String>,
+    /// Batch display title (auto-generated for batch operations)
+    #[serde(default)]
+    pub batch_title: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +42,8 @@ pub struct ClipTaskInfo {
     pub error_message: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
+    pub batch_id: Option<String>,
+    pub batch_title: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -122,16 +130,24 @@ pub async fn create_clip(
 
     // Insert clip_task into database
     let preset_id_sql = req.preset_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
+    let batch_id_sql = req.batch_id.as_ref()
+        .map(|s| format!("'{}'", s.replace('\'', "''")))
+        .unwrap_or("NULL".to_string());
+    let batch_title_sql = req.batch_title.as_ref()
+        .map(|s| format!("'{}'", s.replace('\'', "''")))
+        .unwrap_or("NULL".to_string());
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
-            "INSERT INTO clip_tasks (video_id, start_time_ms, end_time_ms, title, preset_id, status) \
-             VALUES ({}, {}, {}, '{}', {}, 'pending')",
+            "INSERT INTO clip_tasks (video_id, start_time_ms, end_time_ms, title, preset_id, status, batch_id, batch_title) \
+             VALUES ({}, {}, {}, '{}', {}, 'pending', {}, {})",
             req.video_id,
             req.start_ms,
             req.end_ms,
             clip_title.replace('\'', "''"),
             preset_id_sql,
+            batch_id_sql,
+            batch_title_sql,
         ),
     )
     .await
@@ -277,6 +293,8 @@ pub async fn create_clip(
         error_message: None,
         created_at: chrono_now(),
         completed_at: None,
+        batch_id: req.batch_id.clone(),
+        batch_title: req.batch_title.clone(),
     })
 }
 
@@ -330,6 +348,8 @@ pub async fn list_clip_tasks(
             error_message: row.try_get("", "error_message").ok(),
             created_at: row.try_get("", "created_at").unwrap_or_default(),
             completed_at: row.try_get("", "completed_at").ok(),
+            batch_id: row.try_get("", "batch_id").ok(),
+            batch_title: row.try_get("", "batch_title").ok(),
         })
         .collect();
 
@@ -542,6 +562,14 @@ pub async fn create_batch_clips(
     app_handle: tauri::AppHandle,
     req: CreateBatchClipsRequest,
 ) -> Result<Vec<ClipTaskInfo>, String> {
+    // Generate batch ID and title
+    let batch_id = format!("batch-{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis());
+
+    let batch_title = build_batch_title(state.db.conn(), req.video_id).await;
+
     let mut results = Vec::new();
 
     for item in &req.clips {
@@ -577,6 +605,8 @@ pub async fn create_batch_clips(
             output_dir: None,
             include_danmaku: item.include_danmaku,
             include_subtitle: item.include_subtitle,
+            batch_id: Some(batch_id.clone()),
+            batch_title: Some(batch_title.clone()),
         };
 
         match create_clip(state.clone(), app_handle.clone(), clip_req).await {
@@ -792,6 +822,59 @@ pub async fn auto_segment(
     );
 
     Ok(segments)
+}
+
+/// Build batch title: {主播}-{直播标题}-切片于{当前时间}
+async fn build_batch_title(conn: &sea_orm::DatabaseConnection, video_id: i64) -> String {
+    let row = sea_orm::ConnectionTrait::query_one(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT v.stream_title, st.name as streamer_name \
+                 FROM videos v LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 WHERE v.id = {}",
+                video_id,
+            ),
+        ),
+    )
+    .await
+    .ok()
+    .flatten();
+
+    let streamer_name: Option<String> = row.as_ref().and_then(|r| r.try_get("", "streamer_name").ok());
+    let stream_title: Option<String> = row.as_ref().and_then(|r| r.try_get("", "stream_title").ok());
+
+    // Format current time as "MM-dd HH:mm"
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Simple UTC-based time formatting (good enough for display)
+    let secs_in_day = now_secs % 86400;
+    let h = secs_in_day / 3600;
+    let m = (secs_in_day % 3600) / 60;
+    let time_str = format!("{:02}:{:02}", h, m);
+
+    let mut parts = Vec::new();
+    if let Some(name) = streamer_name {
+        if !name.is_empty() {
+            parts.push(name);
+        }
+    }
+    if let Some(title) = stream_title {
+        if !title.is_empty() {
+            let truncated = if title.chars().count() > 15 {
+                format!("{}...", title.chars().take(15).collect::<String>())
+            } else {
+                title
+            };
+            parts.push(truncated);
+        }
+    }
+    parts.push(format!("切片于{}", time_str));
+
+    parts.join("-")
 }
 
 fn chrono_now() -> String {

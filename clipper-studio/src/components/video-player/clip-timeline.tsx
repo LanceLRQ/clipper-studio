@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import type { ClipRegion, ClipOptions, BurnAvailability } from "@/types/multi-clip";
 import { CLIP_COLORS, MAX_CLIPS } from "@/lib/clip-colors";
 import { autoSegment } from "@/services/clip";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 function formatTime(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -202,9 +203,9 @@ export function ClipTimeline({
     onClipsChange?.(clips.map((c) => (c.id === selectedClipId ? { ...c, end: newEnd } : c)));
   }, [selectedClipId, clips, currentTime, onClipsChange, showToast]);
 
-  const handleDeleteClip = useCallback(() => {
+  const handleDeleteClip = useCallback(async () => {
     if (!selectedClipId) return;
-    if (!confirm("确定删除该选区？")) return;
+    if (!(await ask("确定删除该选区？", { title: "删除选区", kind: "warning" }))) return;
     onClipsChange?.(clips.filter((c) => c.id !== selectedClipId));
     onClipSelect?.(null);
   }, [clips, selectedClipId, onClipsChange, onClipSelect]);
@@ -213,7 +214,7 @@ export function ClipTimeline({
 
   const handleAutoSegment = useCallback(async () => {
     if (!videoId) return;
-    if (clips.length > 0 && !confirm("自动分段将替换现有选区，确认？")) return;
+    if (clips.length > 0 && !(await ask("自动分段将替换现有选区，确认？", { title: "自动分段", kind: "warning" }))) return;
 
     setAutoSegLoading(true);
     try {

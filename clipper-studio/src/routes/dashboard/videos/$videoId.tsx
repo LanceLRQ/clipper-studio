@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { VideoPlayer } from "@/components/video-player/player";
@@ -425,15 +426,30 @@ function VideoDetailPage() {
                 )}
               </div>
 
-              {/* Fixed bottom: create task button */}
+              {/* Fixed bottom: clear + create task button */}
               {validClips.length > 0 && (
-                <div className="shrink-0 pt-2 border-t mt-2">
-                  <ClipActions
-                    videoId={video.id}
-                    clips={clips}
-                    presetId={selectedPresetId}
-                    clipOptions={clipOptions}
-                  />
+                <div className="shrink-0 pt-2 border-t mt-2 flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-600 text-xs px-2"
+                    onClick={async () => {
+                      if (await ask(`确定清空全部 ${clips.length} 个选区？`, { title: "清空选区", kind: "warning" })) {
+                        setClips([]);
+                        setSelectedClipId(null);
+                      }
+                    }}
+                  >
+                    清空
+                  </Button>
+                  <div className="flex-1">
+                    <ClipActions
+                      videoId={video.id}
+                      clips={clips}
+                      presetId={selectedPresetId}
+                      clipOptions={clipOptions}
+                    />
+                  </div>
                 </div>
               )}
             </TabsContent>
@@ -521,7 +537,7 @@ function VideoDetailPage() {
                     className="text-xs"
                     onClick={async () => {
                       if (!video || !selectedPresetId) return;
-                      if (!confirm("开始转码？")) return;
+                      if (!(await ask("开始转码？", { title: "转码确认" }))) return;
                       try {
                         await transcodeVideo({
                           video_id: video.id,

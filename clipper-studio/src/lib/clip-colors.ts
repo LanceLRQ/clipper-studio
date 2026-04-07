@@ -10,7 +10,7 @@ export const CLIP_COLORS = [
 ];
 
 /** Maximum number of clips allowed */
-export const MAX_CLIPS = 10;
+export const MAX_CLIPS = 100;
 
 /** Get color for a clip by index */
 export function getClipColor(index: number): string {

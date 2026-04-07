@@ -18,6 +18,8 @@ export interface ClipTaskInfo {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  batch_id: string | null;
+  batch_title: string | null;
 }
 
 export interface EncodingPreset {

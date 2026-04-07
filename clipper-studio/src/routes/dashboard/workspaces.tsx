@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import type { WorkspaceInfo } from "@/types/workspace";
 import { listWorkspaces, deleteWorkspace, scanWorkspace } from "@/services/workspace";
@@ -25,7 +26,7 @@ function WorkspacesPage() {
   }, []);
 
   const handleDelete = async (ws: WorkspaceInfo) => {
-    if (!confirm(`确定要删除工作区「${ws.name}」吗？\n\n注意：仅删除工作区记录，不会删除磁盘上的文件。`)) {
+    if (!(await ask(`确定要删除工作区「${ws.name}」吗？\n\n注意：仅删除工作区记录，不会删除磁盘上的文件。`, { title: "删除工作区", kind: "warning" }))) {
       return;
     }
     try {

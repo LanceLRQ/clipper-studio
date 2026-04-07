@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import type { ClipRegion, ClipOptions } from "@/types/multi-clip";
 import { createBatchClips } from "@/services/clip";
@@ -24,7 +25,7 @@ export function ClipActions({
 
   const handleSubmit = async () => {
     if (validClips.length === 0) return;
-    if (!confirm(`将创建 ${validClips.length} 个切片任务，确认？`)) return;
+    if (!(await ask(`将创建 ${validClips.length} 个切片任务，确认？`, { title: "创建切片" }))) return;
 
     setLoading(true);
     try {
