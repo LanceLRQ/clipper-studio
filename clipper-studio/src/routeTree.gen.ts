@@ -16,9 +16,10 @@ import { Route as DashboardIndexRouteImport } from './routes/dashboard/index'
 import { Route as DashboardWorkspacesRouteImport } from './routes/dashboard/workspaces'
 import { Route as DashboardTasksRouteImport } from './routes/dashboard/tasks'
 import { Route as DashboardSettingsRouteImport } from './routes/dashboard/settings'
-import { Route as DashboardPluginsRouteImport } from './routes/dashboard/plugins'
 import { Route as DashboardVideosIndexRouteImport } from './routes/dashboard/videos/index'
+import { Route as DashboardPluginsIndexRouteImport } from './routes/dashboard/plugins/index'
 import { Route as DashboardVideosVideoIdRouteImport } from './routes/dashboard/videos/$videoId'
+import { Route as DashboardPluginsPluginIdRouteImport } from './routes/dashboard/plugins/$pluginId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -55,14 +56,14 @@ const DashboardSettingsRoute = DashboardSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => DashboardRoute,
 } as any)
-const DashboardPluginsRoute = DashboardPluginsRouteImport.update({
-  id: '/plugins',
-  path: '/plugins',
-  getParentRoute: () => DashboardRoute,
-} as any)
 const DashboardVideosIndexRoute = DashboardVideosIndexRouteImport.update({
   id: '/videos/',
   path: '/videos/',
+  getParentRoute: () => DashboardRoute,
+} as any)
+const DashboardPluginsIndexRoute = DashboardPluginsIndexRouteImport.update({
+  id: '/plugins/',
+  path: '/plugins/',
   getParentRoute: () => DashboardRoute,
 } as any)
 const DashboardVideosVideoIdRoute = DashboardVideosVideoIdRouteImport.update({
@@ -70,28 +71,36 @@ const DashboardVideosVideoIdRoute = DashboardVideosVideoIdRouteImport.update({
   path: '/videos/$videoId',
   getParentRoute: () => DashboardRoute,
 } as any)
+const DashboardPluginsPluginIdRoute =
+  DashboardPluginsPluginIdRouteImport.update({
+    id: '/plugins/$pluginId',
+    path: '/plugins/$pluginId',
+    getParentRoute: () => DashboardRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/welcome': typeof WelcomeRoute
-  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard/': typeof DashboardIndexRoute
+  '/dashboard/plugins/$pluginId': typeof DashboardPluginsPluginIdRoute
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/plugins/': typeof DashboardPluginsIndexRoute
   '/dashboard/videos/': typeof DashboardVideosIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/welcome': typeof WelcomeRoute
-  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard': typeof DashboardIndexRoute
+  '/dashboard/plugins/$pluginId': typeof DashboardPluginsPluginIdRoute
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/plugins': typeof DashboardPluginsIndexRoute
   '/dashboard/videos': typeof DashboardVideosIndexRoute
 }
 export interface FileRoutesById {
@@ -99,12 +108,13 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRouteWithChildren
   '/welcome': typeof WelcomeRoute
-  '/dashboard/plugins': typeof DashboardPluginsRoute
   '/dashboard/settings': typeof DashboardSettingsRoute
   '/dashboard/tasks': typeof DashboardTasksRoute
   '/dashboard/workspaces': typeof DashboardWorkspacesRoute
   '/dashboard/': typeof DashboardIndexRoute
+  '/dashboard/plugins/$pluginId': typeof DashboardPluginsPluginIdRoute
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
+  '/dashboard/plugins/': typeof DashboardPluginsIndexRoute
   '/dashboard/videos/': typeof DashboardVideosIndexRoute
 }
 export interface FileRouteTypes {
@@ -113,35 +123,38 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/welcome'
-    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
     | '/dashboard/'
+    | '/dashboard/plugins/$pluginId'
     | '/dashboard/videos/$videoId'
+    | '/dashboard/plugins/'
     | '/dashboard/videos/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/welcome'
-    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
     | '/dashboard'
+    | '/dashboard/plugins/$pluginId'
     | '/dashboard/videos/$videoId'
+    | '/dashboard/plugins'
     | '/dashboard/videos'
   id:
     | '__root__'
     | '/'
     | '/dashboard'
     | '/welcome'
-    | '/dashboard/plugins'
     | '/dashboard/settings'
     | '/dashboard/tasks'
     | '/dashboard/workspaces'
     | '/dashboard/'
+    | '/dashboard/plugins/$pluginId'
     | '/dashboard/videos/$videoId'
+    | '/dashboard/plugins/'
     | '/dashboard/videos/'
   fileRoutesById: FileRoutesById
 }
@@ -202,18 +215,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardSettingsRouteImport
       parentRoute: typeof DashboardRoute
     }
-    '/dashboard/plugins': {
-      id: '/dashboard/plugins'
-      path: '/plugins'
-      fullPath: '/dashboard/plugins'
-      preLoaderRoute: typeof DashboardPluginsRouteImport
-      parentRoute: typeof DashboardRoute
-    }
     '/dashboard/videos/': {
       id: '/dashboard/videos/'
       path: '/videos'
       fullPath: '/dashboard/videos/'
       preLoaderRoute: typeof DashboardVideosIndexRouteImport
+      parentRoute: typeof DashboardRoute
+    }
+    '/dashboard/plugins/': {
+      id: '/dashboard/plugins/'
+      path: '/plugins'
+      fullPath: '/dashboard/plugins/'
+      preLoaderRoute: typeof DashboardPluginsIndexRouteImport
       parentRoute: typeof DashboardRoute
     }
     '/dashboard/videos/$videoId': {
@@ -223,26 +236,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardVideosVideoIdRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/plugins/$pluginId': {
+      id: '/dashboard/plugins/$pluginId'
+      path: '/plugins/$pluginId'
+      fullPath: '/dashboard/plugins/$pluginId'
+      preLoaderRoute: typeof DashboardPluginsPluginIdRouteImport
+      parentRoute: typeof DashboardRoute
+    }
   }
 }
 
 interface DashboardRouteChildren {
-  DashboardPluginsRoute: typeof DashboardPluginsRoute
   DashboardSettingsRoute: typeof DashboardSettingsRoute
   DashboardTasksRoute: typeof DashboardTasksRoute
   DashboardWorkspacesRoute: typeof DashboardWorkspacesRoute
   DashboardIndexRoute: typeof DashboardIndexRoute
+  DashboardPluginsPluginIdRoute: typeof DashboardPluginsPluginIdRoute
   DashboardVideosVideoIdRoute: typeof DashboardVideosVideoIdRoute
+  DashboardPluginsIndexRoute: typeof DashboardPluginsIndexRoute
   DashboardVideosIndexRoute: typeof DashboardVideosIndexRoute
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
-  DashboardPluginsRoute: DashboardPluginsRoute,
   DashboardSettingsRoute: DashboardSettingsRoute,
   DashboardTasksRoute: DashboardTasksRoute,
   DashboardWorkspacesRoute: DashboardWorkspacesRoute,
   DashboardIndexRoute: DashboardIndexRoute,
+  DashboardPluginsPluginIdRoute: DashboardPluginsPluginIdRoute,
   DashboardVideosVideoIdRoute: DashboardVideosVideoIdRoute,
+  DashboardPluginsIndexRoute: DashboardPluginsIndexRoute,
   DashboardVideosIndexRoute: DashboardVideosIndexRoute,
 }
 

@@ -156,7 +156,7 @@ impl BilibiliRecorderPlugin {
     pub fn new() -> Self {
         let manifest = PluginManifest {
             id: "builtin.recorder.bilibili".to_string(),
-            name: "BilibiliRecorder".to_string(),
+            name: "mikufans录播姬".to_string(),
             plugin_type: PluginType::Recorder,
             version: "1.0.0".to_string(),
             api_version: 1,
@@ -171,22 +171,30 @@ impl BilibiliRecorderPlugin {
                 ("api_url".to_string(), serde_json::json!({
                     "type": "string",
                     "default": "http://127.0.0.1:2007",
-                    "description": "录播姬 HTTP API 地址（只填根地址，不要带 /api 路径）"
+                    "label": "API 地址",
+                    "description": "录播姬 HTTP API 地址（只填根地址，不要带 /api 路径）",
+                    "order": 1
                 })),
                 ("api_key".to_string(), serde_json::json!({
                     "type": "string",
                     "default": "",
-                    "description": "录播姬 API 密钥（可选）"
+                    "label": "API 密钥",
+                    "description": "录播姬 API 密钥（可选，留空不使用）",
+                    "order": 2
                 })),
                 ("basic_user".to_string(), serde_json::json!({
                     "type": "string",
                     "default": "",
-                    "description": "HTTP Basic 认证用户名（留空关闭）"
+                    "label": "认证用户名",
+                    "description": "HTTP Basic 认证用户名（留空关闭）",
+                    "order": 3
                 })),
                 ("basic_pass".to_string(), serde_json::json!({
                     "type": "string",
                     "default": "",
-                    "description": "HTTP Basic 认证密码"
+                    "label": "认证密码",
+                    "description": "HTTP Basic 认证密码",
+                    "order": 4
                 })),
             ]
             .into_iter()

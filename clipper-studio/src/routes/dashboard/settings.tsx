@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSettings, setSetting } from "@/services/settings";
 import { checkASRHealth, type ASRHealthInfo } from "@/services/asr";
 import { getAppInfo } from "@/services/workspace";
@@ -16,17 +17,249 @@ import {
 
 type ASRMode = "local" | "remote" | "disabled";
 
-// ===== Plugin Config Section =====
-interface PluginConfigState {
-  values: Record<string, string>;
-  loaded: boolean;
+// ===== System Settings Tab =====
+function SystemSettingsTab() {
+  // ASR settings
+  const [asrMode, setAsrMode] = useState<ASRMode>("local");
+  const [asrPort, setAsrPort] = useState("8765");
+  const [asrUrl, setAsrUrl] = useState("");
+  const [asrApiKey, setAsrApiKey] = useState("");
+  const [asrHealth, setAsrHealth] = useState<ASRHealthInfo | null>(null);
+  const [asrChecking, setAsrChecking] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Plugin directory
+  const [pluginDir, setPluginDir] = useState("");
+  const [pluginDirLoaded, setPluginDirLoaded] = useState(false);
+
+  // App info
+  const [appInfo, setAppInfo] = useState<{
+    version: string;
+    data_dir: string;
+    config_path: string;
+    ffmpeg_available: boolean;
+    ffmpeg_version: string | null;
+    ffprobe_available: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    getSettings([
+      "asr_mode",
+      "asr_port",
+      "asr_url",
+      "asr_api_key",
+      "plugin_dir",
+    ])
+      .then((settings) => {
+        if (settings.asr_mode) setAsrMode(settings.asr_mode as ASRMode);
+        if (settings.asr_port) setAsrPort(settings.asr_port);
+        if (settings.asr_url) setAsrUrl(settings.asr_url);
+        if (settings.asr_api_key) setAsrApiKey(settings.asr_api_key);
+        if (settings.plugin_dir) {
+          setPluginDir(settings.plugin_dir);
+        }
+        setPluginDirLoaded(true);
+      })
+      .catch(console.error);
+
+    getAppInfo()
+      .then(setAppInfo)
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (appInfo && pluginDirLoaded && !pluginDir) {
+      setPluginDir(`${appInfo.data_dir}/plugins`);
+    }
+  }, [appInfo, pluginDirLoaded, pluginDir]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await setSetting("asr_mode", asrMode);
+      await setSetting("asr_port", asrPort);
+      if (asrUrl) await setSetting("asr_url", asrUrl);
+      if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
+      if (pluginDir) await setSetting("plugin_dir", pluginDir);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      alert("保存失败: " + String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCheckHealth = async () => {
+    setAsrChecking(true);
+    setAsrHealth(null);
+    try {
+      const health = await checkASRHealth();
+      setAsrHealth(health);
+    } catch {
+      setAsrHealth({ status: "error", device: null, model_size: null });
+    } finally {
+      setAsrChecking(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* ASR Settings */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">ASR 语音识别</h3>
+
+        <div className="space-y-1">
+          <Label className="text-sm">识别模式</Label>
+          <div className="flex rounded-md border w-fit">
+            {(
+              [
+                { value: "local", label: "本地引擎" },
+                { value: "remote", label: "远程服务" },
+                { value: "disabled", label: "禁用" },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.value}
+                className={`px-4 py-1.5 text-sm ${asrMode === opt.value ? "bg-accent font-medium" : ""}`}
+                onClick={() => setAsrMode(opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {asrMode === "local" && (
+          <div className="space-y-3 pl-1">
+            <div className="space-y-1">
+              <Label className="text-xs">本地服务端口</Label>
+              <Input
+                value={asrPort}
+                onChange={(e) => setAsrPort(e.target.value)}
+                placeholder="8765"
+                className="w-32 text-sm h-8"
+              />
+              <p className="text-xs text-muted-foreground">
+                qwen3-asr-service 的 HTTP 端口，默认 8765
+              </p>
+            </div>
+          </div>
+        )}
+
+        {asrMode === "remote" && (
+          <div className="space-y-3 pl-1">
+            <div className="space-y-1">
+              <Label className="text-xs">服务地址</Label>
+              <Input
+                value={asrUrl}
+                onChange={(e) => setAsrUrl(e.target.value)}
+                placeholder="http://192.168.1.100:8765"
+                className="text-sm h-8"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">API Key（可选）</Label>
+              <Input
+                value={asrApiKey}
+                onChange={(e) => setAsrApiKey(e.target.value)}
+                placeholder="留空则不使用认证"
+                type="password"
+                className="text-sm h-8"
+              />
+            </div>
+          </div>
+        )}
+
+        {asrMode === "disabled" && (
+          <p className="text-sm text-muted-foreground pl-1">
+            ASR 功能已禁用，视频详情页中将不会显示语音识别按钮。
+          </p>
+        )}
+
+        <div className="flex items-center gap-3 pt-2">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
+          </Button>
+          {asrMode !== "disabled" && (
+            <Button
+              variant="outline"
+              onClick={handleCheckHealth}
+              disabled={asrChecking}
+            >
+              {asrChecking ? "检测中..." : "测试连接"}
+            </Button>
+          )}
+          {asrHealth && (
+            <span
+              className={`text-sm ${asrHealth.status === "ready" ? "text-green-600" : "text-red-500"}`}
+            >
+              {asrHealth.status === "ready"
+                ? `连接成功 (${asrHealth.device ?? "unknown"}${asrHealth.model_size ? ` / ${asrHealth.model_size}` : ""})`
+                : "连接失败"}
+            </span>
+          )}
+        </div>
+      </section>
+
+      {/* Plugin Directory */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">插件目录</h3>
+        <div className="space-y-1">
+          <Label className="text-xs">自定义插件目录（绝对路径）</Label>
+          <Input
+            value={pluginDir}
+            onChange={(e) => setPluginDir(e.target.value)}
+            placeholder="留空使用默认目录"
+            className="text-sm h-8 font-mono"
+          />
+          <p className="text-xs text-muted-foreground">
+            修改后需在「插件管理」页点击「扫描插件」生效。默认：
+            {appInfo ? `${appInfo.data_dir}/plugins` : "加载中..."}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 pt-2">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存"}
+          </Button>
+        </div>
+      </section>
+
+      {/* App Info */}
+      {appInfo && (
+        <section className="rounded-lg border p-5 space-y-3">
+          <h3 className="font-medium text-lg">应用信息</h3>
+          <div className="space-y-2 text-sm">
+            <InfoRow label="版本" value={`v${appInfo.version}`} />
+            <InfoRow label="数据目录" value={appInfo.data_dir} />
+            <InfoRow label="配置文件" value={appInfo.config_path} />
+            <InfoRow
+              label="FFmpeg"
+              value={
+                appInfo.ffmpeg_available
+                  ? appInfo.ffmpeg_version ?? "可用"
+                  : "不可用"
+              }
+            />
+            <InfoRow
+              label="FFprobe"
+              value={appInfo.ffprobe_available ? "可用" : "不可用"}
+            />
+          </div>
+        </section>
+      )}
+    </div>
+  );
 }
 
-function PluginConfigPanel({ plugin }: { plugin: PluginInfo }) {
-  const [configs, setConfigs] = useState<PluginConfigState>({
-    values: {},
-    loaded: false,
-  });
+// ===== Plugin Config Tab =====
+function PluginConfigTab({ plugin }: { plugin: PluginInfo }) {
+  const [configs, setConfigs] = useState<{
+    values: Record<string, string>;
+    loaded: boolean;
+  }>({ values: {}, loaded: false });
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -71,17 +304,16 @@ function PluginConfigPanel({ plugin }: { plugin: PluginInfo }) {
     }
   };
 
-  if (!plugin.has_config || !configs.loaded) return null;
+  if (!configs.loaded) {
+    return <div className="text-muted-foreground text-sm p-4">加载配置中...</div>;
+  }
 
   return (
-    <section className="rounded-lg border p-5 space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-medium text-lg">{plugin.name}</h3>
-          <p className="text-xs text-muted-foreground">
-            {plugin.description ?? `插件配置`}
-          </p>
-        </div>
+        <p className="text-sm text-muted-foreground">
+          {plugin.description ?? "插件配置"}
+        </p>
         <span
           className={`text-xs px-2 py-0.5 rounded ${
             plugin.status === "loaded" || plugin.status === "running"
@@ -100,7 +332,9 @@ function PluginConfigPanel({ plugin }: { plugin: PluginInfo }) {
       </div>
 
       <div className="space-y-3 text-sm">
-        {Object.entries(schema).map(([key, field]) => (
+        {Object.entries(schema)
+          .sort(([, a], [, b]) => (a.order ?? 0) - (b.order ?? 0))
+          .map(([key, field]) => (
           <ConfigField
             key={key}
             fieldKey={key}
@@ -116,10 +350,51 @@ function PluginConfigPanel({ plugin }: { plugin: PluginInfo }) {
           {saving ? "保存中..." : saved ? "已保存 ✓" : "保存配置"}
         </Button>
       </div>
-    </section>
+
+      {/* Plugin UI mount point (for plugins with custom frontend) */}
+      {plugin.frontend?.entry && plugin.dir && (
+        <PluginUIMount plugin={plugin} />
+      )}
+    </div>
   );
 }
 
+// ===== Plugin UI Dynamic Loading =====
+interface PluginModule {
+  registerSettings: (
+    container: HTMLElement,
+    ctx: { pluginId: string; pluginDir: string }
+  ) => void;
+}
+
+function PluginUIMount({ plugin }: { plugin: PluginInfo }) {
+  const containerRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node || !plugin.frontend?.entry || !plugin.dir) return;
+      const entryPath = `${plugin.dir}/${plugin.frontend.entry}`;
+      import(/* @vite-ignore */ entryPath)
+        .then((mod: PluginModule) => {
+          if (typeof mod.registerSettings === "function") {
+            mod.registerSettings(node, {
+              pluginId: plugin.id,
+              pluginDir: plugin.dir!,
+            });
+          }
+        })
+        .catch((e) => console.error(`Failed to load plugin UI for ${plugin.id}:`, e));
+    },
+    [plugin]
+  );
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <h4 className="text-sm font-medium mb-2">插件界面</h4>
+      <div ref={containerRef} className="plugin-ui-container min-h-[100px]" />
+    </div>
+  );
+}
+
+// ===== Config Field =====
 function ConfigField({
   fieldKey,
   field,
@@ -131,6 +406,8 @@ function ConfigField({
   value: string;
   onChange: (key: string, value: string) => void;
 }) {
+  const displayName = field.label || fieldKey;
+
   if (field.type === "boolean") {
     return (
       <div className="space-y-1">
@@ -143,22 +420,25 @@ function ConfigField({
             <option value="true">是</option>
             <option value="false">否</option>
           </select>
-          <Label className="text-sm cursor-pointer">{fieldKey}</Label>
+          <Label className="text-sm cursor-pointer">{displayName}</Label>
         </div>
         {field.description && (
-          <p className="text-xs text-muted-foreground pl-2">{field.description}</p>
+          <p className="text-xs text-muted-foreground pl-2">
+            {field.description}
+          </p>
         )}
       </div>
     );
   }
 
-  const isPassword = fieldKey.toLowerCase().includes("pass") ||
+  const isPassword =
+    fieldKey.toLowerCase().includes("pass") ||
     fieldKey.toLowerCase().includes("secret") ||
     fieldKey.toLowerCase().includes("key");
 
   return (
     <div className="space-y-1">
-      <Label className="text-xs">{fieldKey}</Label>
+      <Label className="text-xs">{displayName}</Label>
       <Input
         value={value}
         onChange={(e) => onChange(fieldKey, e.target.value)}
@@ -173,393 +453,6 @@ function ConfigField({
   );
 }
 
-// ===== Plugin UI Panel (Dynamic Loading) =====
-interface PluginModule {
-  registerSettings: (
-    container: HTMLElement,
-    ctx: { pluginId: string; pluginDir: string }
-  ) => void;
-}
-
-async function loadPluginUI(
-  plugin: PluginInfo
-): Promise<{ register: (container: HTMLElement) => void } | null> {
-  if (!plugin.frontend?.entry || !plugin.dir) return null;
-
-  const entryPath = `${plugin.dir}/${plugin.frontend.entry}`;
-
-  try {
-    const mod = (await import(
-      /* @vite-ignore */ entryPath
-    )) as PluginModule;
-
-    if (typeof mod.registerSettings !== "function") {
-      console.error(
-        `Plugin ${plugin.id} does not export registerSettings function`
-      );
-      return null;
-    }
-
-    return {
-      register: (container: HTMLElement) => {
-        mod.registerSettings(container, {
-          pluginId: plugin.id,
-          pluginDir: plugin.dir!,
-        });
-      },
-    };
-  } catch (e) {
-    console.error(`Failed to load plugin UI for ${plugin.id}:`, e);
-    return null;
-  }
-}
-
-function PluginUIPanel({ plugin }: { plugin: PluginInfo }) {
-  const containerRef = useCallback(
-    (node: HTMLDivElement | null) => {
-      if (node && plugin) {
-        // Load and mount plugin UI when container is available
-        loadPluginUI(plugin).then((loader) => {
-          if (loader) {
-            loader.register(node);
-          }
-        });
-      }
-    },
-    [plugin]
-  );
-
-  if (!plugin.frontend?.entry || !plugin.dir) return null;
-
-  return (
-    <section className="rounded-lg border p-5 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-medium text-lg">{plugin.name}</h3>
-          <p className="text-xs text-muted-foreground">
-            {plugin.description ?? "插件界面"}
-          </p>
-        </div>
-        <span
-          className={`text-xs px-2 py-0.5 rounded ${
-            plugin.status === "loaded" || plugin.status === "running"
-              ? "bg-green-100 text-green-700"
-              : "bg-gray-100 text-gray-500"
-          }`}
-        >
-          {plugin.status === "loaded"
-            ? "已加载"
-            : plugin.status === "running"
-              ? "运行中"
-              : plugin.status === "discovered"
-                ? "未加载"
-                : plugin.status}
-        </span>
-      </div>
-      <div ref={containerRef} className="plugin-ui-container min-h-[100px]" />
-    </section>
-  );
-}
-
-// ===== Main Settings Page =====
-function SettingsPage() {
-  // ASR settings
-  const [asrMode, setAsrMode] = useState<ASRMode>("local");
-  const [asrPort, setAsrPort] = useState("8765");
-  const [asrUrl, setAsrUrl] = useState("");
-  const [asrApiKey, setAsrApiKey] = useState("");
-  const [asrHealth, setAsrHealth] = useState<ASRHealthInfo | null>(null);
-  const [asrChecking, setAsrChecking] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  // Plugin directory
-  const [pluginDir, setPluginDir] = useState("");
-  const [pluginDirLoaded, setPluginDirLoaded] = useState(false);
-
-  // Plugin configs
-  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
-  const [pluginsLoading, setPluginsLoading] = useState(false);
-  // Plugin UIs (plugins with frontend.entry)
-  const [pluginUIs, setPluginUIs] = useState<PluginInfo[]>([]);
-
-  // App info
-  const [appInfo, setAppInfo] = useState<{
-    version: string;
-    data_dir: string;
-    config_path: string;
-    ffmpeg_available: boolean;
-    ffmpeg_version: string | null;
-    ffprobe_available: boolean;
-  } | null>(null);
-
-  useEffect(() => {
-    // Load settings
-    getSettings([
-      "asr_mode",
-      "asr_port",
-      "asr_url",
-      "asr_api_key",
-      "plugin_dir",
-    ])
-      .then((settings) => {
-        if (settings.asr_mode)
-          setAsrMode(settings.asr_mode as ASRMode);
-        if (settings.asr_port) setAsrPort(settings.asr_port);
-        if (settings.asr_url) setAsrUrl(settings.asr_url);
-        if (settings.asr_api_key) setAsrApiKey(settings.asr_api_key);
-        if (settings.plugin_dir) {
-          setPluginDir(settings.plugin_dir);
-        } else if (appInfo) {
-          // Default: data_dir/plugins
-          setPluginDir(`${appInfo.data_dir}/plugins`);
-        }
-        setPluginDirLoaded(true);
-      })
-      .catch(console.error);
-
-    // Load app info (used for default plugin_dir)
-    getAppInfo()
-      .then(setAppInfo)
-      .catch(console.error);
-
-    // Load plugins for config rendering
-    setPluginsLoading(true);
-    listPlugins()
-      .then((list) => {
-        // Only show plugins that have config and are loaded/running
-        setPlugins(list.filter((p) => p.has_config));
-        // Show plugins that have frontend UI
-        setPluginUIs(list.filter((p) => p.frontend?.entry && p.dir));
-      })
-      .catch(console.error)
-      .finally(() => setPluginsLoading(false));
-  }, []);
-
-  // Update plugin_dir default after appInfo loads
-  useEffect(() => {
-    if (appInfo && pluginDirLoaded && !pluginDir) {
-      setPluginDir(`${appInfo.data_dir}/plugins`);
-    }
-  }, [appInfo, pluginDirLoaded, pluginDir]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaved(false);
-    try {
-      await setSetting("asr_mode", asrMode);
-      await setSetting("asr_port", asrPort);
-      if (asrUrl) await setSetting("asr_url", asrUrl);
-      if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
-      if (pluginDir) await setSetting("plugin_dir", pluginDir);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      alert("保存失败: " + String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleCheckHealth = async () => {
-    setAsrChecking(true);
-    setAsrHealth(null);
-    try {
-      const health = await checkASRHealth();
-      setAsrHealth(health);
-    } catch (e) {
-      setAsrHealth({ status: "error", device: null, model_size: null });
-    } finally {
-      setAsrChecking(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-semibold">设置</h2>
-
-      {/* ===== ASR Settings ===== */}
-      <section className="rounded-lg border p-5 space-y-4">
-        <h3 className="font-medium text-lg">ASR 语音识别</h3>
-
-        {/* Mode selector */}
-        <div className="space-y-1">
-          <Label className="text-sm">识别模式</Label>
-          <div className="flex rounded-md border w-fit">
-            {(
-              [
-                { value: "local", label: "本地引擎" },
-                { value: "remote", label: "远程服务" },
-                { value: "disabled", label: "禁用" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={opt.value}
-                className={`px-4 py-1.5 text-sm ${asrMode === opt.value ? "bg-accent font-medium" : ""}`}
-                onClick={() => setAsrMode(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Local mode settings */}
-        {asrMode === "local" && (
-          <div className="space-y-3 pl-1">
-            <div className="space-y-1">
-              <Label className="text-xs">本地服务端口</Label>
-              <Input
-                value={asrPort}
-                onChange={(e) => setAsrPort(e.target.value)}
-                placeholder="8765"
-                className="w-32 text-sm h-8"
-              />
-              <p className="text-xs text-muted-foreground">
-                qwen3-asr-service 的 HTTP 端口，默认 8765
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Remote mode settings */}
-        {asrMode === "remote" && (
-          <div className="space-y-3 pl-1">
-            <div className="space-y-1">
-              <Label className="text-xs">服务地址</Label>
-              <Input
-                value={asrUrl}
-                onChange={(e) => setAsrUrl(e.target.value)}
-                placeholder="http://192.168.1.100:8765"
-                className="text-sm h-8"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">API Key（可选）</Label>
-              <Input
-                value={asrApiKey}
-                onChange={(e) => setAsrApiKey(e.target.value)}
-                placeholder="留空则不使用认证"
-                type="password"
-                className="text-sm h-8"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Disabled mode info */}
-        {asrMode === "disabled" && (
-          <p className="text-sm text-muted-foreground pl-1">
-            ASR 功能已禁用，视频详情页中将不会显示语音识别按钮。
-          </p>
-        )}
-
-        {/* Health check + Save */}
-        <div className="flex items-center gap-3 pt-2">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
-          </Button>
-          {asrMode !== "disabled" && (
-            <Button
-              variant="outline"
-              onClick={handleCheckHealth}
-              disabled={asrChecking}
-            >
-              {asrChecking ? "检测中..." : "测试连接"}
-            </Button>
-          )}
-
-          {/* Health status */}
-          {asrHealth && (
-            <span
-              className={`text-sm ${asrHealth.status === "ready" ? "text-green-600" : "text-red-500"}`}
-            >
-              {asrHealth.status === "ready"
-                ? `连接成功 (${asrHealth.device ?? "unknown"}${asrHealth.model_size ? ` / ${asrHealth.model_size}` : ""})`
-                : "连接失败"}
-            </span>
-          )}
-        </div>
-      </section>
-
-      {/* ===== Plugin Directory ===== */}
-      <section className="rounded-lg border p-5 space-y-4">
-        <h3 className="font-medium text-lg">插件目录</h3>
-        <div className="space-y-1">
-          <Label className="text-xs">自定义插件目录（绝对路径）</Label>
-          <Input
-            value={pluginDir}
-            onChange={(e) => setPluginDir(e.target.value)}
-            placeholder="留空使用默认目录"
-            className="text-sm h-8 font-mono"
-          />
-          <p className="text-xs text-muted-foreground">
-            修改后需在「插件管理」页点击「扫描插件」生效。默认：
-            {appInfo ? `${appInfo.data_dir}/plugins` : "加载中..."}
-          </p>
-        </div>
-        <div className="flex items-center gap-3 pt-2">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存"}
-          </Button>
-        </div>
-      </section>
-
-      {/* ===== Plugin Configs (dynamic) ===== */}
-      {pluginsLoading ? (
-        <div className="text-muted-foreground text-sm">加载插件配置...</div>
-      ) : plugins.length > 0 ? (
-        <section className="space-y-4">
-          <h3 className="font-medium text-lg">插件配置</h3>
-          <p className="text-xs text-muted-foreground">
-            以下插件提供了配置选项。需先在「插件管理」页加载插件后才能修改配置。
-          </p>
-          {plugins.map((plugin) => (
-            <PluginConfigPanel key={plugin.id} plugin={plugin} />
-          ))}
-        </section>
-      ) : null}
-
-      {/* ===== Plugin UIs (dynamic loading) ===== */}
-      {pluginUIs.length > 0 ? (
-        <section className="space-y-4">
-          <h3 className="font-medium text-lg">插件界面</h3>
-          <p className="text-xs text-muted-foreground">
-            以下插件提供了自定义界面。需先在「插件管理」页加载插件后才能使用。
-          </p>
-          {pluginUIs.map((plugin) => (
-            <PluginUIPanel key={plugin.id} plugin={plugin} />
-          ))}
-        </section>
-      ) : null}
-
-      {/* ===== App Info ===== */}
-      {appInfo && (
-        <section className="rounded-lg border p-5 space-y-3">
-          <h3 className="font-medium text-lg">应用信息</h3>
-          <div className="space-y-2 text-sm">
-            <InfoRow label="版本" value={`v${appInfo.version}`} />
-            <InfoRow label="数据目录" value={appInfo.data_dir} />
-            <InfoRow label="配置文件" value={appInfo.config_path} />
-            <InfoRow
-              label="FFmpeg"
-              value={
-                appInfo.ffmpeg_available
-                  ? appInfo.ffmpeg_version ?? "可用"
-                  : "不可用"
-              }
-            />
-            <InfoRow
-              label="FFprobe"
-              value={appInfo.ffprobe_available ? "可用" : "不可用"}
-            />
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
@@ -567,6 +460,53 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="text-right text-xs font-mono break-all min-w-0 shrink">
         {value}
       </span>
+    </div>
+  );
+}
+
+// ===== Main Settings Page =====
+function SettingsPage() {
+  const [configPlugins, setConfigPlugins] = useState<PluginInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    listPlugins()
+      .then((list) => {
+        setConfigPlugins(list.filter((p) => p.has_config));
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="space-y-4">
+      <h2 className="text-2xl font-semibold">设置</h2>
+
+      <Tabs defaultValue="system">
+        <TabsList>
+          <TabsTrigger value="system">系统设置</TabsTrigger>
+          {configPlugins.map((plugin) => (
+            <TabsTrigger key={plugin.id} value={plugin.id}>
+              {plugin.name}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="system" className="mt-4">
+          <SystemSettingsTab />
+        </TabsContent>
+
+        {configPlugins.map((plugin) => (
+          <TabsContent key={plugin.id} value={plugin.id} className="mt-4">
+            <PluginConfigTab plugin={plugin} />
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      {loading && configPlugins.length === 0 && (
+        <div className="text-muted-foreground text-sm">加载中...</div>
+      )}
     </div>
   );
 }

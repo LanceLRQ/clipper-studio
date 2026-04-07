@@ -1,15 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import type { PluginInfo, RecorderRoom } from "@/services/plugin";
+import type { PluginInfo } from "@/services/plugin";
 import {
   scanPlugins,
   listPlugins,
   startPluginService,
   stopPluginService,
-  callPlugin,
-  getPluginConfig,
   setPluginEnabled,
   autoLoadPlugins,
 } from "@/services/plugin";
@@ -36,132 +34,6 @@ const TYPE_LABELS: Record<string, string> = {
   StorageProvider: "存储提供者",
 };
 
-// ===== Recorder Panel =====
-function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
-  const [status, setStatus] = useState<{
-    connected: boolean;
-    rooms: RecorderRoom[];
-    error: string | null;
-  }>({ connected: false, rooms: [], error: null });
-  const [loading, setLoading] = useState(false);
-
-  const loadStatus = async () => {
-    setLoading(true);
-    try {
-      const cfg = await getPluginConfig(plugin.id);
-      const payload: Record<string, string> = {
-        base_url: cfg.api_url || "http://127.0.0.1:2007",
-      };
-      if (cfg.api_key) payload.api_key = cfg.api_key;
-      if (cfg.basic_user && cfg.basic_pass) {
-        payload.basic_user = cfg.basic_user;
-        payload.basic_pass = cfg.basic_pass;
-      }
-
-      const result = await callPlugin(plugin.id, "status", payload) as {
-        connected: boolean;
-        rooms: RecorderRoom[];
-      };
-      setStatus({ connected: result.connected, rooms: result.rooms, error: null });
-    } catch (e) {
-      setStatus((prev) => ({ ...prev, connected: false, error: String(e) }));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSync = async () => {
-    setLoading(true);
-    try {
-      const cfg = await getPluginConfig(plugin.id);
-      const payload: Record<string, string> = {
-        base_url: cfg.api_url || "http://127.0.0.1:2007",
-      };
-      if (cfg.api_key) payload.api_key = cfg.api_key;
-      if (cfg.basic_user && cfg.basic_pass) {
-        payload.basic_user = cfg.basic_user;
-        payload.basic_pass = cfg.basic_pass;
-      }
-
-      await callPlugin(plugin.id, "sync_files", payload);
-      await loadStatus();
-    } catch (e) {
-      setStatus((prev) => ({ ...prev, error: String(e) }));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="rounded-lg border p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-medium">{plugin.name} - 录播姬控制台</h3>
-        <div className="flex items-center gap-2">
-          <span
-            className={`text-xs px-2 py-0.5 rounded ${
-              status.connected
-                ? "bg-green-100 text-green-700"
-                : "bg-gray-100 text-gray-500"
-            }`}
-          >
-            {status.connected ? "已连接" : "未连接"}
-          </span>
-          <Button size="sm" variant="outline" onClick={loadStatus} disabled={loading}>
-            刷新状态
-          </Button>
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        录播姬地址和认证在「设置」页面中配置
-      </p>
-
-      {status.error && (
-        <div className="text-xs text-red-500 bg-red-50 rounded p-2">
-          {status.error}
-        </div>
-      )}
-
-      {/* Room list */}
-      {status.rooms.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium">房间列表（{status.rooms.length}）</span>
-            <Button size="sm" variant="outline" onClick={handleSync} disabled={loading}>
-              同步文件
-            </Button>
-          </div>
-          <div className="space-y-1 max-h-60 overflow-y-auto">
-            {status.rooms.map((room) => (
-              <div
-                key={room.roomId}
-                className="flex items-center gap-3 text-xs bg-muted/30 rounded p-2"
-              >
-                <span className="font-medium">{room.name}</span>
-                <span className="text-muted-foreground truncate max-w-[200px]">
-                  / {room.title}
-                </span>
-                <div className="ml-auto flex items-center gap-2 shrink-0">
-                  {room.recording && (
-                    <span className="text-red-500 text-[10px]">录制中</span>
-                  )}
-                  {room.streaming && (
-                    <span className="text-green-500 text-[10px]">直播中</span>
-                  )}
-                  <span className="text-muted-foreground text-[10px]">
-                    {room.areaNameParent} / {room.areaNameChild}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ===== Main Plugins Page =====
 function PluginsPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -239,8 +111,6 @@ function PluginsPage() {
     }
   };
 
-  const recorderPlugins = plugins.filter((p) => p.plugin_type === "Recorder");
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -256,13 +126,6 @@ function PluginsPage() {
           {loading ? "扫描中..." : "扫描插件"}
         </Button>
       </div>
-
-      {/* Recorder panels */}
-      {recorderPlugins.map((plugin) =>
-        plugin.status === "loaded" || plugin.status === "running" ? (
-          <RecorderPanel key={plugin.id} plugin={plugin} />
-        ) : null
-      )}
 
       {loading && plugins.length === 0 ? (
         <div className="text-muted-foreground">加载中...</div>
@@ -306,7 +169,7 @@ function PluginsPage() {
                       <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
                         <span>{typeLabel}</span>
                         <span>
-                          {plugin.transport === "Http" ? "HTTP" : "Stdio"}
+                          {plugin.transport === "Http" ? "HTTP" : plugin.transport === "Builtin" ? "内置" : "Stdio"}
                         </span>
                         {plugin.managed && <span>托管进程</span>}
                       </div>
@@ -315,6 +178,17 @@ function PluginsPage() {
 
                   {/* Action buttons */}
                   <div className="flex items-center gap-3">
+                    {/* Link to plugin detail page */}
+                    {plugin.enabled && (
+                      <Link
+                        to="/dashboard/plugins/$pluginId"
+                        params={{ pluginId: plugin.id }}
+                      >
+                        <Button size="sm" variant="outline">
+                          查看详情
+                        </Button>
+                      </Link>
+                    )}
                     {/* Service start/stop for managed plugins (only when enabled) */}
                     {plugin.managed && plugin.enabled && (
                       <>
@@ -371,6 +245,6 @@ function PluginsPage() {
   );
 }
 
-export const Route = createFileRoute("/dashboard/plugins")({
+export const Route = createFileRoute("/dashboard/plugins/")({
   component: PluginsPage,
 });

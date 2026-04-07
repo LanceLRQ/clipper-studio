@@ -4,6 +4,10 @@ export interface PluginConfigField {
   type: "string" | "boolean";
   default: string | boolean;
   description: string;
+  /** Friendly display name (falls back to field key if absent) */
+  label?: string;
+  /** Sort order (lower = first, default 0) */
+  order?: number;
 }
 
 export interface PluginFrontend {
