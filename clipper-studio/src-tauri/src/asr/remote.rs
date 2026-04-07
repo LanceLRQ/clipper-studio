@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::provider::{ASRHealthInfo, ASRProvider, ASRSegment, ASRTaskStatus};
+use super::provider::{ASRHealthInfo, ASRProvider, ASRWord, ASRTaskStatus, RawASRSegment};
 
 /// Remote ASR provider (external HTTP API with optional API key)
 pub struct RemoteASRProvider {
@@ -102,11 +102,24 @@ impl ASRProvider for RemoteASRProvider {
                     .map(|arr| {
                         arr.iter()
                             .filter_map(|seg| {
-                                Some(ASRSegment {
-                                    start: seg.get("start")?.as_f64()?,
-                                    end: seg.get("end")?.as_f64()?,
-                                    text: seg.get("text")?.as_str()?.to_string(),
-                                })
+                                let start = seg.get("start")?.as_f64()?;
+                                let end = seg.get("end")?.as_f64()?;
+                                let text = seg.get("text")?.as_str()?.to_string();
+                                let words = seg
+                                    .get("words")
+                                    .and_then(|w| w.as_array())
+                                    .map(|warr| {
+                                        warr.iter()
+                                            .filter_map(|w| {
+                                                Some(ASRWord {
+                                                    text: w.get("text")?.as_str()?.to_string(),
+                                                    start: w.get("start")?.as_f64()?,
+                                                    end: w.get("end")?.as_f64()?,
+                                                })
+                                            })
+                                            .collect()
+                                    });
+                                Some(RawASRSegment { start, end, text, words })
                             })
                             .collect()
                     })

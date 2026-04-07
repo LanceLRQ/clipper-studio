@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::db::Database;
 
 use super::provider::{ASRProvider, ASRSegment, ASRTaskStatus};
+use super::splitter;
 
 /// Maximum automatic retry count
 const MAX_AUTO_RETRIES: u32 = 2;
@@ -234,7 +235,16 @@ pub async fn poll_asr(
             )
             .await;
         }
-        ASRTaskStatus::Completed { segments } => {
+        ASRTaskStatus::Completed { segments: raw_segments } => {
+            // Read max_chars setting for subtitle splitting
+            let max_chars = read_setting_from_db(db, "asr_max_chars")
+                .await
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(15);
+
+            // Split raw segments by punctuation and character count
+            let segments = splitter::split_segments(&raw_segments, max_chars);
+
             // Import segments into subtitle_segments
             let language: String = task_row.try_get("", "language").unwrap_or("Chinese".to_string());
             let count = import_segments(db, video_id, &language, &segments).await?;
@@ -402,6 +412,21 @@ async fn import_segments(
     }
 
     Ok(count)
+}
+
+/// Read a setting value from settings_kv table
+async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
+    sea_orm::ConnectionTrait::query_one(
+        db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT value FROM settings_kv WHERE key = '{}'", key),
+        ),
+    )
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.try_get::<String>("", "value").ok())
 }
 
 /// Parse "yyyy-MM-dd HH:mm:ss" to Unix milliseconds

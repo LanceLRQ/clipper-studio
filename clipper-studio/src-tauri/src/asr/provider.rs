@@ -11,7 +11,7 @@ pub enum ASRTaskStatus {
         progress: f64,
     },
     Completed {
-        segments: Vec<ASRSegment>,
+        segments: Vec<RawASRSegment>,
     },
     /// Temporary error (network timeout, service busy) → retryable
     RetryableError {
@@ -33,6 +33,24 @@ pub struct ASRSegment {
     pub end: f64,
     /// Recognized text
     pub text: String,
+}
+
+/// A single word with timestamp from ASR (character-level for Chinese)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ASRWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+/// Raw ASR segment before splitting, includes optional word-level timestamps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawASRSegment {
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+    /// Word-level timestamps, present when align_enabled=true in ASR service
+    pub words: Option<Vec<ASRWord>>,
 }
 
 /// ASR health info

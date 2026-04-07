@@ -58,6 +58,7 @@ function SystemSettingsTab() {
   const [asrUrl, setAsrUrl] = useState("");
   const [asrApiKey, setAsrApiKey] = useState("");
   const [asrLanguage, setAsrLanguage] = useState("Chinese");
+  const [asrMaxChars, setAsrMaxChars] = useState("15");
   const [asrHealth, setAsrHealth] = useState<ASRHealthInfo | null>(null);
   const [asrChecking, setAsrChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -84,6 +85,7 @@ function SystemSettingsTab() {
       "asr_url",
       "asr_api_key",
       "asr_language",
+      "asr_max_chars",
       "plugin_dir",
     ])
       .then((settings) => {
@@ -92,6 +94,7 @@ function SystemSettingsTab() {
         if (settings.asr_url) setAsrUrl(settings.asr_url);
         if (settings.asr_api_key) setAsrApiKey(settings.asr_api_key);
         if (settings.asr_language) setAsrLanguage(settings.asr_language);
+        if (settings.asr_max_chars) setAsrMaxChars(settings.asr_max_chars);
         if (settings.plugin_dir) {
           setPluginDir(settings.plugin_dir);
         }
@@ -119,6 +122,7 @@ function SystemSettingsTab() {
       if (asrUrl) await setSetting("asr_url", asrUrl);
       if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
       await setSetting("asr_language", asrLanguage);
+      await setSetting("asr_max_chars", asrMaxChars);
       if (pluginDir) await setSetting("plugin_dir", pluginDir);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -182,6 +186,21 @@ function SystemSettingsTab() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-sm">每条字幕最大字符数</Label>
+          <Input
+            value={asrMaxChars}
+            onChange={(e) => setAsrMaxChars(e.target.value)}
+            placeholder="15"
+            className="w-32 text-sm h-8"
+            type="number"
+            min={0}
+          />
+          <p className="text-xs text-muted-foreground">
+            ASR 识别后按标点和字数自动拆分字幕，设为 0 则不拆分
+          </p>
         </div>
 
         {asrMode === "local" && (

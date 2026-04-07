@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::provider::{ASRHealthInfo, ASRProvider, ASRSegment, ASRTaskStatus};
+use super::provider::{ASRHealthInfo, ASRProvider, ASRWord, ASRTaskStatus, RawASRSegment};
 
 /// Local ASR provider using qwen3-asr-service (HTTP API on localhost)
 pub struct LocalASRProvider {
@@ -156,8 +156,8 @@ impl ASRProvider for LocalASRProvider {
     }
 }
 
-/// Parse ASR segments from the response JSON
-fn parse_segments(json: &serde_json::Value) -> Vec<ASRSegment> {
+/// Parse ASR segments from the response JSON, including word-level timestamps
+fn parse_segments(json: &serde_json::Value) -> Vec<RawASRSegment> {
     json.get("result")
         .and_then(|r| r.get("segments"))
         .and_then(|s| s.as_array())
@@ -167,7 +167,26 @@ fn parse_segments(json: &serde_json::Value) -> Vec<ASRSegment> {
                     let start = seg.get("start")?.as_f64()?;
                     let end = seg.get("end")?.as_f64()?;
                     let text = seg.get("text")?.as_str()?.to_string();
-                    Some(ASRSegment { start, end, text })
+                    let words = seg
+                        .get("words")
+                        .and_then(|w| w.as_array())
+                        .map(|warr| {
+                            warr.iter()
+                                .filter_map(|w| {
+                                    Some(ASRWord {
+                                        text: w.get("text")?.as_str()?.to_string(),
+                                        start: w.get("start")?.as_f64()?,
+                                        end: w.get("end")?.as_f64()?,
+                                    })
+                                })
+                                .collect()
+                        });
+                    Some(RawASRSegment {
+                        start,
+                        end,
+                        text,
+                        words,
+                    })
                 })
                 .collect()
         })
