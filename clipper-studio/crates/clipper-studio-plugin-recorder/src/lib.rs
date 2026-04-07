@@ -48,6 +48,12 @@ impl PluginInstance for BilibiliRecorderPlugin {
         action: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        tracing::info!(
+            "[BilibiliRecorder] handle_request: action={}, payload_keys={:?}",
+            action,
+            payload.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+        );
+
         // Extract config from payload (for backward compatibility with frontend config flow)
         // Frontend sends base_url (not api_url), so we check both for compatibility
         let internal_config = self.config.read().await;
@@ -75,6 +81,14 @@ impl PluginInstance for BilibiliRecorderPlugin {
             .unwrap_or(&internal_config.basic_pass)
             .to_string();
 
+        tracing::info!(
+            "[BilibiliRecorder] Resolved config: api_url={}, basic_user={:?}, basic_pass_len={}, api_key_len={}",
+            api_url,
+            if basic_user.is_empty() { "(empty)" } else { &basic_user },
+            basic_pass.len(),
+            api_key.len(),
+        );
+
         let config = BilibiliRecorderConfig {
             api_url,
             api_key,
@@ -84,15 +98,25 @@ impl PluginInstance for BilibiliRecorderPlugin {
 
         match action {
             "status" => {
-                self.call_bilibili(&config, "/status", payload)
-                    .await
+                let rooms_res = self.call_bilibili(&config, "/api/room", serde_json::Value::Null).await;
+                match rooms_res {
+                    Ok(rooms) => Ok(serde_json::json!({
+                        "connected": true,
+                        "rooms": rooms,
+                    })),
+                    Err(e) => Ok(serde_json::json!({
+                        "connected": false,
+                        "rooms": [],
+                        "error": e.to_string(),
+                    })),
+                }
             }
             "sync_files" => {
-                self.call_bilibili(&config, "/sync_files", payload)
+                self.call_bilibili(&config, "/api/file", serde_json::Value::Null)
                     .await
             }
             "get_rooms" => {
-                self.call_bilibili(&config, "/rooms", payload)
+                self.call_bilibili(&config, "/api/room", serde_json::Value::Null)
                     .await
             }
             "get_config" => {
@@ -147,7 +171,7 @@ impl BilibiliRecorderPlugin {
                 ("api_url".to_string(), serde_json::json!({
                     "type": "string",
                     "default": "http://127.0.0.1:2007",
-                    "description": "录播姬 HTTP API 地址"
+                    "description": "录播姬 HTTP API 地址（只填根地址，不要带 /api 路径）"
                 })),
                 ("api_key".to_string(), serde_json::json!({
                     "type": "string",
@@ -198,7 +222,7 @@ impl BilibiliRecorderPlugin {
         &self,
         config: &BilibiliRecorderConfig,
         endpoint: &str,
-        payload: serde_json::Value,
+        _payload: serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
         let url = format!(
             "{}{}",
@@ -206,7 +230,15 @@ impl BilibiliRecorderPlugin {
             endpoint
         );
 
-        let mut req = self.client.post(&url).json(&payload);
+        tracing::info!(
+            "[BilibiliRecorder] Request: GET {} | basic_user={:?} | has_api_key={}",
+            url,
+            if config.basic_user.is_empty() { "(empty)" } else { &config.basic_user },
+            !config.api_key.is_empty(),
+        );
+
+        // Use GET instead of POST; don't send auth fields as JSON body
+        let mut req = self.client.get(&url);
 
         // Add API Key header
         if !config.api_key.is_empty() {
@@ -219,17 +251,32 @@ impl BilibiliRecorderPlugin {
                 "{}:{}",
                 config.basic_user, config.basic_pass
             ));
+            tracing::info!(
+                "[BilibiliRecorder] Authorization: Basic {} (raw: {}:***)",
+                &credentials,
+                config.basic_user,
+            );
             req = req.header("Authorization", format!("Basic {}", credentials));
         }
 
         let resp = req.send().await.map_err(|e| {
-            tracing::error!("Failed to call BilibiliRecorder: {}", e);
+            tracing::error!("[BilibiliRecorder] HTTP request failed: {}", e);
             PluginError::Transport(format!("HTTP request failed: {}", e))
         })?;
+
+        tracing::info!(
+            "[BilibiliRecorder] Response: {} {}",
+            resp.status().as_u16(),
+            resp.status().canonical_reason().unwrap_or(""),
+        );
 
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                "[BilibiliRecorder] Error response body: {}",
+                &body[..body.len().min(500)]
+            );
             return Err(PluginError::Transport(format!(
                 "HTTP {} error: {}",
                 status, body

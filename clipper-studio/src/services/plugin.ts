@@ -21,6 +21,8 @@ export interface PluginInfo {
   status: string;
   description: string | null;
   has_config: boolean;
+  /** Whether the plugin is enabled (persisted, auto-loaded on startup) */
+  enabled: boolean;
   /** Configuration schema (field name -> schema). Only present if has_config is true. */
   config_schema?: Record<string, PluginConfigField>;
   /** Frontend entry for plugin UI. If present, plugin provides a custom React component. */
@@ -66,6 +68,19 @@ export async function getPluginConfig(
   pluginId: string
 ): Promise<Record<string, string>> {
   return invoke<Record<string, string>>("get_plugin_config", { pluginId });
+}
+
+/** Enable or disable a plugin (persists and loads/unloads) */
+export async function setPluginEnabled(
+  pluginId: string,
+  enabled: boolean
+): Promise<void> {
+  return invoke("set_plugin_enabled", { pluginId, enabled });
+}
+
+/** Auto-load all enabled plugins (called once on app startup) */
+export async function autoLoadPlugins(): Promise<string[]> {
+  return invoke<string[]>("auto_load_plugins");
 }
 
 /** Set a single config value for a plugin */

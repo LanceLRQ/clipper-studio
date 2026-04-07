@@ -49,10 +49,20 @@ pub fn run() {
     // We do a minimal init here; full config is loaded in setup()
     let pre_log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
+    // dev 模式下默认开启自身 crate 的 debug 日志，其他 crate 保持 info
+    let default_filter = if cfg!(debug_assertions) {
+        format!(
+            "clipper_studio_lib={lvl},clipper_studio_plugin_recorder={lvl},info",
+            lvl = pre_log_level
+        )
+    } else {
+        format!("clipper_studio_lib={},info", pre_log_level)
+    };
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| format!("clipper_studio_lib={},info", pre_log_level).into()),
+                .unwrap_or_else(|_| default_filter.into()),
         )
         .init();
 
@@ -243,6 +253,8 @@ pub fn run() {
             commands::plugin::call_plugin,
             commands::plugin::get_plugin_config,
             commands::plugin::set_plugin_config,
+            commands::plugin::set_plugin_enabled,
+            commands::plugin::auto_load_plugins,
             commands::asr::submit_asr,
             commands::asr::poll_asr,
             commands::asr::list_asr_tasks,

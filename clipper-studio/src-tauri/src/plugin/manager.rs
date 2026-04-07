@@ -325,7 +325,8 @@ impl PluginManager {
     }
 
     /// List all discovered plugins
-    pub async fn list(&self) -> Vec<PluginInfo> {
+    /// `enabled_ids` contains plugin IDs that are marked as enabled in settings
+    pub async fn list(&self, enabled_ids: &std::collections::HashSet<String>) -> Vec<PluginInfo> {
         let plugins = self.plugins.read().await;
         let services = self.services.read().await;
 
@@ -351,6 +352,7 @@ impl PluginManager {
                     },
                     description: meta.manifest.description.clone(),
                     has_config: !meta.manifest.config_schema.is_empty(),
+                    enabled: enabled_ids.contains(&meta.manifest.id),
                     config_schema: if meta.manifest.config_schema.is_empty() {
                         None
                     } else {
@@ -364,8 +366,8 @@ impl PluginManager {
     }
 
     /// List plugins by type
-    pub async fn list_by_type(&self, plugin_type: &PluginType) -> Vec<PluginInfo> {
-        let all = self.list().await;
+    pub async fn list_by_type(&self, plugin_type: &PluginType, enabled_ids: &std::collections::HashSet<String>) -> Vec<PluginInfo> {
+        let all = self.list(enabled_ids).await;
         let type_str = format!("{:?}", plugin_type);
         all.into_iter()
             .filter(|p| p.plugin_type == type_str)
@@ -485,6 +487,8 @@ pub struct PluginInfo {
     pub status: String,
     pub description: Option<String>,
     pub has_config: bool,
+    /// Whether the plugin is enabled (persisted, auto-loaded on startup)
+    pub enabled: bool,
     /// Configuration schema (field name -> schema with type/default/description)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<std::collections::HashMap<String, serde_json::Value>>,

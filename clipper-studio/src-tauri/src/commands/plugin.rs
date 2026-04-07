@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use tauri::State;
 
 use crate::AppState;
@@ -55,6 +57,32 @@ async fn resolve_plugin_dir(state: &State<'_, AppState>) -> std::path::PathBuf {
     state.config_dir.join("plugins")
 }
 
+/// Query all plugin IDs that are marked as enabled in settings_kv
+async fn query_enabled_plugin_ids(state: &State<'_, AppState>) -> HashSet<String> {
+    let rows = sea_orm::ConnectionTrait::query_all(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT key FROM settings_kv WHERE key LIKE 'plugin:%:enabled' AND value = 'true'"
+                .to_string(),
+        ),
+    )
+    .await;
+
+    let mut ids = HashSet::new();
+    if let Ok(rows) = rows {
+        for row in &rows {
+            if let Ok(key) = row.try_get::<String>("", "key") {
+                // key format: plugin:{id}:enabled
+                if let Some(id) = key.strip_prefix("plugin:").and_then(|s| s.strip_suffix(":enabled")) {
+                    ids.insert(id.to_string());
+                }
+            }
+        }
+    }
+    ids
+}
+
 /// Scan plugin directory and return all discovered plugins
 #[tauri::command]
 pub async fn scan_plugins(
@@ -63,7 +91,8 @@ pub async fn scan_plugins(
     let plugin_dir = resolve_plugin_dir(&state).await;
     let _ = std::fs::create_dir_all(&plugin_dir);
     state.plugin_manager.scan(&plugin_dir).await;
-    Ok(state.plugin_manager.list().await)
+    let enabled_ids = query_enabled_plugin_ids(&state).await;
+    Ok(state.plugin_manager.list(&enabled_ids).await)
 }
 
 /// List all discovered plugins (builtin + external)
@@ -71,10 +100,12 @@ pub async fn scan_plugins(
 pub async fn list_plugins(
     state: State<'_, AppState>,
 ) -> Result<Vec<PluginInfo>, String> {
+    let enabled_ids = query_enabled_plugin_ids(&state).await;
+
     // Builtin plugins from registry
     let builtin: Vec<PluginInfo> = state
         .plugin_registry
-        .list_builtin_with_status()
+        .list_builtin_with_status(&enabled_ids)
         .into_iter()
         .map(|b| PluginInfo {
             id: b.id,
@@ -86,6 +117,7 @@ pub async fn list_plugins(
             status: b.status,
             description: b.description,
             has_config: b.has_config,
+            enabled: b.enabled,
             config_schema: b.config_schema,
             frontend: b.frontend,
             dir: b.dir,
@@ -93,7 +125,7 @@ pub async fn list_plugins(
         .collect();
 
     // External plugins from directory scan
-    let external = state.plugin_manager.list().await;
+    let external = state.plugin_manager.list(&enabled_ids).await;
 
     // Merge: external overrides builtin with same ID
     let mut result = builtin;
@@ -307,4 +339,85 @@ pub async fn set_plugin_config(
     .await
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Enable or disable a plugin (persists to settings_kv and loads/unloads accordingly)
+#[tauri::command]
+pub async fn set_plugin_enabled(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let full_key = format!(
+        "plugin:{}:enabled",
+        plugin_id.replace('\'', "''")
+    );
+
+    // Persist enabled state to settings_kv
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('{}', '{}')",
+            full_key,
+            if enabled { "true" } else { "false" },
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Load or unload the plugin accordingly
+    if enabled {
+        if state.plugin_registry.is_builtin(&plugin_id) {
+            let _ = state.plugin_registry.load_builtin(&plugin_id).await?;
+        } else {
+            state.plugin_manager.load(&plugin_id).await?;
+        }
+        tracing::info!("Plugin enabled and loaded: {}", plugin_id);
+    } else {
+        if state.plugin_registry.is_builtin(&plugin_id) {
+            state.plugin_registry.unload_builtin(&plugin_id).await?;
+            let _ = state.plugin_manager.set_discovered(&plugin_id).await;
+        } else {
+            state.plugin_manager.unload(&plugin_id).await?;
+        }
+        tracing::info!("Plugin disabled and unloaded: {}", plugin_id);
+    }
+
+    Ok(())
+}
+
+/// Auto-load all plugins that are marked as enabled in settings_kv
+/// Called once during app startup
+#[tauri::command]
+pub async fn auto_load_plugins(
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    // First scan external plugins so they are discovered
+    let plugin_dir = resolve_plugin_dir(&state).await;
+    let _ = std::fs::create_dir_all(&plugin_dir);
+    state.plugin_manager.scan(&plugin_dir).await;
+
+    // Query enabled plugin IDs
+    let enabled_ids = query_enabled_plugin_ids(&state).await;
+    let mut loaded = Vec::new();
+
+    for plugin_id in &enabled_ids {
+        let result = if state.plugin_registry.is_builtin(plugin_id) {
+            state.plugin_registry.load_builtin(plugin_id).await.map(|_| ())
+        } else {
+            state.plugin_manager.load(plugin_id).await
+        };
+
+        match result {
+            Ok(()) => {
+                tracing::info!("Auto-loaded enabled plugin: {}", plugin_id);
+                loaded.push(plugin_id.clone());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to auto-load plugin {}: {}", plugin_id, e);
+            }
+        }
+    }
+
+    Ok(loaded)
 }

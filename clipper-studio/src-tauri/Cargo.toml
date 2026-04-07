@@ -80,7 +80,7 @@ clipper-studio-plugin-core = { path = "../crates/clipper-studio-plugin-core" }
 clipper-studio-plugin-recorder = { path = "../crates/clipper-studio-plugin-recorder", optional = true }
 
 [features]
-default = []
+default = ["builtin-plugins"]
 builtin-plugins = ["dep:clipper-studio-plugin-recorder"]
 
 [dev-dependencies]

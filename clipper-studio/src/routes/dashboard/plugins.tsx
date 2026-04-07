@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import type { PluginInfo, RecorderRoom } from "@/services/plugin";
 import {
   scanPlugins,
   listPlugins,
-  loadPlugin,
-  unloadPlugin,
   startPluginService,
   stopPluginService,
   callPlugin,
   getPluginConfig,
+  setPluginEnabled,
+  autoLoadPlugins,
 } from "@/services/plugin";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -178,8 +179,21 @@ function PluginsPage() {
     }
   };
 
+  // Auto-load enabled plugins on first mount, then refresh list
   useEffect(() => {
-    loadData();
+    const init = async () => {
+      setLoading(true);
+      try {
+        await autoLoadPlugins();
+        const list = await listPlugins();
+        setPlugins(list);
+      } catch (e) {
+        console.error("Failed to auto-load plugins:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+    init();
   }, []);
 
   const handleScan = async () => {
@@ -194,25 +208,28 @@ function PluginsPage() {
     }
   };
 
-  const handleAction = async (
+  const handleToggleEnabled = async (pluginId: string, enabled: boolean) => {
+    setActionLoading(pluginId);
+    try {
+      await setPluginEnabled(pluginId, enabled);
+      await loadData();
+    } catch (e) {
+      alert(`操作失败: ${String(e)}`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleServiceAction = async (
     pluginId: string,
-    action: "load" | "unload" | "start" | "stop"
+    action: "start" | "stop"
   ) => {
     setActionLoading(pluginId);
     try {
-      switch (action) {
-        case "load":
-          await loadPlugin(pluginId);
-          break;
-        case "unload":
-          await unloadPlugin(pluginId);
-          break;
-        case "start":
-          await startPluginService(pluginId);
-          break;
-        case "stop":
-          await stopPluginService(pluginId);
-          break;
+      if (action === "start") {
+        await startPluginService(pluginId);
+      } else {
+        await stopPluginService(pluginId);
       }
       await loadData();
     } catch (e) {
@@ -297,47 +314,45 @@ function PluginsPage() {
                   </div>
 
                   {/* Action buttons */}
-                  <div className="flex gap-2">
-                    {plugin.status === "discovered" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={isLoading}
-                        onClick={() => handleAction(plugin.id, "load")}
-                      >
-                        加载
-                      </Button>
-                    )}
-                    {plugin.status === "loaded" && (
+                  <div className="flex items-center gap-3">
+                    {/* Service start/stop for managed plugins (only when enabled) */}
+                    {plugin.managed && plugin.enabled && (
                       <>
-                        {plugin.managed && (
+                        {plugin.status === "loaded" && (
                           <Button
                             size="sm"
                             disabled={isLoading}
-                            onClick={() => handleAction(plugin.id, "start")}
+                            onClick={() => handleServiceAction(plugin.id, "start")}
                           >
                             启动
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isLoading}
-                          onClick={() => handleAction(plugin.id, "unload")}
-                        >
-                          卸载
-                        </Button>
+                        {plugin.status === "running" && (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={isLoading}
+                            onClick={() => handleServiceAction(plugin.id, "stop")}
+                          >
+                            停止
+                          </Button>
+                        )}
                       </>
                     )}
-                    {plugin.status === "running" && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={isLoading}
-                        onClick={() => handleAction(plugin.id, "stop")}
-                      >
-                        停止
-                      </Button>
+                    {/* Enable/Disable toggle (skip incompatible plugins) */}
+                    {plugin.status !== "incompatible" && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {plugin.enabled ? "已启用" : "未启用"}
+                        </span>
+                        <Switch
+                          checked={plugin.enabled}
+                          disabled={isLoading}
+                          onCheckedChange={(checked) =>
+                            handleToggleEnabled(plugin.id, checked)
+                          }
+                        />
+                      </div>
                     )}
                   </div>
                 </div>

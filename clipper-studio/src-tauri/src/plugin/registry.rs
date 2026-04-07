@@ -36,7 +36,7 @@ impl PluginRegistry {
     }
 
     /// Get all registered builtin plugins with their current status
-    pub fn list_builtin_with_status(&self) -> Vec<BuiltinPluginInfo> {
+    pub fn list_builtin_with_status(&self, enabled_ids: &std::collections::HashSet<String>) -> Vec<BuiltinPluginInfo> {
         let loaded: std::collections::HashSet<String> = self
             .instances
             .read()
@@ -50,7 +50,8 @@ impl PluginRegistry {
             .map(|b| {
                 let manifest = b.manifest();
                 let is_loaded = loaded.contains(manifest.id.as_str());
-                BuiltinPluginInfo::from(manifest.clone(), is_loaded)
+                let is_enabled = enabled_ids.contains(manifest.id.as_str());
+                BuiltinPluginInfo::from(manifest.clone(), is_loaded, is_enabled)
             })
             .collect()
     }
@@ -112,6 +113,8 @@ pub struct BuiltinPluginInfo {
     pub status: String,
     pub description: Option<String>,
     pub has_config: bool,
+    /// Whether the plugin is enabled (persisted, auto-loaded on startup)
+    pub enabled: bool,
     pub config_schema: Option<std::collections::HashMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frontend: Option<clipper_studio_plugin_core::PluginFrontend>,
@@ -121,7 +124,7 @@ pub struct BuiltinPluginInfo {
 }
 
 impl BuiltinPluginInfo {
-    pub fn from(m: PluginManifest, is_loaded: bool) -> Self {
+    pub fn from(m: PluginManifest, is_loaded: bool, is_enabled: bool) -> Self {
         Self {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -132,6 +135,7 @@ impl BuiltinPluginInfo {
             status: if is_loaded { "loaded".to_string() } else { "discovered".to_string() },
             description: m.description.clone(),
             has_config: !m.config_schema.is_empty(),
+            enabled: is_enabled,
             config_schema: if m.config_schema.is_empty() {
                 None
             } else {
