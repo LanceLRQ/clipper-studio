@@ -9,7 +9,7 @@ import { ClipActions } from "@/components/video-player/clip-actions";
 import { SubtitlePanel } from "@/components/video-player/subtitle-panel";
 import { DanmakuLayer } from "@/components/video-player/danmaku-layer";
 import type { VideoInfo } from "@/types/video";
-import type { ClipRegion, ClipOptions } from "@/types/multi-clip";
+import type { ClipRegion, ClipOptions, BurnAvailability } from "@/types/multi-clip";
 import type { EncodingPreset } from "@/types/clip";
 import { CLIP_COLORS } from "@/lib/clip-colors";
 import {
@@ -19,8 +19,9 @@ import {
   checkVideoIntegrity,
   remuxVideo,
 } from "@/services/video";
-import { listPresets } from "@/services/clip";
+import { listPresets, checkVideoBurnAvailability } from "@/services/clip";
 import { loadDanmaku, type DanmakuItem } from "@/services/danmaku";
+import { transcodeVideo } from "@/services/media";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -76,6 +77,7 @@ function VideoDetailPage() {
   const [clips, setClips] = useState<ClipRegion[]>([]);
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [clipOptions, setClipOptions] = useState<Record<string, ClipOptions>>({});
+  const [burnAvailability, setBurnAvailability] = useState<BurnAvailability | undefined>(undefined);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
 
   // Track playback time
@@ -120,6 +122,11 @@ function VideoDetailPage() {
       setPresets(p);
       if (p.length > 0) setSelectedPresetId(p[0].id);
     });
+
+    // Load burn availability
+    checkVideoBurnAvailability(videoId)
+      .then(setBurnAvailability)
+      .catch(() => setBurnAvailability(undefined));
   }, [videoId]);
 
   const handleSeek = (timeSecs: number) => {
@@ -311,6 +318,8 @@ function VideoDetailPage() {
               onClipSelect={setSelectedClipId}
               clipOptions={clipOptions}
               onClipOptionsChange={setClipOptions}
+              burnAvailability={burnAvailability}
+              videoId={video?.id}
             />
           </div>
         </div>
@@ -488,6 +497,47 @@ function VideoDetailPage() {
                   </Button>
                 </div>
               )}
+
+              {/* Transcode */}
+              <div className="mt-3 pt-3 border-t space-y-2">
+                <h3 className="font-medium text-sm">转码</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    className="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                    value={selectedPresetId ?? ""}
+                    onChange={(e) => setSelectedPresetId(Number(e.target.value) || null)}
+                  >
+                    {presets
+                      .filter((p) => p.name !== "极速（无重编码）")
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-xs"
+                    onClick={async () => {
+                      if (!video || !selectedPresetId) return;
+                      if (!confirm("开始转码？")) return;
+                      try {
+                        await transcodeVideo({
+                          video_id: video.id,
+                          preset_id: selectedPresetId,
+                        });
+                        navigate({ to: "/dashboard/tasks" });
+                      } catch (e) {
+                        alert("转码失败: " + String(e));
+                      }
+                    }}
+                    disabled={!selectedPresetId}
+                  >
+                    开始转码
+                  </Button>
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
         </div>

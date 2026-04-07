@@ -7,8 +7,9 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ClipRegion, ClipOptions } from "@/types/multi-clip";
+import type { ClipRegion, ClipOptions, BurnAvailability } from "@/types/multi-clip";
 import { CLIP_COLORS, MAX_CLIPS } from "@/lib/clip-colors";
+import { autoSegment } from "@/services/clip";
 
 function formatTime(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -28,9 +29,13 @@ interface ClipTimelineProps {
   onClipSelect?: (clipId: string | null) => void;
   selectedClipId?: string | null;
   maxClips?: number;
-  /** Per-clip options (offset, audio_only) */
+  /** Per-clip options (offset, audio_only, burn) */
   clipOptions?: Record<string, ClipOptions>;
   onClipOptionsChange?: (options: Record<string, ClipOptions>) => void;
+  /** Burn availability info for the current video */
+  burnAvailability?: BurnAvailability;
+  /** Video ID (needed for auto-segment) */
+  videoId?: number;
 }
 
 interface DragState {
@@ -52,6 +57,8 @@ export function ClipTimeline({
   maxClips = MAX_CLIPS,
   clipOptions = {},
   onClipOptionsChange,
+  burnAvailability,
+  videoId,
 }: ClipTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -201,6 +208,38 @@ export function ClipTimeline({
     onClipsChange?.(clips.filter((c) => c.id !== selectedClipId));
     onClipSelect?.(null);
   }, [clips, selectedClipId, onClipsChange, onClipSelect]);
+
+  const [autoSegLoading, setAutoSegLoading] = useState(false);
+
+  const handleAutoSegment = useCallback(async () => {
+    if (!videoId) return;
+    if (clips.length > 0 && !confirm("自动分段将替换现有选区，确认？")) return;
+
+    setAutoSegLoading(true);
+    try {
+      const segments = await autoSegment(videoId);
+      if (segments.length === 0) {
+        showToast("未检测到有效分段");
+        return;
+      }
+      const newClips: ClipRegion[] = segments
+        .slice(0, maxClips)
+        .map((seg, i) => ({
+          id: `clip-${Date.now()}-${i}`,
+          start: seg.start_ms / 1000,
+          end: seg.end_ms / 1000,
+          color: CLIP_COLORS[i % CLIP_COLORS.length],
+          name: `片段${i + 1}`,
+        }));
+      onClipsChange?.(newClips);
+      onClipSelect?.(newClips[0]?.id ?? null);
+      showToast(`检测到 ${newClips.length} 个片��`);
+    } catch (e) {
+      showToast("自动分段失败: " + String(e));
+    } finally {
+      setAutoSegLoading(false);
+    }
+  }, [videoId, clips, maxClips, onClipsChange, onClipSelect, showToast]);
 
   // ===== Track interactions =====
 
@@ -412,6 +451,17 @@ export function ClipTimeline({
               删除
             </Button>
           )}
+          <div className="mx-1 h-4 border-l" />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={handleAutoSegment}
+            disabled={autoSegLoading || !videoId}
+            title="根据音量自动检测分段（需要先提取音量包络）"
+          >
+            {autoSegLoading ? "分析中..." : "自动分段"}
+          </Button>
         </div>
       </div>
 
@@ -521,7 +571,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
                     clip_offset_before: val,
                   },
                 });
@@ -542,7 +592,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
                     clip_offset_after: val,
                   },
                 });
@@ -556,17 +606,91 @@ export function ClipTimeline({
               type="checkbox"
               checked={clipOptions[selectedClip.id]?.audio_only ?? false}
               onChange={(e) => {
+                const opts = clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false };
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false }),
+                    ...opts,
                     audio_only: e.target.checked,
+                    // Disable burn options when audio_only
+                    ...(e.target.checked ? { include_danmaku: false, include_subtitle: false } : {}),
                   },
                 });
               }}
               className="rounded"
             />
             仅音频
+          </label>
+          <label
+            className={`flex items-center gap-1.5 ${
+              (clipOptions[selectedClip.id]?.audio_only) || !burnAvailability?.has_danmaku_xml || !burnAvailability?.has_danmaku_factory
+                ? "opacity-40 cursor-not-allowed"
+                : "cursor-pointer"
+            }`}
+            title={
+              !burnAvailability?.has_danmaku_factory
+                ? "需要安装 DanmakuFactory"
+                : !burnAvailability?.has_danmaku_xml
+                  ? "该视频没有弹幕文件"
+                  : clipOptions[selectedClip.id]?.audio_only
+                    ? "仅音频模式下不可用"
+                    : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              checked={clipOptions[selectedClip.id]?.include_danmaku ?? false}
+              disabled={
+                (clipOptions[selectedClip.id]?.audio_only) ||
+                !burnAvailability?.has_danmaku_xml ||
+                !burnAvailability?.has_danmaku_factory
+              }
+              onChange={(e) => {
+                onClipOptionsChange({
+                  ...clipOptions,
+                  [selectedClip.id]: {
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    include_danmaku: e.target.checked,
+                  },
+                });
+              }}
+              className="rounded"
+            />
+            烧录弹幕
+          </label>
+          <label
+            className={`flex items-center gap-1.5 ${
+              (clipOptions[selectedClip.id]?.audio_only) || !burnAvailability?.has_subtitle
+                ? "opacity-40 cursor-not-allowed"
+                : "cursor-pointer"
+            }`}
+            title={
+              !burnAvailability?.has_subtitle
+                ? "该视频没有字幕"
+                : clipOptions[selectedClip.id]?.audio_only
+                  ? "仅音频模式下不可用"
+                  : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              checked={clipOptions[selectedClip.id]?.include_subtitle ?? false}
+              disabled={
+                (clipOptions[selectedClip.id]?.audio_only) ||
+                !burnAvailability?.has_subtitle
+              }
+              onChange={(e) => {
+                onClipOptionsChange({
+                  ...clipOptions,
+                  [selectedClip.id]: {
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    include_subtitle: e.target.checked,
+                  },
+                });
+              }}
+              className="rounded"
+            />
+            烧录字幕
           </label>
         </div>
       )}

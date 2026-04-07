@@ -384,7 +384,7 @@ pub async fn export_subtitles_srt(
     video_id: i64,
 ) -> Result<String, String> {
     let segments = service::list_subtitles(&state.db, video_id).await?;
-    let base_ms = get_base_ms(&state, video_id).await;
+    let base_ms = crate::core::subtitle::get_base_ms(&state.db, video_id).await;
     Ok(to_srt(&segments, base_ms))
 }
 
@@ -395,8 +395,8 @@ pub async fn export_subtitles_ass(
     video_id: i64,
 ) -> Result<String, String> {
     let segments = service::list_subtitles(&state.db, video_id).await?;
-    let base_ms = get_base_ms(&state, video_id).await;
-    Ok(to_ass(&segments, base_ms))
+    let base_ms = crate::core::subtitle::get_base_ms(&state.db, video_id).await;
+    Ok(crate::core::subtitle::generate_ass(&segments, base_ms))
 }
 
 /// Export subtitles as VTT format
@@ -406,25 +406,8 @@ pub async fn export_subtitles_vtt(
     video_id: i64,
 ) -> Result<String, String> {
     let segments = service::list_subtitles(&state.db, video_id).await?;
-    let base_ms = get_base_ms(&state, video_id).await;
+    let base_ms = crate::core::subtitle::get_base_ms(&state.db, video_id).await;
     Ok(to_vtt(&segments, base_ms))
-}
-
-/// Get the base time (recorded_at as approx ms) for absolute→relative conversion
-async fn get_base_ms(state: &AppState, video_id: i64) -> i64 {
-    sea_orm::ConnectionTrait::query_one(
-        state.db.conn(),
-        sea_orm::Statement::from_string(
-            sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT recorded_at FROM videos WHERE id = {}", video_id),
-        ),
-    )
-    .await
-    .ok()
-    .flatten()
-    .and_then(|r| r.try_get::<String>("", "recorded_at").ok())
-    .and_then(|ts| service::parse_recorded_at_to_unix_ms(&ts))
-    .unwrap_or(0)
 }
 
 fn format_srt_time(ms: i64) -> String {
@@ -434,15 +417,6 @@ fn format_srt_time(ms: i64) -> String {
     let s = total_secs % 60;
     let ms_part = ms % 1000;
     format!("{:02}:{:02}:{:02},{:03}", h, m, s, ms_part)
-}
-
-fn format_ass_time(ms: i64) -> String {
-    let total_secs = ms / 1000;
-    let h = total_secs / 3600;
-    let m = (total_secs % 3600) / 60;
-    let s = total_secs % 60;
-    let cs = (ms % 1000) / 10;
-    format!("{}:{:02}:{:02}.{:02}", h, m, s, cs)
 }
 
 fn format_vtt_time(ms: i64) -> String {
@@ -464,26 +438,6 @@ fn to_srt(segments: &[SubtitleSegment], base_ms: i64) -> String {
             i + 1,
             format_srt_time(start.max(0)),
             format_srt_time(end.max(0)),
-            seg.text,
-        ));
-    }
-    out
-}
-
-fn to_ass(segments: &[SubtitleSegment], base_ms: i64) -> String {
-    let mut out = String::from(
-        "[Script Info]\nTitle: ClipperStudio Export\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n\
-         [V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
-         Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n\n\
-         [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
-    );
-    for seg in segments {
-        let start = seg.start_ms - base_ms;
-        let end = seg.end_ms - base_ms;
-        out.push_str(&format!(
-            "Dialogue: 0,{},{},Default,,0,0,0,,{}\n",
-            format_ass_time(start.max(0)),
-            format_ass_time(end.max(0)),
             seg.text,
         ));
     }

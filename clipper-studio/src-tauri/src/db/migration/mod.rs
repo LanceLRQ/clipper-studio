@@ -2,6 +2,7 @@ use sea_orm_migration::prelude::*;
 
 mod m20260405_000001_init;
 mod m20260406_000002_asr_subtitles;
+mod m20260407_000003_media_tasks;
 
 pub struct Migrator;
 
@@ -11,6 +12,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260405_000001_init::Migration),
             Box::new(m20260406_000002_asr_subtitles::Migration),
+            Box::new(m20260407_000003_media_tasks::Migration),
         ]
     }
 }

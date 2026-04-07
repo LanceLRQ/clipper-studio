@@ -325,7 +325,7 @@ pub async fn remux_to_mp4(
     Ok(())
 }
 
-/// Burn subtitle/danmaku ASS file into video
+/// Burn subtitle/danmaku ASS file into video (simple, no progress reporting)
 pub async fn burn_subtitle(
     ffmpeg_path: &str,
     input: &Path,
@@ -338,11 +338,7 @@ pub async fn burn_subtitle(
         return Err("FFmpeg not available".to_string());
     }
 
-    // Escape ASS path for FFmpeg filter (colons and backslashes need escaping)
-    let ass_escaped = ass_path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .replace(':', "\\:");
+    let ass_escaped = escape_ass_path(ass_path);
 
     let status = AsyncCommand::new(ffmpeg_path)
         .args([
@@ -365,6 +361,154 @@ pub async fn burn_subtitle(
     }
 
     Ok(())
+}
+
+/// Progress info for burn operations (same structure as ClipProgress in clipper.rs)
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BurnProgress {
+    pub progress: f64,
+    pub time_secs: f64,
+    pub speed: Option<f64>,
+}
+
+/// Burn ASS subtitle/danmaku into video with progress reporting, cancellation,
+/// and configurable video codec.
+///
+/// This is the advanced version of `burn_subtitle` used by the clip burning pipeline.
+pub async fn burn_subtitle_with_progress(
+    ffmpeg_path: &str,
+    input: &Path,
+    ass_path: &Path,
+    output: &Path,
+    codec_hint: &str,
+    crf: Option<u32>,
+    cancel: tokio_util::sync::CancellationToken,
+    on_progress: impl Fn(BurnProgress) + Send + 'static,
+) -> Result<(), String> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command as AsyncCommand;
+
+    if ffmpeg_path.is_empty() {
+        return Err("FFmpeg not available".to_string());
+    }
+
+    // Probe input duration for progress calculation
+    let duration_secs = {
+        let ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe");
+        probe(&ffprobe_path, input)
+            .ok()
+            .and_then(|p| p.duration_ms)
+            .map(|ms| ms as f64 / 1000.0)
+            .unwrap_or(0.0)
+    };
+
+    let ass_escaped = escape_ass_path(ass_path);
+
+    let mut args: Vec<String> = Vec::new();
+    args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
+    args.extend(["-vf".to_string(), format!("ass={}", ass_escaped)]);
+
+    // Video codec
+    let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
+    args.extend(["-c:v".to_string(), video_codec]);
+
+    // CRF quality
+    if let Some(crf_val) = crf {
+        args.extend(["-crf".to_string(), crf_val.to_string()]);
+    }
+
+    // Audio: copy (no re-encoding needed)
+    args.extend(["-c:a".to_string(), "copy".to_string()]);
+
+    // Output with progress
+    args.extend([
+        "-y".to_string(),
+        "-progress".to_string(),
+        "pipe:1".to_string(),
+        output.to_string_lossy().to_string(),
+    ]);
+
+    tracing::info!("FFmpeg burn: {} {:?}", ffmpeg_path, args);
+
+    let mut child = AsyncCommand::new(ffmpeg_path)
+        .args(&args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start FFmpeg burn: {}", e))?;
+
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = BufReader::new(stdout).lines();
+    let mut current_speed: Option<f64> = None;
+
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                let _ = child.kill().await;
+                return Err("Task cancelled".to_string());
+            }
+            line = reader.next_line() => {
+                match line {
+                    Ok(Some(line)) => {
+                        if let Some(time_str) = line.strip_prefix("out_time_us=") {
+                            if let Ok(us) = time_str.trim().parse::<i64>() {
+                                let time_secs = us as f64 / 1_000_000.0;
+                                let progress = if duration_secs > 0.0 {
+                                    (time_secs / duration_secs).min(1.0).max(0.0)
+                                } else {
+                                    0.0
+                                };
+                                on_progress(BurnProgress {
+                                    progress,
+                                    time_secs,
+                                    speed: current_speed,
+                                });
+                            }
+                        } else if let Some(speed_str) = line.strip_prefix("speed=") {
+                            let cleaned = speed_str.trim().trim_end_matches('x');
+                            current_speed = cleaned.parse::<f64>().ok();
+                        } else if line.starts_with("progress=end") {
+                            on_progress(BurnProgress {
+                                progress: 1.0,
+                                time_secs: duration_secs,
+                                speed: current_speed,
+                            });
+                            break;
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        tracing::warn!("Failed to read FFmpeg burn output: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("FFmpeg burn process error: {}", e))?;
+
+    if !status.success() {
+        return Err(format!("FFmpeg burn exited with code: {}", status));
+    }
+
+    if !output.exists() {
+        return Err("FFmpeg burn completed but output file not found".to_string());
+    }
+
+    tracing::info!("Burn completed: {}", output.display());
+    Ok(())
+}
+
+/// Escape ASS path for FFmpeg filter (colons and backslashes need escaping)
+fn escape_ass_path(ass_path: &Path) -> String {
+    ass_path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace(':', "\\:")
 }
 
 /// Get FFmpeg version string

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use tauri::{Emitter, State};
 
 use crate::AppState;
-use crate::core::clipper::{self, PresetOptions};
+use crate::core::clipper::{self, BurnOptions, PresetOptions};
 use crate::core::queue::{TaskProgressEvent, TaskStatus};
 
 #[derive(Debug, Deserialize)]
@@ -16,6 +16,12 @@ pub struct CreateClipRequest {
     pub preset_id: Option<i64>,
     /// Output directory override (None = default workspace/clips/)
     pub output_dir: Option<String>,
+    /// Burn danmaku overlay into the output video
+    #[serde(default)]
+    pub include_danmaku: bool,
+    /// Burn subtitle overlay into the output video
+    #[serde(default)]
+    pub include_subtitle: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -147,12 +153,15 @@ pub async fn create_clip(
 
     // Submit to task queue
     let ffmpeg_path = state.ffmpeg_path.clone();
+    let danmaku_factory_path = state.danmaku_factory_path.clone();
     let db = state.db.clone();
-    let input_path = PathBuf::from(video_path);
+    let input_path = PathBuf::from(video_path.clone());
     let output = output_path.clone();
     let start_ms = req.start_ms;
     let end_ms = req.end_ms;
     let video_id = req.video_id;
+    let include_danmaku = req.include_danmaku;
+    let include_subtitle = req.include_subtitle;
     let app = app_handle.clone();
     let clip_title_for_notify = clip_title.clone();
 
@@ -162,14 +171,30 @@ pub async fn create_clip(
             // Update status to processing
             let _ = update_task_status(&db, task_id, "processing", None).await;
 
+            // Prepare burn options
+            let burn_options = prepare_burn_options(
+                &db,
+                &ffmpeg_path,
+                &danmaku_factory_path,
+                &video_path,
+                video_id,
+                start_ms,
+                end_ms,
+                include_danmaku,
+                include_subtitle,
+                task_id,
+            )
+            .await;
+
             let progress_tx_clone = progress_tx.clone();
-            let result = clipper::execute_clip(
+            let result = clipper::execute_clip_with_burn(
                 &ffmpeg_path,
                 &input_path,
                 &output,
                 start_ms,
                 end_ms,
                 &preset_options,
+                &burn_options,
                 cancel_token,
                 move |p| {
                     let _ = progress_tx_clone.send(TaskProgressEvent {
@@ -186,6 +211,17 @@ pub async fn create_clip(
             )
             .await;
 
+            // Cleanup temp ASS files
+            if let Some(ref p) = burn_options.danmaku_ass_path {
+                let _ = std::fs::remove_file(p);
+            }
+            if let Some(ref p) = burn_options.subtitle_ass_path {
+                let _ = std::fs::remove_file(p);
+            }
+
+            let did_burn_danmaku = burn_options.burn_danmaku && burn_options.danmaku_ass_path.is_some();
+            let did_burn_subtitle = burn_options.burn_subtitle && burn_options.subtitle_ass_path.is_some();
+
             match &result {
                 Ok(()) => {
                     // Record output file
@@ -196,13 +232,15 @@ pub async fn create_clip(
                     let _ = sea_orm::ConnectionTrait::execute_unprepared(
                         db.conn(),
                         &format!(
-                            "INSERT INTO clip_outputs (clip_task_id, video_id, output_path, format, variant, file_size) \
-                             VALUES ({}, {}, '{}', '{}', 'original', {})",
+                            "INSERT INTO clip_outputs (clip_task_id, video_id, output_path, format, variant, file_size, include_danmaku, include_subtitle) \
+                             VALUES ({}, {}, '{}', '{}', 'original', {}, {}, {})",
                             task_id,
                             video_id,
                             output.to_string_lossy().replace('\'', "''"),
                             output.extension().unwrap_or_default().to_string_lossy(),
                             file_size,
+                            did_burn_danmaku as i32,
+                            did_burn_subtitle as i32,
                         ),
                     )
                     .await;
@@ -485,6 +523,10 @@ pub struct BatchClipItem {
     pub offset_before_ms: i64,
     pub offset_after_ms: i64,
     pub audio_only: bool,
+    #[serde(default)]
+    pub include_danmaku: bool,
+    #[serde(default)]
+    pub include_subtitle: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -533,6 +575,8 @@ pub async fn create_batch_clips(
             title: item.title.clone(),
             preset_id,
             output_dir: None,
+            include_danmaku: item.include_danmaku,
+            include_subtitle: item.include_subtitle,
         };
 
         match create_clip(state.clone(), app_handle.clone(), clip_req).await {
@@ -545,6 +589,209 @@ pub async fn create_batch_clips(
     }
 
     Ok(results)
+}
+
+/// Prepare burn options for a clip task.
+///
+/// Generates temporary ASS files for danmaku and/or subtitles if requested.
+async fn prepare_burn_options(
+    db: &crate::db::Database,
+    _ffmpeg_path: &str,
+    danmaku_factory_path: &str,
+    video_path: &str,
+    video_id: i64,
+    start_ms: i64,
+    end_ms: i64,
+    include_danmaku: bool,
+    include_subtitle: bool,
+    task_id: i64,
+) -> BurnOptions {
+    let tmp_dir = std::env::temp_dir();
+    let mut danmaku_ass_path: Option<PathBuf> = None;
+    let mut subtitle_ass_path: Option<PathBuf> = None;
+
+    // Generate danmaku ASS
+    if include_danmaku && !danmaku_factory_path.is_empty() {
+        let xml_path = std::path::PathBuf::from(video_path).with_extension("xml");
+        if xml_path.exists() {
+            match crate::core::danmaku::parse_bilibili_xml(&xml_path) {
+                Ok(items) => {
+                    // Filter to clip range and shift timestamps
+                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms);
+                    if !filtered.is_empty() {
+                        // Write filtered XML for DanmakuFactory
+                        let tmp_xml = tmp_dir.join(format!("clipper_{}_danmaku.xml", task_id));
+                        let tmp_ass = tmp_dir.join(format!("clipper_{}_danmaku.ass", task_id));
+                        if crate::core::danmaku::write_bilibili_xml(&filtered, &tmp_xml).is_ok() {
+                            let options = crate::core::danmaku::DanmakuAssOptions::default();
+                            match crate::core::danmaku::convert_to_ass(
+                                danmaku_factory_path,
+                                &tmp_xml,
+                                &tmp_ass,
+                                &options,
+                            ) {
+                                Ok(()) => {
+                                    danmaku_ass_path = Some(tmp_ass);
+                                    tracing::info!("Generated danmaku ASS for task {}", task_id);
+                                }
+                                Err(e) => {
+                                    tracing::warn!("DanmakuFactory conversion failed: {}", e);
+                                }
+                            }
+                        }
+                        let _ = std::fs::remove_file(&tmp_xml);
+                    } else {
+                        tracing::info!("No danmaku in clip range [{}-{}ms]", start_ms, end_ms);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to parse danmaku XML: {}", e);
+                }
+            }
+        } else {
+            tracing::info!("No danmaku XML found for video: {}", video_path);
+        }
+    }
+
+    // Generate subtitle ASS
+    if include_subtitle {
+        let tmp_ass = tmp_dir.join(format!("clipper_{}_subtitle.ass", task_id));
+        match crate::core::subtitle::export_ass_for_clip(
+            db, video_id, start_ms, end_ms, &tmp_ass,
+        )
+        .await
+        {
+            Ok(true) => {
+                subtitle_ass_path = Some(tmp_ass);
+                tracing::info!("Generated subtitle ASS for task {}", task_id);
+            }
+            Ok(false) => {
+                tracing::info!("No subtitles in clip range [{}-{}ms]", start_ms, end_ms);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to generate subtitle ASS: {}", e);
+            }
+        }
+    }
+
+    // Determine burn codec — use "auto" (will pick best available hardware encoder)
+    let burn_codec = "auto".to_string();
+    let burn_crf = Some(23u32);
+
+    BurnOptions {
+        burn_danmaku: include_danmaku,
+        burn_subtitle: include_subtitle,
+        danmaku_ass_path,
+        subtitle_ass_path,
+        burn_codec,
+        burn_crf,
+    }
+}
+
+/// Check what burn options are available for a video
+#[derive(Debug, Serialize)]
+pub struct BurnAvailability {
+    /// Whether a danmaku XML file exists alongside the video
+    pub has_danmaku_xml: bool,
+    /// Whether the video has ASR subtitles in the database
+    pub has_subtitle: bool,
+    /// Whether DanmakuFactory is installed and available
+    pub has_danmaku_factory: bool,
+}
+
+#[tauri::command]
+pub async fn check_video_burn_availability(
+    state: State<'_, AppState>,
+    video_id: i64,
+) -> Result<BurnAvailability, String> {
+    // Get video file path
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT file_path, has_subtitle FROM videos WHERE id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let file_path: String = row.try_get("", "file_path").unwrap_or_default();
+    let has_subtitle: bool = row.try_get("", "has_subtitle").unwrap_or(false);
+
+    // Check danmaku XML existence
+    let xml_path = std::path::PathBuf::from(&file_path).with_extension("xml");
+    let has_danmaku_xml = xml_path.exists();
+
+    // Check DanmakuFactory availability
+    let has_danmaku_factory = !state.danmaku_factory_path.is_empty();
+
+    Ok(BurnAvailability {
+        has_danmaku_xml,
+        has_subtitle,
+        has_danmaku_factory,
+    })
+}
+
+/// Auto-detect segments by finding silence gaps in the audio envelope
+#[tauri::command]
+pub async fn auto_segment(
+    state: State<'_, AppState>,
+    video_id: i64,
+    silence_threshold: Option<f32>,
+    min_silence_ms: Option<i64>,
+    min_segment_ms: Option<i64>,
+) -> Result<Vec<crate::core::segment::DetectedSegment>, String> {
+    use crate::core::segment::{self, SegmentParams};
+    use crate::utils::ffmpeg::AudioEnvelope;
+
+    // Read audio envelope from database
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT window_ms, data FROM audio_envelopes WHERE video_id = {}", video_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("该视频没有音量数据，请先提取音量包络".to_string())?;
+
+    let window_ms: i32 = row.try_get("", "window_ms").unwrap_or(500);
+    let data_bytes: Vec<u8> = row.try_get("", "data").unwrap_or_default();
+
+    // Decode envelope data (stored as f32le blob)
+    let values: Vec<f32> = data_bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    if values.is_empty() {
+        return Err("音量数据为空".to_string());
+    }
+
+    let envelope = AudioEnvelope {
+        window_ms: window_ms as u32,
+        values,
+    };
+
+    let params = SegmentParams {
+        silence_threshold: silence_threshold.unwrap_or(0.05),
+        min_silence_ms: min_silence_ms.unwrap_or(3000),
+        min_segment_ms: min_segment_ms.unwrap_or(10000),
+    };
+
+    let segments = segment::detect_segments(&envelope, &params);
+    tracing::info!(
+        "Auto-segment: detected {} segments for video {} (threshold={}, min_silence={}ms, min_segment={}ms)",
+        segments.len(),
+        video_id,
+        params.silence_threshold,
+        params.min_silence_ms,
+        params.min_segment_ms,
+    );
+
+    Ok(segments)
 }
 
 fn chrono_now() -> String {

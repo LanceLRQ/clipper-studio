@@ -40,6 +40,8 @@ export function ClipActions({
             offset_before_ms: Math.round((opts?.clip_offset_before ?? 0) * 1000),
             offset_after_ms: Math.round((opts?.clip_offset_after ?? 0) * 1000),
             audio_only: opts?.audio_only ?? false,
+            include_danmaku: opts?.include_danmaku ?? false,
+            include_subtitle: opts?.include_subtitle ?? false,
           };
         }),
       });

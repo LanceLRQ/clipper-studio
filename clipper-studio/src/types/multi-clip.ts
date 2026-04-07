@@ -18,6 +18,10 @@ export interface ClipOptions {
   clip_offset_after: number;
   /** Extract audio only */
   audio_only: boolean;
+  /** Burn danmaku overlay into output video */
+  include_danmaku: boolean;
+  /** Burn subtitle overlay into output video */
+  include_subtitle: boolean;
 }
 
 export interface BatchClipItem {
@@ -28,6 +32,15 @@ export interface BatchClipItem {
   offset_before_ms: number;
   offset_after_ms: number;
   audio_only: boolean;
+  include_danmaku: boolean;
+  include_subtitle: boolean;
+}
+
+/** Burn availability info returned by check_video_burn_availability */
+export interface BurnAvailability {
+  has_danmaku_xml: boolean;
+  has_subtitle: boolean;
+  has_danmaku_factory: boolean;
 }
 
 export interface BatchClipRequest {

@@ -234,6 +234,80 @@ pub fn convert_to_ass(
     Ok(())
 }
 
+/// Filter danmaku items to a specific time range and shift timestamps.
+///
+/// - Only keeps items where `start_ms <= time_ms < end_ms`
+/// - Shifts all timestamps by `-start_ms` so the output starts at 0
+pub fn filter_danmaku_by_range(
+    items: &[DanmakuItem],
+    start_ms: i64,
+    end_ms: i64,
+) -> Vec<DanmakuItem> {
+    items
+        .iter()
+        .filter(|d| d.time_ms >= start_ms && d.time_ms < end_ms)
+        .map(|d| DanmakuItem {
+            time_ms: d.time_ms - start_ms,
+            text: d.text.clone(),
+            mode: d.mode,
+            color: d.color,
+            font_size: d.font_size,
+        })
+        .collect()
+}
+
+/// Write danmaku items as a minimal Bilibili XML file.
+///
+/// Produces XML that DanmakuFactory can read:
+/// ```xml
+/// <?xml version="1.0" encoding="utf-8"?>
+/// <i>
+///   <d p="time,mode,fontSize,color,0,0,0,0">text</d>
+///   ...
+/// </i>
+/// ```
+pub fn write_bilibili_xml(items: &[DanmakuItem], output: &Path) -> Result<(), String> {
+    use std::io::Write;
+
+    let mut file = std::fs::File::create(output)
+        .map_err(|e| format!("Failed to create danmaku XML: {}", e))?;
+
+    writeln!(file, "<?xml version=\"1.0\" encoding=\"utf-8\"?>")
+        .map_err(|e| e.to_string())?;
+    writeln!(file, "<i>").map_err(|e| e.to_string())?;
+
+    for item in items {
+        let mode_int: u16 = match item.mode {
+            DanmakuMode::Scroll => 1,
+            DanmakuMode::Bottom => 4,
+            DanmakuMode::Top => 5,
+        };
+        let time_secs = item.time_ms as f64 / 1000.0;
+        // Escape XML special characters in text
+        let escaped_text = item
+            .text
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;");
+        writeln!(
+            file,
+            "<d p=\"{:.3},{},{},{},0,0,0,0\">{}</d>",
+            time_secs, mode_int, item.font_size, item.color, escaped_text,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    writeln!(file, "</i>").map_err(|e| e.to_string())?;
+
+    tracing::info!(
+        "Wrote {} danmaku items to {}",
+        items.len(),
+        output.display(),
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -279,6 +353,39 @@ mod tests {
         assert_eq!(items[0].text, "第一条");
         assert_eq!(items[1].mode, DanmakuMode::Bottom);
         assert_eq!(items[2].mode, DanmakuMode::Top);
+    }
+
+    #[test]
+    fn test_filter_danmaku_by_range() {
+        let items = vec![
+            DanmakuItem { time_ms: 500, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+            DanmakuItem { time_ms: 1500, text: "b".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+            DanmakuItem { time_ms: 2500, text: "c".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+            DanmakuItem { time_ms: 3500, text: "d".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+        ];
+        let filtered = filter_danmaku_by_range(&items, 1000, 3000);
+        assert_eq!(filtered.len(), 2);
+        assert_eq!(filtered[0].text, "b");
+        assert_eq!(filtered[0].time_ms, 500); // 1500 - 1000
+        assert_eq!(filtered[1].text, "c");
+        assert_eq!(filtered[1].time_ms, 1500); // 2500 - 1000
+    }
+
+    #[test]
+    fn test_write_bilibili_xml() {
+        let items = vec![
+            DanmakuItem { time_ms: 1000, text: "hello".into(), mode: DanmakuMode::Scroll, color: 16777215, font_size: 25 },
+            DanmakuItem { time_ms: 2000, text: "<test>&".into(), mode: DanmakuMode::Top, color: 255, font_size: 30 },
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_danmaku_write.xml");
+        write_bilibili_xml(&items, &path).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("<d p=\"1.000,1,25,16777215,0,0,0,0\">hello</d>"));
+        assert!(content.contains("<d p=\"2.000,5,30,255,0,0,0,0\">&lt;test&gt;&amp;</d>"));
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

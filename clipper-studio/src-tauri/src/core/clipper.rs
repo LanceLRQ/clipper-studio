@@ -1,8 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
+
+use crate::utils::ffmpeg;
 
 /// FFmpeg progress info parsed from stderr
 #[derive(Debug, Clone, serde::Serialize)]
@@ -170,7 +172,7 @@ pub async fn execute_clip(
 
 /// Detect available encoders and select the best video codec.
 /// Priority: hardware (NVENC/VideoToolbox/QSV) > software (libx264)
-fn resolve_video_codec(ffmpeg_path: &str, codec_hint: &str) -> String {
+pub fn resolve_video_codec(ffmpeg_path: &str, codec_hint: &str) -> String {
     match codec_hint {
         "h264" | "auto" => detect_best_h264(ffmpeg_path),
         "h265" | "hevc" => detect_best_h265(ffmpeg_path),
@@ -220,4 +222,192 @@ fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
             String::from_utf8_lossy(&output.stdout).contains(encoder)
         })
         .unwrap_or(false)
+}
+
+// ====== Two-pass Clip + Burn Pipeline ======
+
+/// Options for subtitle/danmaku burning after clipping
+#[derive(Debug, Clone)]
+pub struct BurnOptions {
+    /// Burn danmaku overlay
+    pub burn_danmaku: bool,
+    /// Burn subtitle overlay
+    pub burn_subtitle: bool,
+    /// Path to generated danmaku ASS file (clip-relative timestamps)
+    pub danmaku_ass_path: Option<PathBuf>,
+    /// Path to generated subtitle ASS file (clip-relative timestamps)
+    pub subtitle_ass_path: Option<PathBuf>,
+    /// Video codec for the burn pass (e.g. "auto", "h264", "h265")
+    pub burn_codec: String,
+    /// CRF quality for the burn pass
+    pub burn_crf: Option<u32>,
+}
+
+impl BurnOptions {
+    /// Returns true if any burning is requested and has a valid ASS file
+    pub fn needs_burn(&self) -> bool {
+        (self.burn_danmaku && self.danmaku_ass_path.is_some())
+            || (self.burn_subtitle && self.subtitle_ass_path.is_some())
+    }
+}
+
+/// Execute a clip operation with optional subtitle/danmaku burning.
+///
+/// Two-pass pipeline:
+/// 1. **Pass 1 (Clip)**: Extract the time range from the source video (can use stream copy)
+/// 2. **Pass 2 (Burn)**: If burning is requested, burn ASS overlay into the clipped video
+///
+/// Progress is split: Pass 1 = 0%~40%, Pass 2 = 40%~100%.
+/// If no burning is needed, Pass 1 uses the full 0%~100% range.
+pub async fn execute_clip_with_burn(
+    ffmpeg_path: &str,
+    input: &Path,
+    output: &Path,
+    start_ms: i64,
+    end_ms: i64,
+    preset: &PresetOptions,
+    burn: &BurnOptions,
+    cancel: CancellationToken,
+    on_progress: impl Fn(ClipProgress) + Send + Clone + 'static,
+) -> Result<(), String> {
+    let needs_burn = burn.needs_burn();
+
+    if !needs_burn {
+        // No burning — just do a regular clip with full progress range
+        return execute_clip(ffmpeg_path, input, output, start_ms, end_ms, preset, cancel, on_progress).await;
+    }
+
+    // === Pass 1: Clip to intermediate file ===
+    let intermediate = output.with_extension("_tmp.mp4");
+    let on_progress_p1 = on_progress.clone();
+
+    tracing::info!("Clip+Burn Pass 1: clipping to intermediate {}", intermediate.display());
+
+    execute_clip(
+        ffmpeg_path,
+        input,
+        &intermediate,
+        start_ms,
+        end_ms,
+        preset,
+        cancel.clone(),
+        move |p| {
+            // Map pass 1 progress to 0% ~ 40%
+            on_progress_p1(ClipProgress {
+                progress: p.progress * 0.4,
+                time_secs: p.time_secs,
+                speed: p.speed,
+            });
+        },
+    )
+    .await
+    .map_err(|e| {
+        let _ = std::fs::remove_file(&intermediate);
+        e
+    })?;
+
+    // === Merge ASS files if both danmaku and subtitle are requested ===
+    let merged_ass = if burn.burn_danmaku && burn.burn_subtitle
+        && burn.danmaku_ass_path.is_some()
+        && burn.subtitle_ass_path.is_some()
+    {
+        let merged_path = std::env::temp_dir().join(format!(
+            "clipper_merged_{}.ass",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        ));
+        merge_ass_files(
+            burn.danmaku_ass_path.as_ref().unwrap(),
+            burn.subtitle_ass_path.as_ref().unwrap(),
+            &merged_path,
+        )?;
+        Some(merged_path)
+    } else {
+        None
+    };
+
+    // Determine which ASS file to burn
+    let ass_to_burn = if let Some(ref merged) = merged_ass {
+        merged.clone()
+    } else if burn.burn_danmaku {
+        burn.danmaku_ass_path.clone().unwrap()
+    } else {
+        burn.subtitle_ass_path.clone().unwrap()
+    };
+
+    // === Pass 2: Burn ASS into clipped video ===
+    tracing::info!("Clip+Burn Pass 2: burning {} into {}", ass_to_burn.display(), output.display());
+
+    let burn_result = ffmpeg::burn_subtitle_with_progress(
+        ffmpeg_path,
+        &intermediate,
+        &ass_to_burn,
+        output,
+        &burn.burn_codec,
+        burn.burn_crf,
+        cancel,
+        move |p| {
+            // Map pass 2 progress to 40% ~ 100%
+            on_progress(ClipProgress {
+                progress: 0.4 + p.progress * 0.6,
+                time_secs: p.time_secs,
+                speed: p.speed,
+            });
+        },
+    )
+    .await;
+
+    // Cleanup temp files
+    let _ = std::fs::remove_file(&intermediate);
+    if let Some(ref merged) = merged_ass {
+        let _ = std::fs::remove_file(merged);
+    }
+
+    burn_result
+}
+
+/// Merge two ASS files by appending subtitle events from the second file
+/// into the first file's event section.
+///
+/// The danmaku ASS (from DanmakuFactory) is used as base since it has
+/// proper styles for scrolling text. Subtitle events are appended with
+/// the "Default" style from a separate style definition.
+fn merge_ass_files(
+    danmaku_ass: &Path,
+    subtitle_ass: &Path,
+    output: &Path,
+) -> Result<(), String> {
+    let danmaku_content = std::fs::read_to_string(danmaku_ass)
+        .map_err(|e| format!("Failed to read danmaku ASS: {}", e))?;
+    let subtitle_content = std::fs::read_to_string(subtitle_ass)
+        .map_err(|e| format!("Failed to read subtitle ASS: {}", e))?;
+
+    let mut merged = danmaku_content.clone();
+
+    // Add a subtitle style to the danmaku ASS if not already present
+    if !merged.contains("Style: Subtitle,") {
+        // Insert subtitle style before [Events] section
+        if let Some(pos) = merged.find("[Events]") {
+            let subtitle_style = "Style: Subtitle,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n";
+            merged.insert_str(pos, subtitle_style);
+        }
+    }
+
+    // Extract Dialogue lines from subtitle ASS and append with "Subtitle" style
+    for line in subtitle_content.lines() {
+        if line.starts_with("Dialogue:") {
+            // Replace "Default" style with "Subtitle" style
+            let modified = line.replacen(",Default,", ",Subtitle,", 1);
+            merged.push_str(&modified);
+            merged.push('\n');
+        }
+    }
+
+    std::fs::write(output, &merged)
+        .map_err(|e| format!("Failed to write merged ASS: {}", e))?;
+
+    tracing::info!("Merged ASS files into {}", output.display());
+    Ok(())
 }

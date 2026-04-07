@@ -17,6 +17,8 @@ import {
   deleteVideo,
 } from "@/services/video";
 import { getActiveWorkspace } from "@/services/workspace";
+import { mergeVideos } from "@/services/media";
+import { listPresets } from "@/services/clip";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -87,6 +89,9 @@ function VideosPage() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set());
+  const [mergeMode, setMergeMode] = useState<"virtual" | "physical">("virtual");
+  const [merging, setMerging] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -128,6 +133,36 @@ function VideosPage() {
       else next.add(key);
       return next;
     });
+  };
+
+  const toggleVideoSelect = (id: number) => {
+    setSelectedVideoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleMerge = async () => {
+    const ids = Array.from(selectedVideoIds);
+    if (ids.length < 2) {
+      alert("请至少选择 2 个视频");
+      return;
+    }
+    if (!confirm(`将合并 ${ids.length} 个视频（${mergeMode === "virtual" ? "快速合并" : "重编码合并"}），确认？`))
+      return;
+
+    setMerging(true);
+    try {
+      await mergeVideos({ video_ids: ids, mode: mergeMode });
+      setSelectedVideoIds(new Set());
+      navigate({ to: "/dashboard/tasks" });
+    } catch (e) {
+      alert("合并失败: " + String(e));
+    } finally {
+      setMerging(false);
+    }
   };
 
   // Group sessions by streamer for "streamers" view
@@ -229,6 +264,39 @@ function VideosPage() {
           </Button>
         </div>
       </div>
+
+      {/* Merge toolbar (shown when videos are selected) */}
+      {selectedVideoIds.size > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border bg-accent/30 p-2 text-sm">
+          <span className="text-muted-foreground">
+            已选 {selectedVideoIds.size} 个视频
+          </span>
+          <select
+            className="rounded-md border bg-background px-2 py-1 text-xs"
+            value={mergeMode}
+            onChange={(e) =>
+              setMergeMode(e.target.value as "virtual" | "physical")
+            }
+          >
+            <option value="virtual">快速合并（要求相同编码）</option>
+            <option value="physical">重编码合并（通用）</option>
+          </select>
+          <Button
+            size="sm"
+            onClick={handleMerge}
+            disabled={merging || selectedVideoIds.size < 2}
+          >
+            {merging ? "合并中..." : "合并视频"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSelectedVideoIds(new Set())}
+          >
+            取消选择
+          </Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-muted-foreground">加载中...</div>
@@ -333,6 +401,8 @@ function VideosPage() {
                                   indent
                                   onNavigate={() => navigateToVideo(video.id)}
                                   onDelete={(e) => handleDelete(video, e)}
+                                  selected={selectedVideoIds.has(video.id)}
+                                  onToggleSelect={toggleVideoSelect}
                                 />
                               ))}
                             </div>
@@ -398,6 +468,8 @@ function VideosPage() {
                               compact
                               onNavigate={() => navigateToVideo(video.id)}
                               onDelete={(e) => handleDelete(video, e)}
+                              selected={selectedVideoIds.has(video.id)}
+                              onToggleSelect={toggleVideoSelect}
                             />
                           ))}
                         </div>
@@ -426,6 +498,8 @@ function VideosPage() {
                         compact={false}
                         onNavigate={() => navigateToVideo(video.id)}
                         onDelete={(e) => handleDelete(video, e)}
+                        selected={selectedVideoIds.has(video.id)}
+                        onToggleSelect={toggleVideoSelect}
                       />
                     ))}
                 </div>
@@ -442,6 +516,8 @@ function VideosPage() {
               compact={false}
               onNavigate={() => navigateToVideo(video.id)}
               onDelete={(e) => handleDelete(video, e)}
+              selected={selectedVideoIds.has(video.id)}
+              onToggleSelect={toggleVideoSelect}
             />
           ))}
         </div>
@@ -479,12 +555,16 @@ function VideoRow({
   indent,
   onNavigate,
   onDelete,
+  selected,
+  onToggleSelect,
 }: {
   video: VideoInfo;
   compact: boolean;
   indent?: boolean;
   onNavigate: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  selected?: boolean;
+  onToggleSelect?: (id: number) => void;
 }) {
   const title = buildVideoTitle(video);
   const showTitle = title !== video.file_name;
@@ -493,10 +573,19 @@ function VideoRow({
 
   return (
     <div
-      className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass}`}
+      className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass} ${selected ? "bg-accent/40" : ""}`}
       onClick={onNavigate}
     >
       <div className="flex items-center gap-3 min-w-0">
+        {onToggleSelect && (
+          <input
+            type="checkbox"
+            checked={selected ?? false}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => onToggleSelect(video.id)}
+            className="rounded shrink-0"
+          />
+        )}
         <div className="min-w-0 space-y-0.5">
           {/* Primary line: streamer - title - time range */}
           <div className="text-sm truncate font-medium">
