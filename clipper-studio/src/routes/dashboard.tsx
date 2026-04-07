@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
+import bannerImg from "@/assets/banner.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
 
@@ -116,10 +117,10 @@ function DashboardLayout() {
     <div className="flex h-screen flex-col">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-6">
-        <div className="flex items-center">
-          <h1 className="text-lg font-semibold">ClipperStudio</h1>
+        <div className="flex items-center gap-2">
+          <img src={bannerImg} alt="ClipperStudio" className="h-8" />
           {version && (
-            <span className="ml-2 text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground self-end pb-1.5">
               v{version}
             </span>
           )}
