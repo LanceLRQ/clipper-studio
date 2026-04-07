@@ -67,11 +67,19 @@ pub async fn submit_asr(
     force: Option<bool>,
 ) -> Result<i64, String> {
     let provider = get_provider(&state).await?;
+    // Use frontend-provided language, or fall back to settings, or default "Chinese"
+    let lang = match language {
+        Some(l) if !l.is_empty() => l,
+        _ => read_setting(&state, "asr_language")
+            .await
+            .unwrap_or_else(|| "Chinese".to_string()),
+    };
     service::submit_asr(
         &state.db,
         &provider,
+        &state.ffmpeg_path,
         video_id,
-        language.as_deref(),
+        Some(lang.as_str()),
         force.unwrap_or(false),
     )
     .await
@@ -96,13 +104,21 @@ pub async fn list_asr_tasks(
     service::list_asr_tasks(&state.db, video_id).await
 }
 
-/// List subtitle segments for a video
+/// List subtitle segments for a video, along with base_ms for time conversion
 #[tauri::command]
 pub async fn list_subtitles(
     state: State<'_, AppState>,
     video_id: i64,
-) -> Result<Vec<SubtitleSegment>, String> {
-    service::list_subtitles(&state.db, video_id).await
+) -> Result<SubtitleListResponse, String> {
+    let segments = service::list_subtitles(&state.db, video_id).await?;
+    let base_ms = crate::core::subtitle::get_base_ms(&state.db, video_id).await;
+    Ok(SubtitleListResponse { segments, base_ms })
+}
+
+#[derive(serde::Serialize)]
+pub struct SubtitleListResponse {
+    pub segments: Vec<SubtitleSegment>,
+    pub base_ms: i64,
 }
 
 /// Search subtitles by text (FTS5 full-text search)

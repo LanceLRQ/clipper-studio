@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -38,10 +39,56 @@ pub struct ASRTaskInfo {
     pub completed_at: Option<String>,
 }
 
+/// Convert video/audio to 16kHz mono WAV for ASR processing.
+///
+/// Uses FFmpeg: `ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_s16le output.wav`
+/// Returns the path to the temporary WAV file.
+async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let wav_path = temp_dir.join(format!("clipper_asr_{}.wav", timestamp));
+
+    tracing::info!(
+        "Converting audio for ASR: {} -> {}",
+        input.display(),
+        wav_path.display()
+    );
+
+    let output = tokio::process::Command::new(ffmpeg_path)
+        .args([
+            "-i",
+            &input.to_string_lossy(),
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            "-y",
+            &wav_path.to_string_lossy(),
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("音频转换失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("音频转换失败: {}", stderr));
+    }
+
+    Ok(wav_path)
+}
+
 /// Submit an ASR task for a video
 pub async fn submit_asr(
     db: &Database,
     provider: &Arc<dyn ASRProvider>,
+    ffmpeg_path: &str,
     video_id: i64,
     language: Option<&str>,
     force: bool,
@@ -82,12 +129,27 @@ pub async fn submit_asr(
     .ok_or("视频不存在".to_string())?;
 
     let file_path: String = video_row.try_get("", "file_path").unwrap_or_default();
-    let lang = language.unwrap_or("zh");
+    let lang = language.unwrap_or("Chinese");
 
-    // Submit to ASR provider
-    let remote_task_id = provider
-        .submit(std::path::Path::new(&file_path), Some(lang))
-        .await?;
+    // Convert to 16kHz mono WAV for ASR
+    let wav_path = convert_to_asr_wav(ffmpeg_path, Path::new(&file_path)).await?;
+
+    // Submit to ASR provider (use WAV file)
+    let remote_task_id = match provider
+        .submit(&wav_path, Some(lang))
+        .await
+    {
+        Ok(id) => {
+            // Clean up temp WAV after successful submit
+            let _ = tokio::fs::remove_file(&wav_path).await;
+            id
+        }
+        Err(e) => {
+            // Clean up temp WAV on error too
+            let _ = tokio::fs::remove_file(&wav_path).await;
+            return Err(e);
+        }
+    };
 
     // Create asr_task record
     sea_orm::ConnectionTrait::execute_unprepared(
@@ -174,7 +236,7 @@ pub async fn poll_asr(
         }
         ASRTaskStatus::Completed { segments } => {
             // Import segments into subtitle_segments
-            let language: String = task_row.try_get("", "language").unwrap_or("zh".to_string());
+            let language: String = task_row.try_get("", "language").unwrap_or("Chinese".to_string());
             let count = import_segments(db, video_id, &language, &segments).await?;
 
             let _ = sea_orm::ConnectionTrait::execute_unprepared(
@@ -447,7 +509,7 @@ fn row_to_segment(row: &sea_orm::QueryResult) -> SubtitleSegment {
     SubtitleSegment {
         id: row.try_get("", "id").unwrap_or(0),
         video_id: row.try_get("", "video_id").unwrap_or(0),
-        language: row.try_get("", "language").unwrap_or("zh".to_string()),
+        language: row.try_get("", "language").unwrap_or("Chinese".to_string()),
         start_ms: row.try_get("", "start_ms").unwrap_or(0),
         end_ms: row.try_get("", "end_ms").unwrap_or(0),
         text: row.try_get("", "text").unwrap_or_default(),

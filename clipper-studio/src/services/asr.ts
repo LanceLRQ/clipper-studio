@@ -46,10 +46,15 @@ export async function listASRTasks(
   return invoke<ASRTaskInfo[]>("list_asr_tasks", { videoId });
 }
 
+export interface SubtitleListResponse {
+  segments: SubtitleSegment[];
+  base_ms: number;
+}
+
 export async function listSubtitles(
   videoId: number
-): Promise<SubtitleSegment[]> {
-  return invoke<SubtitleSegment[]>("list_subtitles", { videoId });
+): Promise<SubtitleListResponse> {
+  return invoke<SubtitleListResponse>("list_subtitles", { videoId });
 }
 
 export async function searchSubtitles(

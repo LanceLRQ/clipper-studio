@@ -123,8 +123,12 @@
     }
   body {
     @apply bg-background text-foreground;
+    overflow: hidden;
+    overscroll-behavior: none;
     }
   html {
     @apply font-sans;
+    overflow: hidden;
+    overscroll-behavior: none;
     }
 }

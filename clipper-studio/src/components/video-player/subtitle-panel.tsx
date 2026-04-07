@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SubtitleSegment, ASRTaskInfo } from "@/services/asr";
@@ -17,8 +18,6 @@ interface SubtitlePanelProps {
   videoId: number;
   /** Current playback time in seconds */
   currentTime: number;
-  /** Base time offset: recorded_at as approximate Unix seconds (for absolute→relative conversion) */
-  baseTimeMs: number;
   /** Seek callback */
   onSeek?: (timeSecs: number) => void;
   /** Set clip start/end time */
@@ -29,30 +28,37 @@ interface SubtitlePanelProps {
 function formatTime(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const s = Math.floor(secs % 60);
+  const s = secs % 60;
+  const sStr = s.toFixed(1).padStart(4, "0");
   if (h > 0)
-    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    return `${h}:${m.toString().padStart(2, "0")}:${sStr}`;
+  return `${m.toString().padStart(2, "0")}:${sStr}`;
 }
 
 export function SubtitlePanel({
   videoId,
   currentTime,
-  baseTimeMs,
   onSeek,
   onSetClipStart,
   onSetClipEnd,
 }: SubtitlePanelProps) {
   const [segments, setSegments] = useState<SubtitleSegment[]>([]);
+  const [baseTimeMs, setBaseTimeMs] = useState(0);
   const [asrTask, setAsrTask] = useState<ASRTaskInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const activeRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const loadSubtitles = async () => {
+    const resp = await listSubtitles(videoId);
+    setSegments(resp.segments);
+    setBaseTimeMs(resp.base_ms);
+  };
+
   // Load subtitles and ASR task status
   useEffect(() => {
-    listSubtitles(videoId).then(setSegments).catch(console.error);
+    loadSubtitles().catch(console.error);
     listASRTasks(videoId).then((tasks) => {
       const active = tasks.find(
         (t) => t.status === "processing" || t.status === "pending"
@@ -73,8 +79,7 @@ export function SubtitlePanel({
         setAsrTask(updated);
         if (updated.status === "completed") {
           // Reload subtitles
-          const subs = await listSubtitles(videoId);
-          setSegments(subs);
+          await loadSubtitles();
           if (pollRef.current) clearInterval(pollRef.current);
         } else if (updated.status === "failed") {
           if (pollRef.current) clearInterval(pollRef.current);
@@ -193,11 +198,14 @@ export function SubtitlePanel({
                 size="sm"
                 variant="ghost"
                 className="h-6 px-1 text-xs"
-                onClick={handleSubmitASR}
-                disabled={loading}
-                title="重新识别"
+                onClick={async () => {
+                  if (!(await ask("重新识别将覆盖当前字幕，确定继续？", { title: "重新 ASR 识别", kind: "warning" }))) return;
+                  await handleSubmitASR();
+                }}
+                disabled={loading || (asrTask?.status === "processing" || asrTask?.status === "pending")}
+                title="重新识别（将覆盖当前字幕）"
               >
-                刷新
+                重新生成
               </Button>
             </>
           )}
@@ -268,7 +276,7 @@ export function SubtitlePanel({
                 }`}
                 onClick={() => onSeek?.(startSecs)}
               >
-                <span className="text-muted-foreground shrink-0 w-16">
+                <span className="text-muted-foreground shrink-0 w-20">
                   {formatTime(startSecs)}
                 </span>
                 <span className="flex-1 break-all">{seg.text}</span>

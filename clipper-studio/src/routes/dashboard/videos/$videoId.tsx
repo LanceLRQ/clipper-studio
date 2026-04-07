@@ -459,7 +459,6 @@ function VideoDetailPage() {
               <SubtitlePanel
                 videoId={video.id}
                 currentTime={currentTime}
-                baseTimeMs={0}
                 onSeek={handleSeek}
                 onSetClipStart={handleSetClipStart}
                 onSetClipEnd={handleSetClipEnd}

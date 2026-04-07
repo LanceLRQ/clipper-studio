@@ -17,6 +17,39 @@ import {
 
 type ASRMode = "local" | "remote" | "disabled";
 
+const ASR_LANGUAGES = [
+  "Chinese",
+  "English",
+  "Cantonese",
+  "Japanese",
+  "Korean",
+  "Arabic",
+  "German",
+  "French",
+  "Spanish",
+  "Portuguese",
+  "Indonesian",
+  "Italian",
+  "Russian",
+  "Thai",
+  "Vietnamese",
+  "Turkish",
+  "Hindi",
+  "Malay",
+  "Dutch",
+  "Swedish",
+  "Danish",
+  "Finnish",
+  "Polish",
+  "Czech",
+  "Filipino",
+  "Persian",
+  "Greek",
+  "Romanian",
+  "Hungarian",
+  "Macedonian",
+] as const;
+
 // ===== System Settings Tab =====
 function SystemSettingsTab() {
   // ASR settings
@@ -24,6 +57,7 @@ function SystemSettingsTab() {
   const [asrPort, setAsrPort] = useState("8765");
   const [asrUrl, setAsrUrl] = useState("");
   const [asrApiKey, setAsrApiKey] = useState("");
+  const [asrLanguage, setAsrLanguage] = useState("Chinese");
   const [asrHealth, setAsrHealth] = useState<ASRHealthInfo | null>(null);
   const [asrChecking, setAsrChecking] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,6 +83,7 @@ function SystemSettingsTab() {
       "asr_port",
       "asr_url",
       "asr_api_key",
+      "asr_language",
       "plugin_dir",
     ])
       .then((settings) => {
@@ -56,6 +91,7 @@ function SystemSettingsTab() {
         if (settings.asr_port) setAsrPort(settings.asr_port);
         if (settings.asr_url) setAsrUrl(settings.asr_url);
         if (settings.asr_api_key) setAsrApiKey(settings.asr_api_key);
+        if (settings.asr_language) setAsrLanguage(settings.asr_language);
         if (settings.plugin_dir) {
           setPluginDir(settings.plugin_dir);
         }
@@ -82,6 +118,7 @@ function SystemSettingsTab() {
       await setSetting("asr_port", asrPort);
       if (asrUrl) await setSetting("asr_url", asrUrl);
       if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
+      await setSetting("asr_language", asrLanguage);
       if (pluginDir) await setSetting("plugin_dir", pluginDir);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -130,6 +167,21 @@ function SystemSettingsTab() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-sm">识别语言</Label>
+          <select
+            value={asrLanguage}
+            onChange={(e) => setAsrLanguage(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm w-48"
+          >
+            {ASR_LANGUAGES.map((lang) => (
+              <option key={lang} value={lang}>
+                {lang}
+              </option>
+            ))}
+          </select>
         </div>
 
         {asrMode === "local" && (
