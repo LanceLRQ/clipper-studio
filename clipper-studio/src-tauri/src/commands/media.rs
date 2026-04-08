@@ -466,3 +466,90 @@ async fn update_media_task_status(
     .map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Delete output file from disk if it exists
+fn delete_media_output_file(path: &str) {
+    let p = std::path::Path::new(path);
+    if p.exists() {
+        if let Err(e) = std::fs::remove_file(p) {
+            tracing::warn!("Failed to delete output file {}: {}", path, e);
+        } else {
+            tracing::info!("Deleted output file: {}", path);
+        }
+    }
+}
+
+/// Delete a single media task (only completed/failed/cancelled)
+#[tauri::command]
+pub async fn delete_media_task(
+    state: State<'_, AppState>,
+    task_id: i64,
+    delete_files: Option<bool>,
+) -> Result<(), String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT status, output_path FROM media_tasks WHERE id = {}", task_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("任务不存在".to_string())?;
+
+    let status: String = row.try_get("", "status").unwrap_or_default();
+    if status == "pending" || status == "processing" {
+        return Err("请先取消该任务".to_string());
+    }
+
+    if delete_files.unwrap_or(false) {
+        if let Ok(path) = row.try_get::<String>("", "output_path") {
+            delete_media_output_file(&path);
+        }
+    }
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM media_tasks WHERE id = {}", task_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tracing::info!("Media task deleted: id={}, delete_files={}", task_id, delete_files.unwrap_or(false));
+    Ok(())
+}
+
+/// Clear all finished media tasks
+#[tauri::command]
+pub async fn clear_finished_media_tasks(
+    state: State<'_, AppState>,
+    delete_files: Option<bool>,
+) -> Result<u64, String> {
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT output_path FROM media_tasks WHERE status NOT IN ('pending','processing') AND output_path IS NOT NULL".to_string(),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        for row in &rows {
+            if let Ok(path) = row.try_get::<String>("", "output_path") {
+                delete_media_output_file(&path);
+            }
+        }
+    }
+
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "DELETE FROM media_tasks WHERE status NOT IN ('pending','processing')",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let deleted = result.rows_affected();
+    tracing::info!("Cleared {} finished media tasks, delete_files={}", deleted, delete_files.unwrap_or(false));
+    Ok(deleted)
+}

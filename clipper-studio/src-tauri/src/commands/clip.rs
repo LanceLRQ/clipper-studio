@@ -886,6 +886,207 @@ async fn build_batch_title(conn: &sea_orm::DatabaseConnection, video_id: i64) ->
     parts.join("-")
 }
 
+#[derive(Debug, Serialize)]
+pub struct DeleteBatchResult {
+    pub deleted: u64,
+    pub skipped: u64,
+}
+
+/// Collect output file paths for given clip task IDs and delete them from disk
+fn delete_output_files(db_rows: &[sea_orm::QueryResult]) {
+    for row in db_rows {
+        let path: String = match row.try_get("", "output_path") {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let p = std::path::Path::new(&path);
+        if p.exists() {
+            if let Err(e) = std::fs::remove_file(p) {
+                tracing::warn!("Failed to delete output file {}: {}", path, e);
+            } else {
+                tracing::info!("Deleted output file: {}", path);
+            }
+        }
+    }
+}
+
+/// Delete a single clip task (only completed/failed/cancelled)
+#[tauri::command]
+pub async fn delete_clip_task(
+    state: State<'_, AppState>,
+    task_id: i64,
+    delete_files: Option<bool>,
+) -> Result<(), String> {
+    // Check task status
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT status FROM clip_tasks WHERE id = {}", task_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("任务不存在".to_string())?;
+
+    let status: String = row.try_get("", "status").unwrap_or_default();
+    if status == "pending" || status == "processing" {
+        return Err("请先取消该任务".to_string());
+    }
+
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!("SELECT output_path FROM clip_outputs WHERE clip_task_id = {}", task_id),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs first (FK dependency)
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM clip_outputs WHERE clip_task_id = {}", task_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM clip_tasks WHERE id = {}", task_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tracing::info!("Clip task deleted: id={}, delete_files={}", task_id, delete_files.unwrap_or(false));
+    Ok(())
+}
+
+/// Delete all deletable tasks in a batch
+#[tauri::command]
+pub async fn delete_clip_batch(
+    state: State<'_, AppState>,
+    batch_id: String,
+    delete_files: Option<bool>,
+) -> Result<DeleteBatchResult, String> {
+    let escaped = batch_id.replace('\'', "''");
+
+    // Count active tasks in the batch
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT SUM(CASE WHEN status IN ('pending','processing') THEN 1 ELSE 0 END) as active \
+                 FROM clip_tasks WHERE batch_id = '{}'",
+                escaped
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("批次不存在".to_string())?;
+
+    let active: i64 = row.try_get("", "active").unwrap_or(0);
+
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT output_path FROM clip_outputs WHERE clip_task_id IN (\
+                     SELECT id FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing'))",
+                    escaped
+                ),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs for deletable tasks
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "DELETE FROM clip_outputs WHERE clip_task_id IN (\
+             SELECT id FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing'))",
+            escaped
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Delete the tasks themselves
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "DELETE FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing')",
+            escaped
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let deleted = result.rows_affected();
+    tracing::info!("Batch '{}' deleted: {} tasks, {} skipped, delete_files={}", batch_id, deleted, active, delete_files.unwrap_or(false));
+
+    Ok(DeleteBatchResult {
+        deleted,
+        skipped: active as u64,
+    })
+}
+
+/// Clear all finished (completed/failed/cancelled) clip tasks
+#[tauri::command]
+pub async fn clear_finished_clip_tasks(
+    state: State<'_, AppState>,
+    delete_files: Option<bool>,
+) -> Result<u64, String> {
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT output_path FROM clip_outputs WHERE clip_task_id IN (\
+                 SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))".to_string(),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs for finished tasks
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "DELETE FROM clip_outputs WHERE clip_task_id IN (\
+         SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Delete finished tasks
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "DELETE FROM clip_tasks WHERE status NOT IN ('pending','processing')",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let deleted = result.rows_affected();
+    tracing::info!("Cleared {} finished clip tasks, delete_files={}", deleted, delete_files.unwrap_or(false));
+    Ok(deleted)
+}
+
 fn chrono_now() -> String {
     // Simple ISO format without chrono dependency
     let now = std::time::SystemTime::now()

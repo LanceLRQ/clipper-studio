@@ -1,9 +1,25 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import type { ClipTaskInfo, TaskProgressEvent } from "@/types/clip";
-import { listClipTasks, cancelClip } from "@/services/clip";
+import {
+  listClipTasks,
+  cancelClip,
+  deleteClipTask,
+  deleteClipBatch,
+  clearFinishedClipTasks,
+} from "@/services/clip";
+import { clearFinishedMediaTasks } from "@/services/media";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -79,10 +95,85 @@ function TasksPage() {
     };
   }, []);
 
+  // Delete confirmation dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    deleteFiles: boolean;
+    onConfirm: (deleteFiles: boolean) => Promise<void>;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    deleteFiles: false,
+    onConfirm: async () => {},
+  });
+
+  const showDeleteDialog = useCallback(
+    (
+      title: string,
+      description: string,
+      onConfirm: (deleteFiles: boolean) => Promise<void>,
+    ) => {
+      setDeleteDialog({
+        open: true,
+        title,
+        description,
+        deleteFiles: false,
+        onConfirm,
+      });
+    },
+    [],
+  );
+
+  const handleDialogConfirm = async () => {
+    const { deleteFiles, onConfirm } = deleteDialog;
+    setDeleteDialog((prev) => ({ ...prev, open: false }));
+    try {
+      await onConfirm(deleteFiles);
+    } catch (e) {
+      alert(String(e));
+      return;
+    }
+    await loadTasks();
+  };
+
   const handleCancel = async (taskId: number) => {
     await cancelClip(taskId);
     await loadTasks();
   };
+
+  const handleDeleteTask = (taskId: number) => {
+    showDeleteDialog("删除任务", "确定要删除该任务记录吗？", async (df) => {
+      await deleteClipTask(taskId, df);
+    });
+  };
+
+  const handleDeleteBatch = (batchId: string, title: string) => {
+    showDeleteDialog(
+      "删除批次",
+      `确定要删除批次「${title}」的任务记录吗？\n处理中或等待中的任务不会被删除。`,
+      async (df) => {
+        await deleteClipBatch(batchId, df);
+      },
+    );
+  };
+
+  const handleClearAll = () => {
+    showDeleteDialog(
+      "清除任务",
+      "确定要清除所有已完成、失败和已取消的任务记录吗？",
+      async (df) => {
+        await clearFinishedClipTasks(df);
+        await clearFinishedMediaTasks(df);
+      },
+    );
+  };
+
+  const hasFinishedTasks = tasks.some((t) =>
+    ["completed", "failed", "cancelled"].includes(t.status),
+  );
 
   // Group tasks by batch_id
   const groups: TaskGroup[] = useMemo(() => {
@@ -161,9 +252,16 @@ function TasksPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">任务中心</h2>
-        <Button variant="outline" size="sm" onClick={loadTasks}>
-          刷新
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasFinishedTasks && (
+            <Button variant="outline" size="sm" onClick={handleClearAll}>
+              清除已完成
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={loadTasks}>
+            刷新
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -208,6 +306,18 @@ function TasksPage() {
                           onClick={() => handleCancel(task.id)}
                         >
                           取消
+                        </Button>
+                      )}
+                      {["completed", "failed", "cancelled"].includes(
+                        status,
+                      ) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-red-500"
+                          onClick={() => handleDeleteTask(task.id)}
+                        >
+                          删除
                         </Button>
                       )}
                     </div>
@@ -257,9 +367,24 @@ function TasksPage() {
                       {completedCount}/{group.tasks.length} 个片段
                     </span>
                   </div>
-                  <span className={`text-sm ${batchLabel.color}`}>
-                    {batchLabel.text}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-sm ${batchLabel.color}`}>
+                      {batchLabel.text}
+                    </span>
+                    {!["processing", "pending"].includes(batchStatus) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-red-500"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteBatch(group.key, group.title);
+                        }}
+                      >
+                        删除批次
+                      </Button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Batch progress bar */}
@@ -321,6 +446,21 @@ function TasksPage() {
                                   取消
                                 </Button>
                               )}
+                              {["completed", "failed", "cancelled"].includes(
+                                status,
+                              ) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="text-muted-foreground hover:text-red-500 h-6 px-1.5 text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteTask(task.id);
+                                  }}
+                                >
+                                  删除
+                                </Button>
+                              )}
                             </div>
                           </div>
                           {status === "processing" && (
@@ -345,6 +485,55 @@ function TasksPage() {
           })}
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onOpenChange={(open) =>
+          setDeleteDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{deleteDialog.title}</DialogTitle>
+            <DialogDescription>{deleteDialog.description}</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={deleteDialog.deleteFiles}
+                onChange={(e) =>
+                  setDeleteDialog((prev) => ({
+                    ...prev,
+                    deleteFiles: e.target.checked,
+                  }))
+                }
+                className="h-4 w-4 rounded border-input"
+              />
+              <span className="text-sm">同时删除输出文件</span>
+            </label>
+            {deleteDialog.deleteFiles && (
+              <p className="text-xs text-red-500 mt-1 ml-6">
+                将从磁盘上永久删除已生成的文件，此操作不可撤销
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose
+              render={<Button variant="outline" />}
+            >
+              取消
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={handleDialogConfirm}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

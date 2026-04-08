@@ -25,6 +25,31 @@ export async function listPresets(): Promise<EncodingPreset[]> {
   return invoke<EncodingPreset[]>("list_presets");
 }
 
+export async function deleteClipTask(
+  taskId: number,
+  deleteFiles = false
+): Promise<void> {
+  return invoke<void>("delete_clip_task", { taskId, deleteFiles });
+}
+
+export interface DeleteBatchResult {
+  deleted: number;
+  skipped: number;
+}
+
+export async function deleteClipBatch(
+  batchId: string,
+  deleteFiles = false
+): Promise<DeleteBatchResult> {
+  return invoke<DeleteBatchResult>("delete_clip_batch", { batchId, deleteFiles });
+}
+
+export async function clearFinishedClipTasks(
+  deleteFiles = false
+): Promise<number> {
+  return invoke<number>("clear_finished_clip_tasks", { deleteFiles });
+}
+
 import type { BatchClipRequest, BurnAvailability } from "@/types/multi-clip";
 
 export async function createBatchClips(
