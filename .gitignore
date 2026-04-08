@@ -145,6 +145,7 @@ CLAUDE.local.md
 .claude
 .opencode
 tasks.md
+TASK.md
 .DS_Store
 
 # Tauri build artifacts
