@@ -30,6 +30,19 @@ export async function listMediaTasks(
   return invoke<MediaTaskInfo[]>("list_media_tasks", { taskType });
 }
 
+export async function deleteMediaTask(
+  taskId: number,
+  deleteFiles = false
+): Promise<void> {
+  return invoke<void>("delete_media_task", { taskId, deleteFiles });
+}
+
+export async function clearFinishedMediaTasks(
+  deleteFiles = false
+): Promise<number> {
+  return invoke<number>("clear_finished_media_tasks", { deleteFiles });
+}
+
 export interface MergeRequest {
   video_ids: number[];
   mode: string;

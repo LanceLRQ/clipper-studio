@@ -16,6 +16,7 @@ export interface ClipTaskInfo {
   status: string;
   progress: number;
   error_message: string | null;
+  output_path: string | null;
   created_at: string;
   completed_at: string | null;
   batch_id: string | null;

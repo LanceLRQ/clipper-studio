@@ -139,11 +139,13 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
 # project
+.worktree
 plans
 CLAUDE.local.md
 .claude
 .opencode
 tasks.md
+TASK.md
 .DS_Store
 
 # Tauri build artifacts

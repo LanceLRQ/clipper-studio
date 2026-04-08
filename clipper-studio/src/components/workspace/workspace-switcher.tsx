@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { FolderOpenIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -53,7 +54,7 @@ export function WorkspaceSwitcher() {
       <DropdownMenuTrigger
         className="inline-flex items-center gap-2 rounded-md border border-input bg-background px-3 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground cursor-pointer"
       >
-        <span className="text-base">📁</span>
+        <FolderOpenIcon className="h-4 w-4 text-muted-foreground" />
         <span className="max-w-[180px] truncate">{displayName}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
@@ -82,12 +83,14 @@ export function WorkspaceSwitcher() {
         <DropdownMenuItem
           onClick={() => navigate({ to: "/welcome" })}
         >
-          + 添加工作区
+          <PlusIcon className="h-4 w-4 mr-1" />
+          添加工作区
         </DropdownMenuItem>
         <DropdownMenuItem
           onClick={() => navigate({ to: "/dashboard/workspaces" })}
         >
-          管理工作区...
+          <SettingsIcon className="h-4 w-4 mr-1" />
+          管理工作区
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

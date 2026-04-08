@@ -1,120 +1,103 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
-import type {
-  VideoInfo,
-  SessionInfo,
-  StreamerInfo,
-  ListVideosResponse,
-} from "@/types/video";
+import { Input } from "@/components/ui/input";
+import { SearchIcon } from "lucide-react";
+import type { ListVideosResponse, ListStreamersResponse } from "@/types/video";
 import {
   listVideos,
-  listSessions,
   listStreamers,
   importVideo,
   deleteVideo,
 } from "@/services/video";
 import { getActiveWorkspace } from "@/services/workspace";
 import { mergeVideos } from "@/services/media";
-import { listPresets } from "@/services/clip";
+import { VideoRow } from "@/components/video/video-row";
+import { PaginationBar } from "@/components/video/pagination-bar";
+import { StreamerCard, UnassociatedCard } from "@/components/video/streamer-card";
+import { MergeToolbar } from "@/components/video/merge-toolbar";
 
-function formatDuration(ms: number | null): string {
-  if (!ms) return "--:--";
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0)
-    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  return `${m}:${s.toString().padStart(2, "0")}`;
+interface VideoSearchParams {
+  view?: "cards" | "flat";
+  page?: number;
+  search?: string;
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
-
-/** Compute end time from recorded_at + duration_ms */
-function computeEndTime(recordedAt: string | null, durationMs: number | null): string | null {
-  if (!recordedAt || !durationMs) return null;
-  // recorded_at format: "yyyy-MM-dd HH:mm:ss"
-  const match = recordedAt.match(/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/);
-  if (!match) return null;
-  const date = new Date(
-    parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]),
-    parseInt(match[4]), parseInt(match[5]), parseInt(match[6])
-  );
-  date.setMilliseconds(date.getMilliseconds() + durationMs);
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-/** Format time range: show date once if same day */
-function formatTimeRange(start: string | null, end: string | null): string {
-  if (!start) return "";
-  const startDate = start.slice(0, 10);
-  const startTime = start.slice(11);
-  if (!end) return start;
-  const endDate = end.slice(0, 10);
-  const endTime = end.slice(11);
-  if (startDate === endDate) {
-    return `${startDate} ${startTime} ~ ${endTime}`;
-  }
-  return `${start} ~ ${end}`;
-}
-
-/** Build display title: 主播 - 标题 - 时间段 */
-function buildVideoTitle(video: VideoInfo): string {
-  const parts: string[] = [];
-  if (video.streamer_name) parts.push(video.streamer_name);
-  if (video.stream_title) parts.push(video.stream_title);
-  const endTime = computeEndTime(video.recorded_at, video.duration_ms);
-  const timeRange = formatTimeRange(video.recorded_at, endTime);
-  if (timeRange) parts.push(timeRange);
-  return parts.length > 0 ? parts.join(" - ") : video.file_name;
-}
-
-type ViewMode = "streamers" | "flat";
+const PAGE_SIZE = 50;
 
 function VideosPage() {
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<ViewMode>("streamers");
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const { view = "cards", page = 1, search = "" } = Route.useSearch();
+
+  const [streamersData, setStreamersData] =
+    useState<ListStreamersResponse | null>(null);
   const [flatVideos, setFlatVideos] = useState<ListVideosResponse | null>(null);
-  const [streamers, setStreamers] = useState<StreamerInfo[]>([]);
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [unassociatedCount, setUnassociatedCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
-  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set());
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(
+    new Set()
+  );
   const [mergeMode, setMergeMode] = useState<"virtual" | "physical">("virtual");
   const [merging, setMerging] = useState(false);
+  const [searchInput, setSearchInput] = useState(search);
 
-  const loadData = async () => {
+  const updateSearch = useCallback(
+    (updates: Partial<VideoSearchParams>) => {
+      navigate({
+        to: "/dashboard/videos",
+        search: (prev: VideoSearchParams) => ({
+          ...prev,
+          ...updates,
+        }),
+        replace: true,
+      });
+    },
+    [navigate]
+  );
+
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const activeWs = await getActiveWorkspace();
-      const [sess, flat, strs] = await Promise.all([
-        listSessions(activeWs),
-        listVideos({ workspace_id: activeWs, page: 1, page_size: 200 }),
-        listStreamers(),
-      ]);
-      setSessions(sess);
-      setFlatVideos(flat);
-      setStreamers(strs);
+      if (view === "cards") {
+        const [strs, unassoc] = await Promise.all([
+          listStreamers({
+            workspace_id: activeWs,
+            page,
+            page_size: PAGE_SIZE,
+          }),
+          // Count videos without streamer
+          listVideos({
+            workspace_id: activeWs,
+            streamer_id: -1,
+            page: 1,
+            page_size: 1,
+          }),
+        ]);
+        setStreamersData(strs);
+        setUnassociatedCount(unassoc.total);
+      } else {
+        const flat = await listVideos({
+          workspace_id: activeWs,
+          page,
+          page_size: PAGE_SIZE,
+          search: search || undefined,
+        });
+        setFlatVideos(flat);
+      }
     } catch (e) {
       console.error("Failed to load videos:", e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [view, page, search]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   // Auto-refresh when watcher detects new files
   useEffect(() => {
@@ -124,15 +107,19 @@ function VideosPage() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
+  }, [loadData]);
 
-  const toggleGroup = (key: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  // Sync search input with URL
+  useEffect(() => {
+    setSearchInput(search);
+  }, [search]);
+
+  const handleSearchSubmit = () => {
+    updateSearch({ search: searchInput || undefined, page: 1 });
+  };
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") handleSearchSubmit();
   };
 
   const toggleVideoSelect = (id: number) => {
@@ -150,7 +137,12 @@ function VideosPage() {
       alert("请至少选择 2 个视频");
       return;
     }
-    if (!(await ask(`将合并 ${ids.length} 个视频（${mergeMode === "virtual" ? "快速合并" : "重编码合并"}），确认？`, { title: "合并视频" })))
+    if (
+      !(await ask(
+        `将合并 ${ids.length} 个视频（${mergeMode === "virtual" ? "快速合并" : "重编码合并"}），确认？`,
+        { title: "合并视频" }
+      ))
+    )
       return;
 
     setMerging(true);
@@ -164,17 +156,6 @@ function VideosPage() {
       setMerging(false);
     }
   };
-
-  // Group sessions by streamer for "streamers" view
-  const sessionsByStreamer = useMemo(() => {
-    const map = new Map<number | null, SessionInfo[]>();
-    for (const s of sessions) {
-      const key = s.streamer_id;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(s);
-    }
-    return map;
-  }, [sessions]);
 
   const handleImport = async () => {
     try {
@@ -209,17 +190,17 @@ function VideosPage() {
     }
   };
 
-  const handleDelete = async (video: VideoInfo, e: React.MouseEvent) => {
+  const handleDelete = async (videoId: number, fileName: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (
       !(await ask(
-        `确定要删除「${video.file_name}」吗？\n\n注意：仅删除记录，不会删除磁盘文件。`,
-        { title: "删除视频", kind: "warning" },
+        `确定要删除「${fileName}」吗？\n\n注意：仅删除记录，不会删除磁盘文件。`,
+        { title: "删除视频", kind: "warning" }
       ))
     )
       return;
     try {
-      await deleteVideo(video.id);
+      await deleteVideo(videoId);
       await loadData();
     } catch (e) {
       console.error("Delete failed:", e);
@@ -233,7 +214,10 @@ function VideosPage() {
     });
   };
 
-  const totalVideos = flatVideos?.total ?? 0;
+  const totalItems =
+    view === "cards"
+      ? streamersData?.total ?? 0
+      : flatVideos?.total ?? 0;
 
   return (
     <div className="space-y-4">
@@ -241,22 +225,34 @@ function VideosPage() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">视频列表</h2>
-          <p className="text-sm text-muted-foreground">
-            共 {totalVideos} 个视频
-            {sessions.length > 0 && `，${sessions.length} 个场次`}
-            {streamers.length > 0 && `，${streamers.length} 个主播`}
-          </p>
+          {view === "cards" && streamersData && (
+            <p className="text-sm text-muted-foreground">
+              共 {streamersData.total} 个主播
+              {unassociatedCount > 0 &&
+                `，${unassociatedCount} 个未关联视频`}
+            </p>
+          )}
+          {view === "flat" && flatVideos && (
+            <p className="text-sm text-muted-foreground">
+              共 {flatVideos.total} 个视频
+            </p>
+          )}
         </div>
         <div className="flex gap-2">
           {/* View mode toggle */}
           <div className="flex rounded-md border">
-            {(["streamers", "flat"] as const).map((mode) => (
+            {(
+              [
+                { key: "cards", label: "主播" },
+                { key: "flat", label: "列表" },
+              ] as const
+            ).map(({ key, label }) => (
               <button
-                key={mode}
-                className={`px-3 py-1 text-sm ${viewMode === mode ? "bg-accent" : ""}`}
-                onClick={() => setViewMode(mode)}
+                key={key}
+                className={`px-3 py-1 text-sm ${view === key ? "bg-accent" : ""}`}
+                onClick={() => updateSearch({ view: key, page: 1, search: undefined })}
               >
-                {{ streamers: "主播", flat: "列表" }[mode]}
+                {label}
               </button>
             ))}
           </div>
@@ -266,366 +262,117 @@ function VideosPage() {
         </div>
       </div>
 
-      {/* Merge toolbar (shown when videos are selected) */}
-      {selectedVideoIds.size > 0 && (
-        <div className="flex items-center gap-3 rounded-lg border bg-accent/30 p-2 text-sm">
-          <span className="text-muted-foreground">
-            已选 {selectedVideoIds.size} 个视频
-          </span>
-          <select
-            className="rounded-md border bg-background px-2 py-1 text-xs"
-            value={mergeMode}
-            onChange={(e) =>
-              setMergeMode(e.target.value as "virtual" | "physical")
-            }
-          >
-            <option value="virtual">快速合并（要求相同编码）</option>
-            <option value="physical">重编码合并（通用）</option>
-          </select>
-          <Button
-            size="sm"
-            onClick={handleMerge}
-            disabled={merging || selectedVideoIds.size < 2}
-          >
-            {merging ? "合并中..." : "合并视频"}
+      {/* Search bar (flat view only) */}
+      {view === "flat" && (
+        <div className="flex gap-2">
+          <div className="relative flex-1 max-w-sm">
+            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="搜索标题或文件名..."
+              className="pl-8 h-8 text-sm"
+            />
+          </div>
+          <Button variant="outline" size="sm" onClick={handleSearchSubmit}>
+            搜索
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setSelectedVideoIds(new Set())}
-          >
-            取消选择
-          </Button>
+          {search && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchInput("");
+                updateSearch({ search: undefined, page: 1 });
+              }}
+            >
+              清除
+            </Button>
+          )}
         </div>
       )}
 
+      {/* Merge toolbar */}
+      <MergeToolbar
+        selectedCount={selectedVideoIds.size}
+        mergeMode={mergeMode}
+        onMergeModeChange={setMergeMode}
+        onMerge={handleMerge}
+        onCancel={() => setSelectedVideoIds(new Set())}
+        merging={merging}
+      />
+
       {loading ? (
         <div className="text-muted-foreground">加载中...</div>
-      ) : totalVideos === 0 ? (
+      ) : totalItems === 0 && !search ? (
         <div className="rounded-lg border border-dashed p-12 text-center">
           <p className="text-muted-foreground mb-4">暂无视频</p>
           <Button onClick={handleImport}>导入视频文件</Button>
         </div>
-      ) : viewMode === "streamers" ? (
-        /* ===== Streamer → Session → Video view ===== */
-        <div className="space-y-4">
-          {streamers.map((streamer) => {
-            const streamerSessions = sessionsByStreamer.get(streamer.id) ?? [];
-            if (streamerSessions.length === 0) return null;
-            const streamerKey = `streamer-${streamer.id}`;
-            const isStreamerExpanded = expandedGroups.has(streamerKey);
-            const allVideos = streamerSessions.flatMap((s) => s.videos);
-            const totalDuration = allVideos.reduce(
-              (sum, v) => sum + (v.duration_ms ?? 0), 0
-            );
-            return (
-              <div key={streamer.id} className="rounded-lg border">
-                {/* Streamer header */}
-                <div
-                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-accent/30 transition-colors"
-                  onClick={() => toggleGroup(streamerKey)}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-muted-foreground text-sm">
-                      {isStreamerExpanded ? "▼" : "▶"}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-primary">
-                          {streamer.name}
-                        </span>
-                        {streamer.room_id && (
-                          <span className="text-xs text-muted-foreground">
-                            房间号 {streamer.room_id}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex gap-3 text-xs text-muted-foreground">
-                        <span>{streamerSessions.length} 个场次</span>
-                        <span>{allVideos.length} 个视频</span>
-                        <span>总时长 {formatDuration(totalDuration)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <StatusTags videos={allVideos} />
-                </div>
-
-                {/* Expanded: show sessions under this streamer */}
-                {isStreamerExpanded && (
-                  <div className="border-t">
-                    {streamerSessions.map((session) => {
-                      const sessKey = `streamer-sess-${session.id}`;
-                      const isSessExpanded = expandedGroups.has(sessKey);
-                      const sessDuration = session.videos.reduce(
-                        (sum, v) => sum + (v.duration_ms ?? 0), 0
-                      );
-                      return (
-                        <div key={session.id}>
-                          {/* Session header (indented) */}
-                          <div
-                            className="flex items-center justify-between px-4 py-2 pl-10 cursor-pointer hover:bg-accent/20 transition-colors border-b last:border-b-0"
-                            onClick={() => toggleGroup(sessKey)}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-muted-foreground text-xs">
-                                {isSessExpanded ? "▼" : "▶"}
-                              </span>
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium truncate">
-                                  {session.title || "未命名场次"}
-                                </div>
-                                <div className="flex gap-3 text-xs text-muted-foreground">
-                                  {session.started_at && (
-                                    <span>
-                                      {formatTimeRange(
-                                        session.started_at,
-                                        computeEndTime(session.started_at, sessDuration)
-                                      )}
-                                    </span>
-                                  )}
-                                  <span>{session.videos.length} 个分片</span>
-                                  <span>{formatDuration(sessDuration)}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <StatusTags videos={session.videos} />
-                          </div>
-
-                          {/* Expanded: show videos in session */}
-                          {isSessExpanded && (
-                            <div className="bg-muted/10">
-                              {session.videos.map((video) => (
-                                <VideoRow
-                                  key={video.id}
-                                  video={video}
-                                  compact
-                                  indent
-                                  onNavigate={() => navigateToVideo(video.id)}
-                                  onDelete={(e) => handleDelete(video, e)}
-                                  selected={selectedVideoIds.has(video.id)}
-                                  onToggleSelect={toggleVideoSelect}
-                                />
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Sessions without streamer */}
-          {(sessionsByStreamer.get(null)?.length ?? 0) > 0 && (
-            <div className="rounded-lg border">
-              <div className="p-3 text-sm text-muted-foreground font-medium">
-                未关联主播的场次
-              </div>
-              <div className="border-t">
-                {sessionsByStreamer.get(null)!.map((session) => {
-                  const sessKey = `orphan-sess-${session.id}`;
-                  const isSessExpanded = expandedGroups.has(sessKey);
-                  const sessDuration = session.videos.reduce(
-                    (sum, v) => sum + (v.duration_ms ?? 0), 0
-                  );
-                  return (
-                    <div key={session.id}>
-                      <div
-                        className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-accent/20 transition-colors border-b last:border-b-0"
-                        onClick={() => toggleGroup(sessKey)}
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-muted-foreground text-xs">
-                            {isSessExpanded ? "▼" : "▶"}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">
-                              {session.title || "未命名场次"}
-                            </div>
-                            <div className="flex gap-3 text-xs text-muted-foreground">
-                              {session.started_at && (
-                                <span>
-                                  {formatTimeRange(
-                                    session.started_at,
-                                    computeEndTime(session.started_at, sessDuration)
-                                  )}
-                                </span>
-                              )}
-                              <span>{session.videos.length} 个分片</span>
-                              <span>{formatDuration(sessDuration)}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <StatusTags videos={session.videos} />
-                      </div>
-                      {isSessExpanded && (
-                        <div className="bg-muted/10">
-                          {session.videos.map((video) => (
-                            <VideoRow
-                              key={video.id}
-                              video={video}
-                              compact
-                              onNavigate={() => navigateToVideo(video.id)}
-                              onDelete={(e) => handleDelete(video, e)}
-                              selected={selectedVideoIds.has(video.id)}
-                              onToggleSelect={toggleVideoSelect}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Videos without any session */}
-          {flatVideos &&
-            flatVideos.videos.filter((v) => v.session_id === null).length > 0 && (
-              <div className="rounded-lg border">
-                <div className="p-3 text-sm text-muted-foreground font-medium">
-                  未分组的视频
-                </div>
-                <div className="border-t">
-                  {flatVideos.videos
-                    .filter((v) => v.session_id === null)
-                    .map((video) => (
-                      <VideoRow
-                        key={video.id}
-                        video={video}
-                        compact={false}
-                        onNavigate={() => navigateToVideo(video.id)}
-                        onDelete={(e) => handleDelete(video, e)}
-                        selected={selectedVideoIds.has(video.id)}
-                        onToggleSelect={toggleVideoSelect}
-                      />
-                    ))}
-                </div>
-              </div>
-            )}
+      ) : view === "cards" ? (
+        /* ===== Streamer card grid ===== */
+        <div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-4">
+            {streamersData?.streamers.map((streamer) => (
+              <StreamerCard key={streamer.id} streamer={streamer} />
+            ))}
+            <UnassociatedCard
+              count={unassociatedCount}
+              onClick={() =>
+                navigate({
+                  to: "/dashboard/videos/streamer/$streamerId",
+                  params: { streamerId: "-1" },
+                })
+              }
+            />
+          </div>
+          <PaginationBar
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={streamersData?.total ?? 0}
+            onPageChange={(p) => updateSearch({ page: p })}
+          />
         </div>
       ) : (
         /* ===== Flat list view ===== */
-        <div className="space-y-2">
-          {flatVideos?.videos.map((video) => (
-            <VideoRow
-              key={video.id}
-              video={video}
-              compact={false}
-              onNavigate={() => navigateToVideo(video.id)}
-              onDelete={(e) => handleDelete(video, e)}
-              selected={selectedVideoIds.has(video.id)}
-              onToggleSelect={toggleVideoSelect}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Status tag badges for a group of videos */
-function StatusTags({ videos }: { videos: VideoInfo[] }) {
-  return (
-    <div className="flex gap-1.5 shrink-0">
-      {videos.some((v) => v.has_danmaku) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
-          弹幕
-        </span>
-      )}
-      {videos.some((v) => v.has_subtitle) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
-          字幕
-        </span>
-      )}
-      {videos.some((v) => v.has_envelope) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">
-          热度
-        </span>
-      )}
-    </div>
-  );
-}
-
-function VideoRow({
-  video,
-  compact,
-  indent,
-  onNavigate,
-  onDelete,
-  selected,
-  onToggleSelect,
-}: {
-  video: VideoInfo;
-  compact: boolean;
-  indent?: boolean;
-  onNavigate: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-  selected?: boolean;
-  onToggleSelect?: (id: number) => void;
-}) {
-  const title = buildVideoTitle(video);
-  const showTitle = title !== video.file_name;
-
-  const paddingClass = indent ? "px-4 py-2 pl-16" : compact ? "px-4 py-2 pl-10" : "rounded-lg border p-3";
-
-  return (
-    <div
-      className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass} ${selected ? "bg-accent/40" : ""}`}
-      onClick={onNavigate}
-    >
-      <div className="flex items-center gap-3 min-w-0">
-        {onToggleSelect && (
-          <input
-            type="checkbox"
-            checked={selected ?? false}
-            onClick={(e) => e.stopPropagation()}
-            onChange={() => onToggleSelect(video.id)}
-            className="rounded shrink-0"
+        <div>
+          {flatVideos && flatVideos.videos.length === 0 && search && (
+            <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
+              没有找到匹配「{search}」的视频
+            </div>
+          )}
+          <div className="space-y-2">
+            {flatVideos?.videos.map((video) => (
+              <VideoRow
+                key={video.id}
+                video={video}
+                onNavigate={() => navigateToVideo(video.id)}
+                onDelete={(e) =>
+                  handleDelete(video.id, video.file_name, e)
+                }
+                selected={selectedVideoIds.has(video.id)}
+                onToggleSelect={toggleVideoSelect}
+              />
+            ))}
+          </div>
+          <PaginationBar
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={flatVideos?.total ?? 0}
+            onPageChange={(p) => updateSearch({ page: p })}
           />
-        )}
-        <div className="min-w-0 space-y-0.5">
-          {/* Primary line: streamer - title - time range */}
-          <div className="text-sm truncate font-medium">
-            {showTitle ? title : video.file_name}
-          </div>
-          {/* Secondary line: file name (if title shown) + meta */}
-          <div className="flex gap-3 text-xs text-muted-foreground">
-            {showTitle && (
-              <span className="truncate max-w-[300px]">{video.file_name}</span>
-            )}
-            <span>{formatDuration(video.duration_ms)}</span>
-            <span>{formatFileSize(video.file_size)}</span>
-            {video.width && video.height && (
-              <span>
-                {video.width}x{video.height}
-              </span>
-            )}
-          </div>
         </div>
-      </div>
-      <div className="flex items-center gap-1.5 shrink-0">
-        {video.has_danmaku && (
-          <span className="text-xs px-1 py-0.5 rounded bg-blue-100 text-blue-700">
-            弹幕
-          </span>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-red-500 hover:text-red-600 h-7 px-2"
-          onClick={onDelete}
-        >
-          删除
-        </Button>
-      </div>
+      )}
     </div>
   );
 }
 
 export const Route = createFileRoute("/dashboard/videos/")({
   component: VideosPage,
+  validateSearch: (search: Record<string, unknown>): VideoSearchParams => ({
+    view: (search.view as VideoSearchParams["view"]) ?? "cards",
+    page: Number(search.page) || 1,
+    search: (search.search as string) ?? "",
+  }),
 });

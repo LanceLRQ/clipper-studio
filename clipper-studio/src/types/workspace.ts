@@ -4,6 +4,7 @@ export interface WorkspaceInfo {
   path: string;
   adapter_id: string;
   auto_scan: boolean;
+  clip_output_dir: string | null;
   created_at: string;
 }
 
@@ -11,6 +12,13 @@ export interface CreateWorkspaceRequest {
   name: string;
   path: string;
   adapter_id: string;
+}
+
+export interface UpdateWorkspaceRequest {
+  workspace_id: number;
+  name?: string;
+  auto_scan?: boolean;
+  clip_output_dir?: string;
 }
 
 export interface AppInfo {

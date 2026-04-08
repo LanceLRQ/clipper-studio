@@ -40,6 +40,7 @@ pub struct ClipTaskInfo {
     pub status: String,
     pub progress: f64,
     pub error_message: Option<String>,
+    pub output_path: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub batch_id: Option<String>,
@@ -70,8 +71,10 @@ pub async fn create_clip(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
                 "SELECT v.file_path, v.file_name, v.stream_title, v.recorded_at, \
-                 st.name as streamer_name \
-                 FROM videos v LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 st.name as streamer_name, w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 LEFT JOIN workspaces w ON v.workspace_id = w.id \
                  WHERE v.id = {}",
                 req.video_id
             ),
@@ -86,6 +89,9 @@ pub async fn create_clip(
     let streamer_name: Option<String> = video_row.try_get("", "streamer_name").ok();
     let stream_title: Option<String> = video_row.try_get("", "stream_title").ok();
     let recorded_at: Option<String> = video_row.try_get("", "recorded_at").ok();
+    let ws_clip_output_dir: Option<String> = video_row
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
 
     // Load preset options
     let preset_options = if let Some(pid) = req.preset_id {
@@ -109,23 +115,37 @@ pub async fn create_clip(
     let output_dir = match &req.output_dir {
         Some(dir) => PathBuf::from(dir),
         None => {
-            // Default: same directory as source, under clips/ subfolder
-            let src = PathBuf::from(&video_path);
-            src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+            // Priority: workspace clip_output_dir > source file directory / clips/
+            if let Some(ref dir) = ws_clip_output_dir {
+                PathBuf::from(dir)
+            } else {
+                let src = PathBuf::from(&video_path);
+                src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+            }
         }
     };
 
-    let clip_title = build_clip_name(
-        streamer_name.as_deref(),
-        stream_title.as_deref(),
-        req.title.as_deref(),
-        recorded_at.as_deref(),
-        req.start_ms,
-        req.end_ms,
-        &video_name,
-    );
-
-    let output_filename = format!("{}.{}", sanitize_filename(&clip_title), ext);
+    // Build output filename: batch clips use simplified name, standalone clips use full name
+    let output_filename = if req.batch_id.is_some() {
+        let short_name = build_batch_clip_filename(
+            req.title.as_deref(),
+            recorded_at.as_deref(),
+            req.start_ms,
+            req.end_ms,
+        );
+        format!("{}.{}", sanitize_filename(&short_name), ext)
+    } else {
+        let clip_title = build_clip_name(
+            streamer_name.as_deref(),
+            stream_title.as_deref(),
+            req.title.as_deref(),
+            recorded_at.as_deref(),
+            req.start_ms,
+            req.end_ms,
+            &video_name,
+        );
+        format!("{}.{}", sanitize_filename(&clip_title), ext)
+    };
     let output_path = output_dir.join(&output_filename);
 
     // Insert clip_task into database
@@ -136,6 +156,8 @@ pub async fn create_clip(
     let batch_title_sql = req.batch_title.as_ref()
         .map(|s| format!("'{}'", s.replace('\'', "''")))
         .unwrap_or("NULL".to_string());
+    // Store user-given clip name as task title (for display), not the full filename
+    let display_title = req.title.as_deref().unwrap_or("").replace('\'', "''");
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
@@ -144,7 +166,7 @@ pub async fn create_clip(
             req.video_id,
             req.start_ms,
             req.end_ms,
-            clip_title.replace('\'', "''"),
+            display_title,
             preset_id_sql,
             batch_id_sql,
             batch_title_sql,
@@ -179,7 +201,11 @@ pub async fn create_clip(
     let include_danmaku = req.include_danmaku;
     let include_subtitle = req.include_subtitle;
     let app = app_handle.clone();
-    let clip_title_for_notify = clip_title.clone();
+    // Use filename stem (without ext) for completion notification
+    let clip_title_for_notify = output_filename
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or_else(|| output_filename.clone());
 
     state
         .task_queue
@@ -287,10 +313,11 @@ pub async fn create_clip(
         video_id: req.video_id,
         start_time_ms: req.start_ms,
         end_time_ms: req.end_ms,
-        title: Some(clip_title),
+        title: req.title.clone(),
         status: "pending".to_string(),
         progress: 0.0,
         error_message: None,
+        output_path: None,
         created_at: chrono_now(),
         completed_at: None,
         batch_id: req.batch_id.clone(),
@@ -327,8 +354,10 @@ pub async fn list_clip_tasks(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT * FROM clip_tasks {} ORDER BY created_at DESC",
-                where_clause
+                "SELECT t.*, co.output_path FROM clip_tasks t \
+                 LEFT JOIN clip_outputs co ON co.clip_task_id = t.id \
+                 {} ORDER BY t.created_at DESC",
+                if where_clause.is_empty() { String::new() } else { where_clause.replace("WHERE", "WHERE t.") }
             ),
         ),
     )
@@ -346,6 +375,7 @@ pub async fn list_clip_tasks(
             status: row.try_get("", "status").unwrap_or_default(),
             progress: row.try_get("", "progress").unwrap_or(0.0),
             error_message: row.try_get("", "error_message").ok(),
+            output_path: row.try_get::<Option<String>>("", "output_path").unwrap_or(None),
             created_at: row.try_get("", "created_at").unwrap_or_default(),
             completed_at: row.try_get("", "completed_at").ok(),
             batch_id: row.try_get("", "batch_id").ok(),
@@ -523,6 +553,155 @@ fn build_clip_name(
     parts.join("-")
 }
 
+/// Build simplified filename for batch clip: {片段名}-{时间段}
+/// With recorded_at: "片段1-260407-2130-260407-2145"
+/// Without recorded_at: "片段1-0100-0300"
+fn build_batch_clip_filename(
+    clip_name: Option<&str>,
+    recorded_at: Option<&str>,
+    start_ms: i64,
+    end_ms: i64,
+) -> String {
+    let name = clip_name.unwrap_or("clip");
+
+    let time_range = if let Some(ts) = recorded_at {
+        // Parse "yyyy-MM-dd HH:mm:ss" and compute absolute time
+        let ts_parts: Vec<&str> = ts.split(&['-', ' ', ':'][..]).collect();
+        if ts_parts.len() >= 6 {
+            if let (Ok(y), Ok(mo), Ok(d), Ok(h), Ok(mi), Ok(s)) = (
+                ts_parts[0].parse::<i64>(),
+                ts_parts[1].parse::<i64>(),
+                ts_parts[2].parse::<i64>(),
+                ts_parts[3].parse::<i64>(),
+                ts_parts[4].parse::<i64>(),
+                ts_parts[5].parse::<i64>(),
+            ) {
+                let base_secs = h * 3600 + mi * 60 + s;
+                let fmt = |offset_ms: i64| -> String {
+                    let offset_s = offset_ms / 1000;
+                    let total_s = base_secs + offset_s;
+                    let extra_days = total_s / 86400;
+                    let day_s = total_s % 86400;
+                    let ah = day_s / 3600;
+                    let am = (day_s % 3600) / 60;
+                    let ad = d + extra_days;
+                    format!("{:02}{:02}{:02}-{:02}{:02}", y % 100, mo, ad, ah, am)
+                };
+                format!("{}-{}", fmt(start_ms), fmt(end_ms))
+            } else {
+                format_relative_time_range(start_ms, end_ms)
+            }
+        } else {
+            format_relative_time_range(start_ms, end_ms)
+        }
+    } else {
+        format_relative_time_range(start_ms, end_ms)
+    };
+
+    format!("{}-{}", name, time_range)
+}
+
+/// Format relative time range: "HHMMSS-HHMMSS" or "MMSS-MMSS"
+fn format_relative_time_range(start_ms: i64, end_ms: i64) -> String {
+    let fmt = |ms: i64| -> String {
+        let total_s = ms / 1000;
+        let h = total_s / 3600;
+        let m = (total_s % 3600) / 60;
+        let s = total_s % 60;
+        if h > 0 {
+            format!("{:02}{:02}{:02}", h, m, s)
+        } else {
+            format!("{:02}{:02}", m, s)
+        }
+    };
+    format!("{}-{}", fmt(start_ms), fmt(end_ms))
+}
+
+/// Build batch output subfolder path: {base_dir}/{YYYYMMDD}_{HHmm}_{主播}_{标题}
+async fn build_batch_output_dir(
+    conn: &sea_orm::DatabaseConnection,
+    video_id: i64,
+    _ffprobe_path: &str,
+) -> Result<PathBuf, String> {
+    // Get video info for base output dir and metadata
+    let row = sea_orm::ConnectionTrait::query_one(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT v.file_path, v.stream_title, st.name as streamer_name, \
+                 w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 LEFT JOIN workspaces w ON v.workspace_id = w.id \
+                 WHERE v.id = {}",
+                video_id
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let video_path: String = row.try_get("", "file_path").unwrap_or_default();
+    let streamer_name: Option<String> = row.try_get("", "streamer_name").ok();
+    let stream_title: Option<String> = row.try_get("", "stream_title").ok();
+    let ws_clip_output_dir: Option<String> = row
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
+
+    // Determine base output dir
+    let base_dir = if let Some(ref dir) = ws_clip_output_dir {
+        PathBuf::from(dir)
+    } else {
+        let src = PathBuf::from(&video_path);
+        src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+    };
+
+    // Get local datetime from SQLite for folder name
+    let time_row = sea_orm::ConnectionTrait::query_one(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT strftime('%Y%m%d', 'now', 'localtime') as date_part, \
+                    strftime('%H%M', 'now', 'localtime') as time_part"
+                .to_string(),
+        ),
+    )
+    .await
+    .ok()
+    .flatten();
+
+    let date_part: String = time_row.as_ref()
+        .and_then(|r| r.try_get("", "date_part").ok())
+        .unwrap_or_else(|| "00000000".to_string());
+    let time_part: String = time_row.as_ref()
+        .and_then(|r| r.try_get("", "time_part").ok())
+        .unwrap_or_else(|| "0000".to_string());
+
+    // Build folder name: {YYYYMMDD}_{HHmm}_{主播}_{标题}
+    let mut folder_parts = vec![format!("{}_{}", date_part, time_part)];
+
+    if let Some(name) = streamer_name {
+        if !name.is_empty() {
+            folder_parts.push(name);
+        }
+    }
+    if let Some(title) = stream_title {
+        if !title.is_empty() {
+            let truncated = if title.chars().count() > 20 {
+                title.chars().take(20).collect::<String>()
+            } else {
+                title
+            };
+            folder_parts.push(truncated);
+        }
+    }
+
+    let folder_name = sanitize_filename(&folder_parts.join("_"));
+    Ok(base_dir.join(folder_name))
+}
+
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
@@ -570,6 +749,12 @@ pub async fn create_batch_clips(
 
     let batch_title = build_batch_title(state.db.conn(), req.video_id).await;
 
+    // Build batch subfolder: determine base output dir, then create subfolder
+    let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &state.ffprobe_path).await?;
+    // Ensure the subfolder exists
+    std::fs::create_dir_all(&batch_output_dir)
+        .map_err(|e| format!("无法创建批次输出目录: {}", e))?;
+
     let mut results = Vec::new();
 
     for item in &req.clips {
@@ -602,7 +787,7 @@ pub async fn create_batch_clips(
             end_ms: effective_end,
             title: item.title.clone(),
             preset_id,
-            output_dir: None,
+            output_dir: Some(batch_output_dir.to_string_lossy().to_string()),
             include_danmaku: item.include_danmaku,
             include_subtitle: item.include_subtitle,
             batch_id: Some(batch_id.clone()),
@@ -824,7 +1009,7 @@ pub async fn auto_segment(
     Ok(segments)
 }
 
-/// Build batch title: {主播}-{直播标题}-切片于{当前时间}
+/// Build batch title: [主播] 标题 - yyyy年M月d日 HH:mm
 async fn build_batch_title(conn: &sea_orm::DatabaseConnection, video_id: i64) -> String {
     let row = sea_orm::ConnectionTrait::query_one(
         conn,
@@ -845,36 +1030,269 @@ async fn build_batch_title(conn: &sea_orm::DatabaseConnection, video_id: i64) ->
     let streamer_name: Option<String> = row.as_ref().and_then(|r| r.try_get("", "streamer_name").ok());
     let stream_title: Option<String> = row.as_ref().and_then(|r| r.try_get("", "stream_title").ok());
 
-    // Format current time as "MM-dd HH:mm"
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    // Simple UTC-based time formatting (good enough for display)
-    let secs_in_day = now_secs % 86400;
-    let h = secs_in_day / 3600;
-    let m = (secs_in_day % 3600) / 60;
-    let time_str = format!("{:02}:{:02}", h, m);
+    // Get local time from SQLite
+    let now_str = query_local_datetime_cn(conn).await;
 
-    let mut parts = Vec::new();
+    let mut result = String::new();
+
     if let Some(name) = streamer_name {
         if !name.is_empty() {
-            parts.push(name);
+            result.push_str(&format!("[{}] ", name));
         }
     }
+
     if let Some(title) = stream_title {
         if !title.is_empty() {
-            let truncated = if title.chars().count() > 15 {
-                format!("{}...", title.chars().take(15).collect::<String>())
+            let truncated = if title.chars().count() > 20 {
+                format!("{}...", title.chars().take(20).collect::<String>())
             } else {
                 title
             };
-            parts.push(truncated);
+            result.push_str(&truncated);
         }
     }
-    parts.push(format!("切片于{}", time_str));
 
-    parts.join("-")
+    if result.is_empty() {
+        result.push_str("切片任务");
+    }
+
+    result.push_str(&format!(" - {}", now_str));
+    result
+}
+
+/// Query local datetime from SQLite and format as "yyyy年M月d日 HH:mm"
+async fn query_local_datetime_cn(conn: &sea_orm::DatabaseConnection) -> String {
+    let row = sea_orm::ConnectionTrait::query_one(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT strftime('%Y', 'now', 'localtime') as y, \
+                    strftime('%m', 'now', 'localtime') as mo, \
+                    strftime('%d', 'now', 'localtime') as d, \
+                    strftime('%H', 'now', 'localtime') as h, \
+                    strftime('%M', 'now', 'localtime') as mi"
+                .to_string(),
+        ),
+    )
+    .await
+    .ok()
+    .flatten();
+
+    match row {
+        Some(r) => {
+            let y: String = r.try_get("", "y").unwrap_or_default();
+            let mo: String = r.try_get("", "mo").unwrap_or_default();
+            let d: String = r.try_get("", "d").unwrap_or_default();
+            let h: String = r.try_get("", "h").unwrap_or_default();
+            let mi: String = r.try_get("", "mi").unwrap_or_default();
+            // Remove leading zeros for month and day
+            let mo_num: u32 = mo.parse().unwrap_or(0);
+            let d_num: u32 = d.parse().unwrap_or(0);
+            format!("{}年{}月{}日 {}:{}", y, mo_num, d_num, h, mi)
+        }
+        None => "未知时间".to_string(),
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteBatchResult {
+    pub deleted: u64,
+    pub skipped: u64,
+}
+
+/// Collect output file paths for given clip task IDs and delete them from disk
+fn delete_output_files(db_rows: &[sea_orm::QueryResult]) {
+    for row in db_rows {
+        let path: String = match row.try_get("", "output_path") {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let p = std::path::Path::new(&path);
+        if p.exists() {
+            if let Err(e) = std::fs::remove_file(p) {
+                tracing::warn!("Failed to delete output file {}: {}", path, e);
+            } else {
+                tracing::info!("Deleted output file: {}", path);
+            }
+        }
+    }
+}
+
+/// Delete a single clip task (only completed/failed/cancelled)
+#[tauri::command]
+pub async fn delete_clip_task(
+    state: State<'_, AppState>,
+    task_id: i64,
+    delete_files: Option<bool>,
+) -> Result<(), String> {
+    // Check task status
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT status FROM clip_tasks WHERE id = {}", task_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("任务不存在".to_string())?;
+
+    let status: String = row.try_get("", "status").unwrap_or_default();
+    if status == "pending" || status == "processing" {
+        return Err("请先取消该任务".to_string());
+    }
+
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!("SELECT output_path FROM clip_outputs WHERE clip_task_id = {}", task_id),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs first (FK dependency)
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM clip_outputs WHERE clip_task_id = {}", task_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM clip_tasks WHERE id = {}", task_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    tracing::info!("Clip task deleted: id={}, delete_files={}", task_id, delete_files.unwrap_or(false));
+    Ok(())
+}
+
+/// Delete all deletable tasks in a batch
+#[tauri::command]
+pub async fn delete_clip_batch(
+    state: State<'_, AppState>,
+    batch_id: String,
+    delete_files: Option<bool>,
+) -> Result<DeleteBatchResult, String> {
+    let escaped = batch_id.replace('\'', "''");
+
+    // Count active tasks in the batch
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT SUM(CASE WHEN status IN ('pending','processing') THEN 1 ELSE 0 END) as active \
+                 FROM clip_tasks WHERE batch_id = '{}'",
+                escaped
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("批次不存在".to_string())?;
+
+    let active: i64 = row.try_get("", "active").unwrap_or(0);
+
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT output_path FROM clip_outputs WHERE clip_task_id IN (\
+                     SELECT id FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing'))",
+                    escaped
+                ),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs for deletable tasks
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "DELETE FROM clip_outputs WHERE clip_task_id IN (\
+             SELECT id FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing'))",
+            escaped
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Delete the tasks themselves
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "DELETE FROM clip_tasks WHERE batch_id = '{}' AND status NOT IN ('pending','processing')",
+            escaped
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let deleted = result.rows_affected();
+    tracing::info!("Batch '{}' deleted: {} tasks, {} skipped, delete_files={}", batch_id, deleted, active, delete_files.unwrap_or(false));
+
+    Ok(DeleteBatchResult {
+        deleted,
+        skipped: active as u64,
+    })
+}
+
+/// Clear all finished (completed/failed/cancelled) clip tasks
+#[tauri::command]
+pub async fn clear_finished_clip_tasks(
+    state: State<'_, AppState>,
+    delete_files: Option<bool>,
+) -> Result<u64, String> {
+    // Optionally delete output files from disk
+    if delete_files.unwrap_or(false) {
+        let rows = sea_orm::ConnectionTrait::query_all(
+            state.db.conn(),
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "SELECT output_path FROM clip_outputs WHERE clip_task_id IN (\
+                 SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))".to_string(),
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        delete_output_files(&rows);
+    }
+
+    // Delete clip_outputs for finished tasks
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "DELETE FROM clip_outputs WHERE clip_task_id IN (\
+         SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Delete finished tasks
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "DELETE FROM clip_tasks WHERE status NOT IN ('pending','processing')",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let deleted = result.rows_affected();
+    tracing::info!("Cleared {} finished clip tasks, delete_files={}", deleted, delete_files.unwrap_or(false));
+    Ok(deleted)
 }
 
 fn chrono_now() -> String {

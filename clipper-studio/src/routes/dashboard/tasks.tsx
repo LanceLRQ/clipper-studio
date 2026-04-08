@@ -1,9 +1,39 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import {
+  XIcon,
+  PlayIcon,
+  FolderOpenIcon,
+  Trash2Icon,
+  ListXIcon,
+  RefreshCwIcon,
+} from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
 import type { ClipTaskInfo, TaskProgressEvent } from "@/types/clip";
-import { listClipTasks, cancelClip } from "@/services/clip";
+import {
+  listClipTasks,
+  cancelClip,
+  deleteClipTask,
+  deleteClipBatch,
+  clearFinishedClipTasks,
+} from "@/services/clip";
+import { clearFinishedMediaTasks } from "@/services/media";
+import { invoke } from "@tauri-apps/api/core";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -22,12 +52,35 @@ function formatDurationMs(ms: number): string {
   return `${m}分${s}秒`;
 }
 
-const statusLabels: Record<string, { text: string; color: string }> = {
-  pending: { text: "等待中", color: "text-yellow-600" },
-  processing: { text: "处理中", color: "text-blue-600" },
-  completed: { text: "已完成", color: "text-green-600" },
-  failed: { text: "失败", color: "text-red-500" },
-  cancelled: { text: "已取消", color: "text-muted-foreground" },
+const statusLabels: Record<
+  string,
+  { text: string; color: string; tag: string }
+> = {
+  pending: {
+    text: "等待中",
+    color: "text-yellow-600",
+    tag: "bg-yellow-100 text-yellow-700",
+  },
+  processing: {
+    text: "处理中",
+    color: "text-blue-600",
+    tag: "bg-blue-100 text-blue-700",
+  },
+  completed: {
+    text: "已完成",
+    color: "text-green-600",
+    tag: "bg-green-100 text-green-700",
+  },
+  failed: {
+    text: "失败",
+    color: "text-red-500",
+    tag: "bg-red-100 text-red-600",
+  },
+  cancelled: {
+    text: "已取消",
+    color: "text-muted-foreground",
+    tag: "bg-gray-100 text-gray-500",
+  },
 };
 
 /** A group of tasks — either a batch or a single standalone task */
@@ -79,10 +132,101 @@ function TasksPage() {
     };
   }, []);
 
+  // Delete confirmation dialog state
+  const [deleteDialog, setDeleteDialog] = useState<{
+    open: boolean;
+    title: string;
+    description: string;
+    deleteFiles: boolean;
+    onConfirm: (deleteFiles: boolean) => Promise<void>;
+  }>({
+    open: false,
+    title: "",
+    description: "",
+    deleteFiles: false,
+    onConfirm: async () => {},
+  });
+
+  const showDeleteDialog = useCallback(
+    (
+      title: string,
+      description: string,
+      onConfirm: (deleteFiles: boolean) => Promise<void>,
+    ) => {
+      setDeleteDialog({
+        open: true,
+        title,
+        description,
+        deleteFiles: false,
+        onConfirm,
+      });
+    },
+    [],
+  );
+
+  const handleDialogConfirm = async () => {
+    const { deleteFiles, onConfirm } = deleteDialog;
+    setDeleteDialog((prev) => ({ ...prev, open: false }));
+    try {
+      await onConfirm(deleteFiles);
+    } catch (e) {
+      alert(String(e));
+      return;
+    }
+    await loadTasks();
+  };
+
   const handleCancel = async (taskId: number) => {
     await cancelClip(taskId);
     await loadTasks();
   };
+
+  const handleDeleteTask = (taskId: number) => {
+    showDeleteDialog("删除任务", "确定要删除该任务记录吗？", async (df) => {
+      await deleteClipTask(taskId, df);
+    });
+  };
+
+  const handleDeleteBatch = (batchId: string, title: string) => {
+    showDeleteDialog(
+      "删除批次",
+      `确定要删除批次「${title}」的任务记录吗？\n处理中或等待中的任务不会被删除。`,
+      async (df) => {
+        await deleteClipBatch(batchId, df);
+      },
+    );
+  };
+
+  const handleClearAll = () => {
+    showDeleteDialog(
+      "清除任务",
+      "确定要清除所有已完成、失败和已取消的任务记录吗？",
+      async (df) => {
+        await clearFinishedClipTasks(df);
+        await clearFinishedMediaTasks(df);
+      },
+    );
+  };
+
+  const handleOpenFile = async (path: string) => {
+    try {
+      await invoke("open_file", { path });
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const handleRevealFile = async (path: string) => {
+    try {
+      await invoke("reveal_file", { path });
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const hasFinishedTasks = tasks.some((t) =>
+    ["completed", "failed", "cancelled"].includes(t.status),
+  );
 
   // Group tasks by batch_id
   const groups: TaskGroup[] = useMemo(() => {
@@ -116,7 +260,7 @@ function TasksPage() {
     for (const task of standalone) {
       result.push({
         key: `single-${task.id}`,
-        title: task.title ?? `切片 #${task.id}`,
+        title: task.title || `切片 #${task.id}`,
         tasks: [task],
         isBatch: false,
       });
@@ -161,9 +305,38 @@ function TasksPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">任务中心</h2>
-        <Button variant="outline" size="sm" onClick={loadTasks}>
-          刷新
-        </Button>
+        <div className="flex items-center gap-1">
+          {hasFinishedTasks && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={handleClearAll}
+                  />
+                }
+              >
+                <ListXIcon className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent>清除已完成</TooltipContent>
+            </Tooltip>
+          )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={loadTasks}
+                />
+              }
+            >
+              <RefreshCwIcon className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       {loading ? (
@@ -189,26 +362,90 @@ function TasksPage() {
                   className="rounded-lg border p-4 space-y-2"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${label.tag}`}
+                      >
+                        {label.text}
+                      </span>
                       <span className="font-medium">{group.title}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {formatTime(task.start_time_ms)} →{" "}
                         {formatTime(task.end_time_ms)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-sm ${label.color}`}>
-                        {label.text}
-                      </span>
+                    <div className="flex items-center gap-1">
                       {status === "processing" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-500"
-                          onClick={() => handleCancel(task.id)}
-                        >
-                          取消
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-red-500"
+                                onClick={() => handleCancel(task.id)}
+                              />
+                            }
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>取消任务</TooltipContent>
+                        </Tooltip>
+                      )}
+                      {status === "completed" && task.output_path && (
+                        <>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() =>
+                                    handleOpenFile(task.output_path!)
+                                  }
+                                />
+                              }
+                            >
+                              <PlayIcon className="h-4 w-4" />
+                            </TooltipTrigger>
+                            <TooltipContent>播放</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() =>
+                                    handleRevealFile(task.output_path!)
+                                  }
+                                />
+                              }
+                            >
+                              <FolderOpenIcon className="h-4 w-4" />
+                            </TooltipTrigger>
+                            <TooltipContent>在文件夹中显示</TooltipContent>
+                          </Tooltip>
+                        </>
+                      )}
+                      {["completed", "failed", "cancelled"].includes(
+                        status,
+                      ) && (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-muted-foreground hover:text-red-500"
+                                onClick={() => handleDeleteTask(task.id)}
+                              />
+                            }
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>删除</TooltipContent>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
@@ -252,14 +489,41 @@ function TasksPage() {
                     <span className="text-xs text-muted-foreground">
                       {isCollapsed ? "▸" : "▾"}
                     </span>
+                    <span
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${batchLabel.tag}`}
+                    >
+                      {batchLabel.text}
+                    </span>
                     <span className="font-medium">{group.title}</span>
                     <span className="text-xs text-muted-foreground">
                       {completedCount}/{group.tasks.length} 个片段
                     </span>
                   </div>
-                  <span className={`text-sm ${batchLabel.color}`}>
-                    {batchLabel.text}
-                  </span>
+                  <div className="flex items-center gap-1">
+                    {!["processing", "pending"].includes(batchStatus) && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground hover:text-red-500"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteBatch(
+                                  group.key,
+                                  group.title,
+                                );
+                              }}
+                            />
+                          }
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </TooltipTrigger>
+                        <TooltipContent>删除批次</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
                 </div>
 
                 {/* Batch progress bar */}
@@ -290,11 +554,16 @@ function TasksPage() {
                           className="px-4 py-2.5 space-y-1.5"
                         >
                           <div className="flex items-center justify-between">
-                            <div className="text-sm">
-                              <span className="font-medium">
-                                {task.title ?? `片段 #${task.id}`}
+                            <div className="flex items-center gap-1.5 text-sm">
+                              <span
+                                className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium leading-none ${label.tag}`}
+                              >
+                                {label.text}
                               </span>
-                              <span className="ml-2 text-xs text-muted-foreground">
+                              <span className="font-medium">
+                                {task.title || `片段 #${task.id}`}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
                                 {formatTime(task.start_time_ms)} →{" "}
                                 {formatTime(task.end_time_ms)}
                                 <span className="ml-1">
@@ -302,24 +571,95 @@ function TasksPage() {
                                 </span>
                               </span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`text-xs ${label.color}`}
-                              >
-                                {label.text}
-                              </span>
+                            <div className="flex items-center gap-0.5">
                               {status === "processing" && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-500 h-6 px-1.5 text-xs"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCancel(task.id);
-                                  }}
-                                >
-                                  取消
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-red-500 h-6 w-6"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleCancel(task.id);
+                                        }}
+                                      />
+                                    }
+                                  >
+                                    <XIcon className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>取消</TooltipContent>
+                                </Tooltip>
+                              )}
+                              {status === "completed" &&
+                                task.output_path && (
+                                  <>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="h-6 w-6"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenFile(
+                                                task.output_path!,
+                                              );
+                                            }}
+                                          />
+                                        }
+                                      >
+                                        <PlayIcon className="h-3.5 w-3.5" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>播放</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="h-6 w-6"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleRevealFile(
+                                                task.output_path!,
+                                              );
+                                            }}
+                                          />
+                                        }
+                                      >
+                                        <FolderOpenIcon className="h-3.5 w-3.5" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        在文件夹中显示
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </>
+                                )}
+                              {["completed", "failed", "cancelled"].includes(
+                                status,
+                              ) && (
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-muted-foreground hover:text-red-500 h-6 w-6"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteTask(task.id);
+                                        }}
+                                      />
+                                    }
+                                  >
+                                    <Trash2Icon className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>删除</TooltipContent>
+                                </Tooltip>
                               )}
                             </div>
                           </div>
@@ -345,6 +685,55 @@ function TasksPage() {
           })}
         </div>
       )}
+
+      {/* Delete confirmation dialog */}
+      <Dialog
+        open={deleteDialog.open}
+        onOpenChange={(open) =>
+          setDeleteDialog((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{deleteDialog.title}</DialogTitle>
+            <DialogDescription>{deleteDialog.description}</DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={deleteDialog.deleteFiles}
+                onChange={(e) =>
+                  setDeleteDialog((prev) => ({
+                    ...prev,
+                    deleteFiles: e.target.checked,
+                  }))
+                }
+                className="h-4 w-4 rounded border-input"
+              />
+              <span className="text-sm">同时删除输出文件</span>
+            </label>
+            {deleteDialog.deleteFiles && (
+              <p className="text-xs text-red-500 mt-1 ml-6">
+                将从磁盘上永久删除已生成的文件，此操作不可撤销
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose
+              render={<Button variant="outline" />}
+            >
+              取消
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={handleDialogConfirm}
+            >
+              确认删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
