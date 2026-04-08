@@ -207,7 +207,7 @@ function TasksPage() {
     for (const task of standalone) {
       result.push({
         key: `single-${task.id}`,
-        title: task.title ?? `切片 #${task.id}`,
+        title: task.title || `切片 #${task.id}`,
         tasks: [task],
         isBatch: false,
       });
@@ -417,7 +417,7 @@ function TasksPage() {
                           <div className="flex items-center justify-between">
                             <div className="text-sm">
                               <span className="font-medium">
-                                {task.title ?? `片段 #${task.id}`}
+                                {task.title || `片段 #${task.id}`}
                               </span>
                               <span className="ml-2 text-xs text-muted-foreground">
                                 {formatTime(task.start_time_ms)} →{" "}
