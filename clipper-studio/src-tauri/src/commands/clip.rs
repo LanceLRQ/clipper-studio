@@ -1303,3 +1303,141 @@ fn chrono_now() -> String {
         .as_secs();
     format!("{}", now) // Simplified; DB uses datetime('now') anyway
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== sanitize_filename ====================
+
+    #[test]
+    fn test_sanitize_normal_text() {
+        assert_eq!(sanitize_filename("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_sanitize_special_chars() {
+        assert_eq!(sanitize_filename("a/b\\c:d*e?f\"g<h>i|j"), "a_b_c_d_e_f_g_h_i_j");
+    }
+
+    #[test]
+    fn test_sanitize_chinese() {
+        assert_eq!(sanitize_filename("你好世界"), "你好世界");
+    }
+
+    #[test]
+    fn test_sanitize_empty() {
+        assert_eq!(sanitize_filename(""), "");
+    }
+
+    // ==================== format_relative_time_range ====================
+
+    #[test]
+    fn test_format_relative_mmss() {
+        assert_eq!(format_relative_time_range(30_000, 90_000), "0030-0130");
+    }
+
+    #[test]
+    fn test_format_relative_hhmmss() {
+        assert_eq!(format_relative_time_range(3600_000, 7265_000), "010000-020105");
+    }
+
+    // ==================== build_clip_name ====================
+
+    #[test]
+    fn test_build_clip_name_full() {
+        let result = build_clip_name(
+            Some("主播A"),
+            Some("直播标题"),
+            Some("片段1"),
+            Some("2026-04-07 21:30:00"),
+            0,
+            300_000,
+            "fallback.mp4",
+        );
+        // Should contain streamer, title, clip name, and time range
+        assert!(result.contains("主播A"));
+        assert!(result.contains("直播标题"));
+        assert!(result.contains("片段1"));
+        // Absolute time format: yyMMdd-HHmm
+        assert!(result.contains("260407-2130"));
+    }
+
+    #[test]
+    fn test_build_clip_name_no_recorded_at() {
+        let result = build_clip_name(
+            Some("主播"),
+            None,
+            Some("clip"),
+            None,
+            60_000,
+            120_000,
+            "video.mp4",
+        );
+        assert!(result.contains("主播"));
+        assert!(result.contains("clip"));
+        // Relative time: 60s → "000100", 120s → "000200"
+        assert!(result.contains("000100-000200"));
+    }
+
+    #[test]
+    fn test_build_clip_name_long_title_truncated() {
+        let long_title = "这是一个非常非常非常非常非常非常非常非常长的标题";
+        let result = build_clip_name(
+            Some("主播"),
+            Some(long_title),
+            None,
+            None,
+            0,
+            1000,
+            "fallback.flv",
+        );
+        // Title should be truncated to 20 chars + "..."
+        assert!(result.contains("..."));
+    }
+
+    #[test]
+    fn test_build_clip_name_fallback() {
+        // All metadata is None, but recorded_at is also None → uses relative time format
+        let result = build_clip_name(None, None, None, None, 1000, 5000, "video.mp4");
+        // Relative time: 1s → "000001", 5s → "000005"
+        assert!(result.contains("000001-000005"));
+    }
+
+    // ==================== build_batch_clip_filename ====================
+
+    #[test]
+    fn test_batch_filename_with_name() {
+        let result = build_batch_clip_filename(
+            Some("片段1"),
+            Some("2026-04-07 21:30:00"),
+            0,
+            300_000,
+        );
+        assert!(result.starts_with("片段1-"));
+        assert!(result.contains("260407-2130"));
+    }
+
+    #[test]
+    fn test_batch_filename_no_name() {
+        let result = build_batch_clip_filename(
+            None,
+            None,
+            30_000,
+            90_000,
+        );
+        assert!(result.starts_with("clip-"));
+        assert!(result.contains("0030-0130"));
+    }
+
+    #[test]
+    fn test_batch_filename_no_recorded_at() {
+        let result = build_batch_clip_filename(
+            Some("test"),
+            None,
+            60_000,
+            120_000,
+        );
+        assert!(result.contains("0100-0200"));
+    }
+}
