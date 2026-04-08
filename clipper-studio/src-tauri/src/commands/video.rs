@@ -39,6 +39,12 @@ pub struct ImportVideoRequest {
 #[derive(Debug, Deserialize)]
 pub struct ListVideosRequest {
     pub workspace_id: Option<i64>,
+    pub streamer_id: Option<i64>,
+    pub sort_by: Option<String>,
+    pub sort_order: Option<String>,
+    pub search: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
     pub page: Option<u32>,
     pub page_size: Option<u32>,
 }
@@ -207,9 +213,58 @@ pub async fn list_videos(
     let page_size = req.page_size.unwrap_or(50).min(200);
     let offset = (page - 1) * page_size;
 
-    let where_clause = match req.workspace_id {
-        Some(id) => format!("WHERE v.workspace_id = {}", id),
-        None => String::new(),
+    // Build WHERE clauses dynamically
+    let mut conditions: Vec<String> = Vec::new();
+
+    if let Some(ws_id) = req.workspace_id {
+        conditions.push(format!("v.workspace_id = {}", ws_id));
+    }
+
+    if let Some(sid) = req.streamer_id {
+        if sid == -1 {
+            conditions.push("v.streamer_id IS NULL".to_string());
+        } else {
+            conditions.push(format!("v.streamer_id = {}", sid));
+        }
+    }
+
+    if let Some(ref keyword) = req.search {
+        let escaped = keyword.replace('\'', "''").replace('%', "\\%");
+        if !escaped.is_empty() {
+            conditions.push(format!(
+                "(v.stream_title LIKE '%{}%' OR v.file_name LIKE '%{}%')",
+                escaped, escaped
+            ));
+        }
+    }
+
+    if let Some(ref d) = req.date_from {
+        if !d.is_empty() {
+            conditions.push(format!("v.recorded_at >= '{}'", d.replace('\'', "''")));
+        }
+    }
+
+    if let Some(ref d) = req.date_to {
+        if !d.is_empty() {
+            // date_to is inclusive: use next day
+            conditions.push(format!("v.recorded_at < '{}T'", d.replace('\'', "''")));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Validate and build ORDER BY
+    let sort_col = match req.sort_by.as_deref() {
+        Some("recorded_at") => "v.recorded_at",
+        _ => "v.created_at",
+    };
+    let sort_dir = match req.sort_order.as_deref() {
+        Some("asc") => "ASC",
+        _ => "DESC",
     };
 
     // Count total
@@ -235,8 +290,8 @@ pub async fn list_videos(
             format!(
                 "SELECT v.*, st.name as streamer_name FROM videos v \
                  LEFT JOIN streamers st ON v.streamer_id = st.id \
-                 {} ORDER BY v.created_at DESC LIMIT {} OFFSET {}",
-                where_clause, page_size, offset
+                 {} ORDER BY {} {} LIMIT {} OFFSET {}",
+                where_clause, sort_col, sort_dir, page_size, offset
             ),
         ),
     )
@@ -316,18 +371,121 @@ pub struct StreamerInfo {
     pub room_id: Option<String>,
     pub name: String,
     pub video_count: i64,
+    pub total_duration_ms: Option<i64>,
 }
 
-/// List videos grouped by recording sessions
+#[derive(Debug, Deserialize)]
+pub struct ListStreamersRequest {
+    pub workspace_id: Option<i64>,
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListStreamersResponse {
+    pub streamers: Vec<StreamerInfo>,
+    pub total: i64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListSessionsRequest {
+    pub workspace_id: Option<i64>,
+    pub streamer_id: Option<i64>,
+    pub sort_order: Option<String>,
+    pub search: Option<String>,
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListSessionsResponse {
+    pub sessions: Vec<SessionInfo>,
+    pub total: i64,
+    pub page: u32,
+    pub page_size: u32,
+}
+
+/// List videos grouped by recording sessions, with filtering and pagination
 #[tauri::command]
 pub async fn list_sessions(
     state: State<'_, AppState>,
-    workspace_id: Option<i64>,
-) -> Result<Vec<SessionInfo>, String> {
-    let ws_filter = workspace_id
-        .map(|id| format!("WHERE s.workspace_id = {}", id))
-        .unwrap_or_default();
+    req: Option<ListSessionsRequest>,
+) -> Result<ListSessionsResponse, String> {
+    let req = req.unwrap_or(ListSessionsRequest {
+        workspace_id: None,
+        streamer_id: None,
+        sort_order: None,
+        search: None,
+        date_from: None,
+        date_to: None,
+        page: None,
+        page_size: None,
+    });
 
+    let page = req.page.unwrap_or(1).max(1);
+    let page_size = req.page_size.unwrap_or(50).min(200);
+    let offset = (page - 1) * page_size;
+
+    let sort_dir = match req.sort_order.as_deref() {
+        Some("asc") => "ASC",
+        _ => "DESC",
+    };
+
+    // Build WHERE clauses
+    let mut conditions: Vec<String> = Vec::new();
+    if let Some(ws_id) = req.workspace_id {
+        conditions.push(format!("s.workspace_id = {}", ws_id));
+    }
+    if let Some(sid) = req.streamer_id {
+        if sid == -1 {
+            conditions.push("s.streamer_id IS NULL".to_string());
+        } else {
+            conditions.push(format!("s.streamer_id = {}", sid));
+        }
+    }
+    if let Some(ref keyword) = req.search {
+        let escaped = keyword.replace('\'', "''").replace('%', "\\%");
+        if !escaped.is_empty() {
+            conditions.push(format!("s.title LIKE '%{}%'", escaped));
+        }
+    }
+    if let Some(ref d) = req.date_from {
+        if !d.is_empty() {
+            conditions.push(format!("s.started_at >= '{}'", d.replace('\'', "''")));
+        }
+    }
+    if let Some(ref d) = req.date_to {
+        if !d.is_empty() {
+            conditions.push(format!("s.started_at < '{}T'", d.replace('\'', "''")));
+        }
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    // Count total
+    let count_row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT COUNT(*) as cnt FROM recording_sessions s {}", where_clause),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let total: i64 = count_row
+        .and_then(|r| r.try_get("", "cnt").ok())
+        .unwrap_or(0);
+
+    // Query sessions page
     let session_rows = sea_orm::ConnectionTrait::query_all(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -335,8 +493,8 @@ pub async fn list_sessions(
             format!(
                 "SELECT s.*, st.name as streamer_name FROM recording_sessions s \
                  LEFT JOIN streamers st ON s.streamer_id = st.id \
-                 {} ORDER BY s.started_at DESC",
-                ws_filter
+                 {} ORDER BY s.started_at {} LIMIT {} OFFSET {}",
+                where_clause, sort_dir, page_size, offset
             ),
         ),
     )
@@ -348,7 +506,6 @@ pub async fn list_sessions(
     for srow in &session_rows {
         let session_id: i64 = srow.try_get("", "id").unwrap_or(0);
 
-        // Get videos in this session
         let video_rows = sea_orm::ConnectionTrait::query_all(
             state.db.conn(),
             sea_orm::Statement::from_string(
@@ -378,23 +535,76 @@ pub async fn list_sessions(
         });
     }
 
-    Ok(sessions)
+    Ok(ListSessionsResponse {
+        sessions,
+        total,
+        page,
+        page_size,
+    })
 }
 
-/// List all streamers
+/// List streamers with optional workspace filter and pagination
 #[tauri::command]
 pub async fn list_streamers(
     state: State<'_, AppState>,
-) -> Result<Vec<StreamerInfo>, String> {
+    req: Option<ListStreamersRequest>,
+) -> Result<ListStreamersResponse, String> {
+    let req = req.unwrap_or(ListStreamersRequest {
+        workspace_id: None,
+        page: None,
+        page_size: None,
+    });
+    let page = req.page.unwrap_or(1).max(1);
+    let page_size = req.page_size.unwrap_or(50).min(200);
+    let offset = (page - 1) * page_size;
+
+    let ws_filter = match req.workspace_id {
+        Some(id) => format!("WHERE v.workspace_id = {}", id),
+        None => String::new(),
+    };
+
+    // Count total streamers (that have videos in this workspace)
+    let count_sql = if ws_filter.is_empty() {
+        "SELECT COUNT(*) as cnt FROM streamers".to_string()
+    } else {
+        format!(
+            "SELECT COUNT(DISTINCT st.id) as cnt FROM streamers st \
+             INNER JOIN videos v ON st.id = v.streamer_id {}",
+            ws_filter
+        )
+    };
+
+    let count_row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(sea_orm::DatabaseBackend::Sqlite, count_sql),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let total: i64 = count_row
+        .and_then(|r| r.try_get("", "cnt").ok())
+        .unwrap_or(0);
+
+    // Query streamers with aggregated video stats
+    let query_sql = if ws_filter.is_empty() {
+        format!(
+            "SELECT st.*, COUNT(v.id) as video_count, SUM(v.duration_ms) as total_duration_ms \
+             FROM streamers st LEFT JOIN videos v ON st.id = v.streamer_id \
+             GROUP BY st.id ORDER BY st.name LIMIT {} OFFSET {}",
+            page_size, offset
+        )
+    } else {
+        format!(
+            "SELECT st.*, COUNT(v.id) as video_count, SUM(v.duration_ms) as total_duration_ms \
+             FROM streamers st INNER JOIN videos v ON st.id = v.streamer_id {} \
+             GROUP BY st.id ORDER BY st.name LIMIT {} OFFSET {}",
+            ws_filter, page_size, offset
+        )
+    };
+
     let rows = sea_orm::ConnectionTrait::query_all(
         state.db.conn(),
-        sea_orm::Statement::from_string(
-            sea_orm::DatabaseBackend::Sqlite,
-            "SELECT st.*, COUNT(v.id) as video_count FROM streamers st \
-             LEFT JOIN videos v ON st.id = v.streamer_id \
-             GROUP BY st.id ORDER BY st.name"
-                .to_string(),
-        ),
+        sea_orm::Statement::from_string(sea_orm::DatabaseBackend::Sqlite, query_sql),
     )
     .await
     .map_err(|e| e.to_string())?;
@@ -407,10 +617,16 @@ pub async fn list_streamers(
             room_id: row.try_get("", "room_id").ok(),
             name: row.try_get("", "name").unwrap_or_default(),
             video_count: row.try_get("", "video_count").unwrap_or(0),
+            total_duration_ms: row.try_get("", "total_duration_ms").ok(),
         })
         .collect();
 
-    Ok(streamers)
+    Ok(ListStreamersResponse {
+        streamers,
+        total,
+        page,
+        page_size,
+    })
 }
 
 // ==================== Audio Envelope ====================

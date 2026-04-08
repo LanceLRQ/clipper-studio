@@ -210,7 +210,7 @@ function VideoDetailPage() {
       <div className="space-y-4">
         <Button
           variant="ghost"
-          onClick={() => navigate({ to: "/dashboard/videos" })}
+          onClick={() => window.history.back()}
         >
           ← 返回列表
         </Button>
@@ -234,7 +234,7 @@ function VideoDetailPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate({ to: "/dashboard/videos" })}
+          onClick={() => window.history.back()}
         >
           ← 返回
         </Button>

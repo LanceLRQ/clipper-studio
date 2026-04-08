@@ -20,6 +20,7 @@ import { Route as DashboardVideosIndexRouteImport } from './routes/dashboard/vid
 import { Route as DashboardPluginsIndexRouteImport } from './routes/dashboard/plugins/index'
 import { Route as DashboardVideosVideoIdRouteImport } from './routes/dashboard/videos/$videoId'
 import { Route as DashboardPluginsPluginIdRouteImport } from './routes/dashboard/plugins/$pluginId'
+import { Route as DashboardVideosStreamerStreamerIdRouteImport } from './routes/dashboard/videos/streamer/$streamerId'
 
 const WelcomeRoute = WelcomeRouteImport.update({
   id: '/welcome',
@@ -77,6 +78,12 @@ const DashboardPluginsPluginIdRoute =
     path: '/plugins/$pluginId',
     getParentRoute: () => DashboardRoute,
   } as any)
+const DashboardVideosStreamerStreamerIdRoute =
+  DashboardVideosStreamerStreamerIdRouteImport.update({
+    id: '/videos/streamer/$streamerId',
+    path: '/videos/streamer/$streamerId',
+    getParentRoute: () => DashboardRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
   '/dashboard/plugins/': typeof DashboardPluginsIndexRoute
   '/dashboard/videos/': typeof DashboardVideosIndexRoute
+  '/dashboard/videos/streamer/$streamerId': typeof DashboardVideosStreamerStreamerIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +110,7 @@ export interface FileRoutesByTo {
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
   '/dashboard/plugins': typeof DashboardPluginsIndexRoute
   '/dashboard/videos': typeof DashboardVideosIndexRoute
+  '/dashboard/videos/streamer/$streamerId': typeof DashboardVideosStreamerStreamerIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +125,7 @@ export interface FileRoutesById {
   '/dashboard/videos/$videoId': typeof DashboardVideosVideoIdRoute
   '/dashboard/plugins/': typeof DashboardPluginsIndexRoute
   '/dashboard/videos/': typeof DashboardVideosIndexRoute
+  '/dashboard/videos/streamer/$streamerId': typeof DashboardVideosStreamerStreamerIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +141,7 @@ export interface FileRouteTypes {
     | '/dashboard/videos/$videoId'
     | '/dashboard/plugins/'
     | '/dashboard/videos/'
+    | '/dashboard/videos/streamer/$streamerId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -143,6 +154,7 @@ export interface FileRouteTypes {
     | '/dashboard/videos/$videoId'
     | '/dashboard/plugins'
     | '/dashboard/videos'
+    | '/dashboard/videos/streamer/$streamerId'
   id:
     | '__root__'
     | '/'
@@ -156,6 +168,7 @@ export interface FileRouteTypes {
     | '/dashboard/videos/$videoId'
     | '/dashboard/plugins/'
     | '/dashboard/videos/'
+    | '/dashboard/videos/streamer/$streamerId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -243,6 +256,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DashboardPluginsPluginIdRouteImport
       parentRoute: typeof DashboardRoute
     }
+    '/dashboard/videos/streamer/$streamerId': {
+      id: '/dashboard/videos/streamer/$streamerId'
+      path: '/videos/streamer/$streamerId'
+      fullPath: '/dashboard/videos/streamer/$streamerId'
+      preLoaderRoute: typeof DashboardVideosStreamerStreamerIdRouteImport
+      parentRoute: typeof DashboardRoute
+    }
   }
 }
 
@@ -255,6 +275,7 @@ interface DashboardRouteChildren {
   DashboardVideosVideoIdRoute: typeof DashboardVideosVideoIdRoute
   DashboardPluginsIndexRoute: typeof DashboardPluginsIndexRoute
   DashboardVideosIndexRoute: typeof DashboardVideosIndexRoute
+  DashboardVideosStreamerStreamerIdRoute: typeof DashboardVideosStreamerStreamerIdRoute
 }
 
 const DashboardRouteChildren: DashboardRouteChildren = {
@@ -266,6 +287,8 @@ const DashboardRouteChildren: DashboardRouteChildren = {
   DashboardVideosVideoIdRoute: DashboardVideosVideoIdRoute,
   DashboardPluginsIndexRoute: DashboardPluginsIndexRoute,
   DashboardVideosIndexRoute: DashboardVideosIndexRoute,
+  DashboardVideosStreamerStreamerIdRoute:
+    DashboardVideosStreamerStreamerIdRoute,
 }
 
 const DashboardRouteWithChildren = DashboardRoute._addFileChildren(
