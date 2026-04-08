@@ -40,6 +40,7 @@ pub struct ClipTaskInfo {
     pub status: String,
     pub progress: f64,
     pub error_message: Option<String>,
+    pub output_path: Option<String>,
     pub created_at: String,
     pub completed_at: Option<String>,
     pub batch_id: Option<String>,
@@ -316,6 +317,7 @@ pub async fn create_clip(
         status: "pending".to_string(),
         progress: 0.0,
         error_message: None,
+        output_path: None,
         created_at: chrono_now(),
         completed_at: None,
         batch_id: req.batch_id.clone(),
@@ -352,8 +354,10 @@ pub async fn list_clip_tasks(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT * FROM clip_tasks {} ORDER BY created_at DESC",
-                where_clause
+                "SELECT t.*, co.output_path FROM clip_tasks t \
+                 LEFT JOIN clip_outputs co ON co.clip_task_id = t.id \
+                 {} ORDER BY t.created_at DESC",
+                if where_clause.is_empty() { String::new() } else { where_clause.replace("WHERE", "WHERE t.") }
             ),
         ),
     )
@@ -371,6 +375,7 @@ pub async fn list_clip_tasks(
             status: row.try_get("", "status").unwrap_or_default(),
             progress: row.try_get("", "progress").unwrap_or(0.0),
             error_message: row.try_get("", "error_message").ok(),
+            output_path: row.try_get::<Option<String>>("", "output_path").unwrap_or(None),
             created_at: row.try_get("", "created_at").unwrap_or_default(),
             completed_at: row.try_get("", "completed_at").ok(),
             batch_id: row.try_get("", "batch_id").ok(),

@@ -222,6 +222,8 @@ pub fn run() {
             commands::system::get_setting,
             commands::system::set_setting,
             commands::system::get_settings,
+            commands::system::reveal_file,
+            commands::system::open_file,
             commands::video::import_video,
             commands::video::list_videos,
             commands::video::get_video,

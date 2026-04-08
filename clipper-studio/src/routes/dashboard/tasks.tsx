@@ -20,6 +20,7 @@ import {
   clearFinishedClipTasks,
 } from "@/services/clip";
 import { clearFinishedMediaTasks } from "@/services/media";
+import { invoke } from "@tauri-apps/api/core";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -171,6 +172,22 @@ function TasksPage() {
     );
   };
 
+  const handleOpenFile = async (path: string) => {
+    try {
+      await invoke("open_file", { path });
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const handleRevealFile = async (path: string) => {
+    try {
+      await invoke("reveal_file", { path });
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
   const hasFinishedTasks = tasks.some((t) =>
     ["completed", "failed", "cancelled"].includes(t.status),
   );
@@ -307,6 +324,26 @@ function TasksPage() {
                         >
                           取消
                         </Button>
+                      )}
+                      {status === "completed" && task.output_path && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleOpenFile(task.output_path!)}
+                          >
+                            播放
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              handleRevealFile(task.output_path!)
+                            }
+                          >
+                            定位
+                          </Button>
+                        </>
                       )}
                       {["completed", "failed", "cancelled"].includes(
                         status,
@@ -446,6 +483,33 @@ function TasksPage() {
                                   取消
                                 </Button>
                               )}
+                              {status === "completed" &&
+                                task.output_path && (
+                                  <>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-1.5 text-xs"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenFile(task.output_path!);
+                                      }}
+                                    >
+                                      播放
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 px-1.5 text-xs"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRevealFile(task.output_path!);
+                                      }}
+                                    >
+                                      定位
+                                    </Button>
+                                  </>
+                                )}
                               {["completed", "failed", "cancelled"].includes(
                                 status,
                               ) && (
