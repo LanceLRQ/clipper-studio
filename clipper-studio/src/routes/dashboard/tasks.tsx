@@ -3,6 +3,12 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
+import { XIcon, PlayIcon, FolderOpenIcon, Trash2Icon } from "lucide-react";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -339,48 +345,78 @@ function TasksPage() {
                         {formatTime(task.end_time_ms)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       {status === "processing" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-500"
-                          onClick={() => handleCancel(task.id)}
-                        >
-                          取消
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-red-500"
+                                onClick={() => handleCancel(task.id)}
+                              />
+                            }
+                          >
+                            <XIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>取消任务</TooltipContent>
+                        </Tooltip>
                       )}
                       {status === "completed" && task.output_path && (
                         <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenFile(task.output_path!)}
-                          >
-                            播放
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() =>
-                              handleRevealFile(task.output_path!)
-                            }
-                          >
-                            定位
-                          </Button>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() =>
+                                    handleOpenFile(task.output_path!)
+                                  }
+                                />
+                              }
+                            >
+                              <PlayIcon className="h-4 w-4" />
+                            </TooltipTrigger>
+                            <TooltipContent>播放</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  onClick={() =>
+                                    handleRevealFile(task.output_path!)
+                                  }
+                                />
+                              }
+                            >
+                              <FolderOpenIcon className="h-4 w-4" />
+                            </TooltipTrigger>
+                            <TooltipContent>在文件夹中显示</TooltipContent>
+                          </Tooltip>
                         </>
                       )}
                       {["completed", "failed", "cancelled"].includes(
                         status,
                       ) && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-muted-foreground hover:text-red-500"
-                          onClick={() => handleDeleteTask(task.id)}
-                        >
-                          删除
-                        </Button>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-muted-foreground hover:text-red-500"
+                                onClick={() => handleDeleteTask(task.id)}
+                              />
+                            }
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>删除</TooltipContent>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
@@ -434,19 +470,29 @@ function TasksPage() {
                       {completedCount}/{group.tasks.length} 个片段
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     {!["processing", "pending"].includes(batchStatus) && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-muted-foreground hover:text-red-500"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteBatch(group.key, group.title);
-                        }}
-                      >
-                        删除批次
-                      </Button>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-muted-foreground hover:text-red-500"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteBatch(
+                                  group.key,
+                                  group.title,
+                                );
+                              }}
+                            />
+                          }
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </TooltipTrigger>
+                        <TooltipContent>删除批次</TooltipContent>
+                      </Tooltip>
                     )}
                   </div>
                 </div>
@@ -496,61 +542,95 @@ function TasksPage() {
                                 </span>
                               </span>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-0.5">
                               {status === "processing" && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-red-500 h-6 px-1.5 text-xs"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCancel(task.id);
-                                  }}
-                                >
-                                  取消
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-red-500 h-6 w-6"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleCancel(task.id);
+                                        }}
+                                      />
+                                    }
+                                  >
+                                    <XIcon className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>取消</TooltipContent>
+                                </Tooltip>
                               )}
                               {status === "completed" &&
                                 task.output_path && (
                                   <>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1.5 text-xs"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleOpenFile(task.output_path!);
-                                      }}
-                                    >
-                                      播放
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 px-1.5 text-xs"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRevealFile(task.output_path!);
-                                      }}
-                                    >
-                                      定位
-                                    </Button>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="h-6 w-6"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleOpenFile(
+                                                task.output_path!,
+                                              );
+                                            }}
+                                          />
+                                        }
+                                      >
+                                        <PlayIcon className="h-3.5 w-3.5" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>播放</TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            variant="ghost"
+                                            size="icon-sm"
+                                            className="h-6 w-6"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleRevealFile(
+                                                task.output_path!,
+                                              );
+                                            }}
+                                          />
+                                        }
+                                      >
+                                        <FolderOpenIcon className="h-3.5 w-3.5" />
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        在文件夹中显示
+                                      </TooltipContent>
+                                    </Tooltip>
                                   </>
                                 )}
                               {["completed", "failed", "cancelled"].includes(
                                 status,
                               ) && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="text-muted-foreground hover:text-red-500 h-6 px-1.5 text-xs"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteTask(task.id);
-                                  }}
-                                >
-                                  删除
-                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="text-muted-foreground hover:text-red-500 h-6 w-6"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleDeleteTask(task.id);
+                                        }}
+                                      />
+                                    }
+                                  >
+                                    <Trash2Icon className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>删除</TooltipContent>
+                                </Tooltip>
                               )}
                             </div>
                           </div>
