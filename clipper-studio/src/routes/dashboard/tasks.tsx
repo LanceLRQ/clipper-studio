@@ -39,12 +39,35 @@ function formatDurationMs(ms: number): string {
   return `${m}分${s}秒`;
 }
 
-const statusLabels: Record<string, { text: string; color: string }> = {
-  pending: { text: "等待中", color: "text-yellow-600" },
-  processing: { text: "处理中", color: "text-blue-600" },
-  completed: { text: "已完成", color: "text-green-600" },
-  failed: { text: "失败", color: "text-red-500" },
-  cancelled: { text: "已取消", color: "text-muted-foreground" },
+const statusLabels: Record<
+  string,
+  { text: string; color: string; tag: string }
+> = {
+  pending: {
+    text: "等待中",
+    color: "text-yellow-600",
+    tag: "bg-yellow-100 text-yellow-700",
+  },
+  processing: {
+    text: "处理中",
+    color: "text-blue-600",
+    tag: "bg-blue-100 text-blue-700",
+  },
+  completed: {
+    text: "已完成",
+    color: "text-green-600",
+    tag: "bg-green-100 text-green-700",
+  },
+  failed: {
+    text: "失败",
+    color: "text-red-500",
+    tag: "bg-red-100 text-red-600",
+  },
+  cancelled: {
+    text: "已取消",
+    color: "text-muted-foreground",
+    tag: "bg-gray-100 text-gray-500",
+  },
 };
 
 /** A group of tasks — either a batch or a single standalone task */
@@ -304,17 +327,19 @@ function TasksPage() {
                   className="rounded-lg border p-4 space-y-2"
                 >
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${label.tag}`}
+                      >
+                        {label.text}
+                      </span>
                       <span className="font-medium">{group.title}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {formatTime(task.start_time_ms)} →{" "}
                         {formatTime(task.end_time_ms)}
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className={`text-sm ${label.color}`}>
-                        {label.text}
-                      </span>
                       {status === "processing" && (
                         <Button
                           variant="ghost"
@@ -399,15 +424,17 @@ function TasksPage() {
                     <span className="text-xs text-muted-foreground">
                       {isCollapsed ? "▸" : "▾"}
                     </span>
+                    <span
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${batchLabel.tag}`}
+                    >
+                      {batchLabel.text}
+                    </span>
                     <span className="font-medium">{group.title}</span>
                     <span className="text-xs text-muted-foreground">
                       {completedCount}/{group.tasks.length} 个片段
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className={`text-sm ${batchLabel.color}`}>
-                      {batchLabel.text}
-                    </span>
                     {!["processing", "pending"].includes(batchStatus) && (
                       <Button
                         variant="ghost"
@@ -452,11 +479,16 @@ function TasksPage() {
                           className="px-4 py-2.5 space-y-1.5"
                         >
                           <div className="flex items-center justify-between">
-                            <div className="text-sm">
+                            <div className="flex items-center gap-1.5 text-sm">
+                              <span
+                                className={`inline-flex items-center rounded px-1 py-0.5 text-[10px] font-medium leading-none ${label.tag}`}
+                              >
+                                {label.text}
+                              </span>
                               <span className="font-medium">
                                 {task.title || `片段 #${task.id}`}
                               </span>
-                              <span className="ml-2 text-xs text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 {formatTime(task.start_time_ms)} →{" "}
                                 {formatTime(task.end_time_ms)}
                                 <span className="ml-1">
@@ -465,11 +497,6 @@ function TasksPage() {
                               </span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span
-                                className={`text-xs ${label.color}`}
-                              >
-                                {label.text}
-                              </span>
                               {status === "processing" && (
                                 <Button
                                   variant="ghost"
