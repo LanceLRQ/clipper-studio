@@ -369,3 +369,91 @@ fn scan_dir_recursive(dir: &Path, results: &mut Vec<RecordingFileMeta>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_file_meta(
+        room_id: Option<&str>,
+        streamer_name: Option<&str>,
+        recorded_at: Option<&str>,
+        duration_ms: Option<i64>,
+    ) -> RecordingFileMeta {
+        RecordingFileMeta {
+            room_id: room_id.map(|s| s.to_string()),
+            streamer_name: streamer_name.map(|s| s.to_string()),
+            stream_title: None,
+            recorded_at: recorded_at.map(|s| s.to_string()),
+            duration_ms,
+            file_path: PathBuf::from("/tmp/dummy.flv"),
+            file_name: "dummy.flv".to_string(),
+            extension: "flv".to_string(),
+            associated_files: vec![],
+        }
+    }
+
+    #[test]
+    fn test_group_empty() {
+        let sessions = group_into_sessions(&[], 3600);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn test_group_single_file() {
+        let files = vec![make_file_meta(
+            Some("12345"), Some("测试"), Some("2026-04-05 20:00:00"), Some(3600000),
+        )];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].room_id, "12345");
+        assert_eq!(sessions[0].files.len(), 1);
+    }
+
+    #[test]
+    fn test_group_same_room_adjacent() {
+        // Two files from same room, within 1-hour gap
+        let files = vec![
+            make_file_meta(Some("12345"), Some("主播"), Some("2026-04-05 20:00:00"), Some(1800000)),
+            make_file_meta(Some("12345"), Some("主播"), Some("2026-04-05 20:30:00"), Some(1800000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1, "Adjacent files should be grouped into one session");
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_same_room_large_gap() {
+        // Two files from same room, gap > 1 hour
+        let files = vec![
+            make_file_meta(Some("12345"), Some("主播"), Some("2026-04-05 10:00:00"), Some(1800000)),
+            make_file_meta(Some("12345"), Some("主播"), Some("2026-04-05 20:00:00"), Some(1800000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2, "Large gap should split into two sessions");
+    }
+
+    #[test]
+    fn test_group_different_rooms() {
+        let files = vec![
+            make_file_meta(Some("111"), Some("主播A"), Some("2026-04-05 20:00:00"), None),
+            make_file_meta(Some("222"), Some("主播B"), Some("2026-04-05 20:00:00"), None),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2, "Different rooms should be separate sessions");
+        let room_ids: Vec<&str> = sessions.iter().map(|s| s.room_id.as_str()).collect();
+        assert!(room_ids.contains(&"111"));
+        assert!(room_ids.contains(&"222"));
+    }
+
+    #[test]
+    fn test_group_no_recorded_at() {
+        // Files without recorded_at but different room_ids still group by room
+        let files = vec![
+            make_file_meta(Some("12345"), Some("主播"), None, None),
+            make_file_meta(Some("12345"), Some("主播"), None, None),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+    }
+}

@@ -398,4 +398,69 @@ mod tests {
         let density = compute_density(&items, 3000, 1000);
         assert_eq!(density, vec![2, 1, 0]);
     }
+
+    // ==================== normalize_density ====================
+
+    #[test]
+    fn test_normalize_all_zeros() {
+        assert_eq!(normalize_density(&[0, 0, 0]), vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_normalize_basic() {
+        let result = normalize_density(&[2, 10, 5]);
+        assert!((result[0] - 0.2).abs() < 0.001);
+        assert!((result[1] - 1.0).abs() < 0.001);
+        assert!((result[2] - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_normalize_single() {
+        assert_eq!(normalize_density(&[42]), vec![1.0]);
+    }
+
+    #[test]
+    fn test_normalize_empty() {
+        assert!(normalize_density(&[]).is_empty());
+    }
+
+    // ==================== write + read roundtrip ====================
+
+    #[test]
+    fn test_write_read_roundtrip() {
+        let items = vec![
+            DanmakuItem { time_ms: 1000, text: "你好".into(), mode: DanmakuMode::Scroll, color: 16777215, font_size: 25 },
+            DanmakuItem { time_ms: 2000, text: "世界".into(), mode: DanmakuMode::Top, color: 255, font_size: 30 },
+            DanmakuItem { time_ms: 3000, text: "底部".into(), mode: DanmakuMode::Bottom, color: 16711680, font_size: 25 },
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_roundtrip.xml");
+        write_bilibili_xml(&items, &path).unwrap();
+
+        let parsed = parse_bilibili_xml(&path).unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].text, "你好");
+        assert_eq!(parsed[0].mode, DanmakuMode::Scroll);
+        assert_eq!(parsed[1].mode, DanmakuMode::Top);
+        assert_eq!(parsed[2].mode, DanmakuMode::Bottom);
+        assert_eq!(parsed[2].color, 16711680);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_xml_escape_roundtrip() {
+        let items = vec![
+            DanmakuItem { time_ms: 500, text: "<script>&alert(\"xss\")</script>".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+        ];
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_escape_roundtrip.xml");
+        write_bilibili_xml(&items, &path).unwrap();
+
+        let parsed = parse_bilibili_xml(&path).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].text, "<script>&alert(\"xss\")</script>");
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

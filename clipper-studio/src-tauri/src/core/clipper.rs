@@ -411,3 +411,105 @@ fn merge_ass_files(
     tracing::info!("Merged ASS files into {}", output.display());
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    // ==================== BurnOptions::needs_burn ====================
+
+    #[test]
+    fn test_needs_burn_none() {
+        let opts = BurnOptions {
+            burn_danmaku: false,
+            burn_subtitle: false,
+            danmaku_ass_path: None,
+            subtitle_ass_path: None,
+            burn_codec: "auto".to_string(),
+            burn_crf: None,
+        };
+        assert!(!opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_danmaku_no_path() {
+        let opts = BurnOptions {
+            burn_danmaku: true,
+            burn_subtitle: false,
+            danmaku_ass_path: None,
+            subtitle_ass_path: None,
+            burn_codec: "auto".to_string(),
+            burn_crf: None,
+        };
+        assert!(!opts.needs_burn(), "burn_danmaku=true but no path → false");
+    }
+
+    #[test]
+    fn test_needs_burn_danmaku_with_path() {
+        let opts = BurnOptions {
+            burn_danmaku: true,
+            burn_subtitle: false,
+            danmaku_ass_path: Some(PathBuf::from("/tmp/danmaku.ass")),
+            subtitle_ass_path: None,
+            burn_codec: "auto".to_string(),
+            burn_crf: None,
+        };
+        assert!(opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_subtitle_with_path() {
+        let opts = BurnOptions {
+            burn_danmaku: false,
+            burn_subtitle: true,
+            danmaku_ass_path: None,
+            subtitle_ass_path: Some(PathBuf::from("/tmp/sub.ass")),
+            burn_codec: "auto".to_string(),
+            burn_crf: None,
+        };
+        assert!(opts.needs_burn());
+    }
+
+    // ==================== merge_ass_files ====================
+
+    fn write_temp_ass(_name: &str, content: &str) -> tempfile::NamedTempFile {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        write!(tmp, "{}", content).unwrap();
+        tmp
+    }
+
+    #[test]
+    fn test_merge_ass_files_combines_dialogues() {
+        let danmaku = write_temp_ass("danmaku", "[Script Info]\n\n[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,弹幕文本\n");
+        let subtitle = write_temp_ass("subtitle", "[Script Info]\n\n[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,字幕文本\n");
+
+        let output = std::env::temp_dir().join("test_merged.ass");
+        merge_ass_files(danmaku.path(), subtitle.path(), &output).unwrap();
+
+        let merged = std::fs::read_to_string(&output).unwrap();
+        assert!(merged.contains("弹幕文本"), "Should contain danmaku dialogue");
+        assert!(merged.contains("字幕文本"), "Should contain subtitle dialogue");
+        assert!(merged.contains("Style: Subtitle,"), "Should add Subtitle style");
+
+        let _ = std::fs::remove_file(&output);
+    }
+
+    #[test]
+    fn test_merge_ass_files_subtitle_style_not_duplicated() {
+        let danmaku = write_temp_ass("danmaku", "[Script Info]\n\n[Events]\nDialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,弹幕\n");
+        let subtitle = write_temp_ass("subtitle", "[Script Info]\n\n[Events]\nDialogue: 0,0:00:01.50,0:00:02.50,Default,,0,0,0,,字幕A\nDialogue: 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,字幕B\n");
+
+        let output = std::env::temp_dir().join("test_merged_nodup.ass");
+        merge_ass_files(danmaku.path(), subtitle.path(), &output).unwrap();
+
+        let merged = std::fs::read_to_string(&output).unwrap();
+        // Subtitle dialogues should use "Subtitle" style
+        assert!(merged.contains(",Subtitle,"));
+        // "Style: Subtitle," should appear only once
+        let style_count = merged.matches("Style: Subtitle,").count();
+        assert_eq!(style_count, 1, "Subtitle style should not be duplicated");
+
+        let _ = std::fs::remove_file(&output);
+    }
+}

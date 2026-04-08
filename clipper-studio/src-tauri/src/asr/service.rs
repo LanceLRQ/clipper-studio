@@ -555,3 +555,42 @@ fn row_to_task_info(row: &sea_orm::QueryResult) -> ASRTaskInfo {
         completed_at: row.try_get("", "completed_at").ok(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_recorded_at_standard() {
+        let result = parse_recorded_at_to_unix_ms("2026-04-05 20:30:00");
+        assert!(result.is_some());
+        // Approximate: 2026*365*86400 + 4*30*86400 + 5*86400 + 20*3600 + 30*60 + 0
+        let expected = (2026i64 * 365 + 4 * 30 + 5) * 86400 + 20 * 3600 + 30 * 60;
+        assert_eq!(result.unwrap(), expected * 1000);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_insufficient_parts() {
+        assert_eq!(parse_recorded_at_to_unix_ms("2026-04-05"), None);
+        assert_eq!(parse_recorded_at_to_unix_ms("2026-04-05 20"), None);
+        assert_eq!(parse_recorded_at_to_unix_ms("2026-04-05 20:30"), None);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_empty() {
+        assert_eq!(parse_recorded_at_to_unix_ms(""), None);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_invalid_chars() {
+        assert_eq!(parse_recorded_at_to_unix_ms("abcd-ef-gh ij:kl:mn"), None);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_deterministic() {
+        let ts = "2026-04-05 20:30:00";
+        let a = parse_recorded_at_to_unix_ms(ts);
+        let b = parse_recorded_at_to_unix_ms(ts);
+        assert_eq!(a, b, "Same input must produce same output");
+    }
+}

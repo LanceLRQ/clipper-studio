@@ -302,4 +302,52 @@ mod tests {
         assert!((result[1].start - 5.0).abs() < 0.001);
         assert!((result[1].end - 10.0).abs() < 0.001);
     }
+
+    #[test]
+    fn test_multiple_segments() {
+        let raw = vec![
+            make_raw(0.0, 5.0, "第一段，有标点。", None),
+            make_raw(5.0, 10.0, "第二段，也有标点！", None),
+        ];
+        let result = split_segments(&raw, 5);
+        assert!(result.len() >= 4, "Each segment should be split, got {}", result.len());
+        // All text preserved
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("");
+        let original = "第一段，有标点。第二段，也有标点！";
+        let original_clean: String = original.chars().collect();
+        assert_eq!(combined, original_clean);
+    }
+
+    #[test]
+    fn test_empty_text_skipped() {
+        let raw = vec![
+            make_raw(0.0, 2.0, "", None),
+            make_raw(2.0, 4.0, "有效文本", None),
+        ];
+        let result = split_segments(&raw, 15);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "有效文本");
+    }
+
+    #[test]
+    fn test_whitespace_only_skipped() {
+        let raw = vec![
+            make_raw(0.0, 2.0, "   ", None),
+            make_raw(2.0, 4.0, "实际内容", None),
+        ];
+        let result = split_segments(&raw, 15);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].text, "实际内容");
+    }
+
+    #[test]
+    fn test_consecutive_punctuation() {
+        let raw = vec![make_raw(0.0, 10.0, "你好。。。世界！！哈哈", None)];
+        let result = split_segments(&raw, 5);
+        // "。。。" and "！！" should be grouped with adjacent text
+        assert!(!result.is_empty());
+        let combined: String = result.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("");
+        let original: String = "你好。。。世界！！哈哈".chars().collect();
+        assert_eq!(combined, original);
+    }
 }
