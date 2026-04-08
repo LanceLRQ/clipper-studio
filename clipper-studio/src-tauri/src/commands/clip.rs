@@ -70,8 +70,10 @@ pub async fn create_clip(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
                 "SELECT v.file_path, v.file_name, v.stream_title, v.recorded_at, \
-                 st.name as streamer_name \
-                 FROM videos v LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 st.name as streamer_name, w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 LEFT JOIN workspaces w ON v.workspace_id = w.id \
                  WHERE v.id = {}",
                 req.video_id
             ),
@@ -86,6 +88,9 @@ pub async fn create_clip(
     let streamer_name: Option<String> = video_row.try_get("", "streamer_name").ok();
     let stream_title: Option<String> = video_row.try_get("", "stream_title").ok();
     let recorded_at: Option<String> = video_row.try_get("", "recorded_at").ok();
+    let ws_clip_output_dir: Option<String> = video_row
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
 
     // Load preset options
     let preset_options = if let Some(pid) = req.preset_id {
@@ -109,9 +114,13 @@ pub async fn create_clip(
     let output_dir = match &req.output_dir {
         Some(dir) => PathBuf::from(dir),
         None => {
-            // Default: same directory as source, under clips/ subfolder
-            let src = PathBuf::from(&video_path);
-            src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+            // Priority: workspace clip_output_dir > source file directory / clips/
+            if let Some(ref dir) = ws_clip_output_dir {
+                PathBuf::from(dir)
+            } else {
+                let src = PathBuf::from(&video_path);
+                src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+            }
         }
     };
 

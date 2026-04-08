@@ -1,12 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSettings, setSetting } from "@/services/settings";
 import { checkASRHealth, type ASRHealthInfo } from "@/services/asr";
-import { getAppInfo } from "@/services/workspace";
+import {
+  getAppInfo,
+  getActiveWorkspace,
+  listWorkspaces,
+  updateWorkspace,
+} from "@/services/workspace";
+import type { WorkspaceInfo } from "@/types/workspace";
 import {
   listPlugins,
   type PluginInfo,
@@ -49,6 +56,133 @@ const ASR_LANGUAGES = [
   "Hungarian",
   "Macedonian",
 ] as const;
+
+// ===== Workspace Settings Tab =====
+function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
+  const [name, setName] = useState(workspace.name);
+  const [autoScan, setAutoScan] = useState(workspace.auto_scan);
+  const [clipOutputDir, setClipOutputDir] = useState(
+    workspace.clip_output_dir ?? ""
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setName(workspace.name);
+    setAutoScan(workspace.auto_scan);
+    setClipOutputDir(workspace.clip_output_dir ?? "");
+  }, [workspace]);
+
+  const handlePickDir = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (selected) {
+      setClipOutputDir(selected as string);
+    }
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    try {
+      await updateWorkspace({
+        workspace_id: workspace.id,
+        name: name.trim(),
+        auto_scan: autoScan,
+        clip_output_dir: clipOutputDir.trim(),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      alert("保存失败: " + String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const ADAPTER_LABELS: Record<string, string> = {
+    "bililive-recorder": "录播姬 (BililiveRecorder)",
+    generic: "通用目录",
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Basic Info */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">基本信息</h3>
+
+        <div className="space-y-1">
+          <Label className="text-sm">工作区名称</Label>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="输入工作区名称"
+            className="text-sm h-8"
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-sm">工作区路径</Label>
+          <p className="text-sm font-mono text-muted-foreground">
+            {workspace.path}
+          </p>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-sm">适配器类型</Label>
+          <p className="text-sm text-muted-foreground">
+            {ADAPTER_LABELS[workspace.adapter_id] ?? workspace.adapter_id}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Label className="text-sm">自动扫描目录</Label>
+          <select
+            value={autoScan ? "true" : "false"}
+            onChange={(e) => setAutoScan(e.target.value === "true")}
+            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+          >
+            <option value="true">开启</option>
+            <option value="false">关闭</option>
+          </select>
+          <span className="text-xs text-muted-foreground">
+            开启后，新文件会自动被发现并导入
+          </span>
+        </div>
+      </section>
+
+      {/* Clip Output Directory */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">切片输出设置</h3>
+
+        <div className="space-y-1">
+          <Label className="text-sm">切片视频输出目录</Label>
+          <div className="flex gap-2">
+            <Input
+              value={clipOutputDir}
+              onChange={(e) => setClipOutputDir(e.target.value)}
+              placeholder="留空则使用默认位置（源文件旁 clips/ 目录）"
+              className="text-sm h-8 font-mono flex-1"
+            />
+            <Button variant="outline" size="sm" onClick={handlePickDir}>
+              浏览...
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            自定义切片视频的输出位置。留空时，切片文件会保存在源视频同目录下的
+            clips/ 子文件夹中。
+          </p>
+        </div>
+      </section>
+
+      {/* Save */}
+      <div className="flex items-center gap-3">
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 // ===== System Settings Tab =====
 function SystemSettingsTab() {
@@ -538,24 +672,42 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 // ===== Main Settings Page =====
 function SettingsPage() {
   const [configPlugins, setConfigPlugins] = useState<PluginInfo[]>([]);
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
+
+    // Load plugins with config
     listPlugins()
       .then((list) => {
         setConfigPlugins(list.filter((p) => p.has_config));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+
+    // Load active workspace
+    getActiveWorkspace()
+      .then(async (wsId) => {
+        if (wsId == null) return;
+        const all = await listWorkspaces();
+        const ws = all.find((w) => w.id === wsId) ?? null;
+        setActiveWorkspace(ws);
+      })
+      .catch(console.error);
   }, []);
 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">设置</h2>
 
-      <Tabs defaultValue="system">
+      <Tabs defaultValue={activeWorkspace ? "workspace" : "system"}>
         <TabsList>
+          {activeWorkspace && (
+            <TabsTrigger value="workspace">工作区设置</TabsTrigger>
+          )}
           <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
@@ -563,6 +715,12 @@ function SettingsPage() {
             </TabsTrigger>
           ))}
         </TabsList>
+
+        {activeWorkspace && (
+          <TabsContent value="workspace" className="mt-4">
+            <WorkspaceSettingsTab workspace={activeWorkspace} />
+          </TabsContent>
+        )}
 
         <TabsContent value="system" className="mt-4">
           <SystemSettingsTab />

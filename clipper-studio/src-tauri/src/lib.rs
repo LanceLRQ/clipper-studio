@@ -244,6 +244,7 @@ pub fn run() {
             commands::media::list_media_tasks,
             commands::workspace::list_workspaces,
             commands::workspace::create_workspace,
+            commands::workspace::update_workspace,
             commands::workspace::delete_workspace,
             commands::workspace::get_active_workspace,
             commands::workspace::set_active_workspace,

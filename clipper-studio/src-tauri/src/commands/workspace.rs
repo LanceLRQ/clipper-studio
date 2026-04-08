@@ -13,7 +13,16 @@ pub struct WorkspaceInfo {
     pub path: String,
     pub adapter_id: String,
     pub auto_scan: bool,
+    pub clip_output_dir: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkspaceRequest {
+    pub workspace_id: i64,
+    pub name: Option<String>,
+    pub auto_scan: Option<bool>,
+    pub clip_output_dir: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +42,7 @@ pub async fn list_workspaces(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT id, name, path, adapter_id, auto_scan, created_at FROM workspaces ORDER BY created_at DESC"
+            "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces ORDER BY created_at DESC"
                 .to_string(),
         ),
     )
@@ -50,6 +59,7 @@ pub async fn list_workspaces(
                 path: row.try_get("", "path").unwrap_or_default(),
                 adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
                 auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
+                clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
                 created_at: row.try_get("", "created_at").unwrap_or_default(),
             }
         })
@@ -93,7 +103,7 @@ pub async fn create_workspace(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT id, name, path, adapter_id, auto_scan, created_at FROM workspaces WHERE path = '{}'",
+                "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces WHERE path = '{}'",
                 req.path.replace('\'', "''")
             ),
         ),
@@ -109,6 +119,7 @@ pub async fn create_workspace(
         path: row.try_get("", "path").unwrap_or_default(),
         adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
         auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
+        clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
     };
 
@@ -485,6 +496,100 @@ pub struct ScanResult {
     pub total_files: usize,
     pub total_sessions: usize,
     pub streamers: usize,
+}
+
+/// Update workspace editable fields
+#[tauri::command]
+pub async fn update_workspace(
+    state: State<'_, AppState>,
+    req: UpdateWorkspaceRequest,
+) -> Result<WorkspaceInfo, String> {
+    // Build SET clauses dynamically
+    let mut set_clauses: Vec<String> = Vec::new();
+
+    if let Some(ref name) = req.name {
+        if name.trim().is_empty() {
+            return Err("工作区名称不能为空".to_string());
+        }
+        set_clauses.push(format!("name = '{}'", name.replace('\'', "''")));
+    }
+
+    if let Some(auto_scan) = req.auto_scan {
+        set_clauses.push(format!("auto_scan = {}", auto_scan as i32));
+    }
+
+    // clip_output_dir: Some("") or Some(path) both accepted; empty string stored as NULL
+    if let Some(ref dir) = req.clip_output_dir {
+        if dir.trim().is_empty() {
+            set_clauses.push("clip_output_dir = NULL".to_string());
+        } else {
+            // Validate directory exists or can be created
+            let path = std::path::Path::new(dir);
+            if !path.exists() {
+                std::fs::create_dir_all(path)
+                    .map_err(|e| format!("无法创建输出目录: {}", e))?;
+            }
+            if !path.is_dir() {
+                return Err("指定的切片输出路径不是一个目录".to_string());
+            }
+            set_clauses.push(format!("clip_output_dir = '{}'", dir.replace('\'', "''")));
+        }
+    }
+
+    if set_clauses.is_empty() {
+        return Err("没有需要更新的字段".to_string());
+    }
+
+    set_clauses.push("updated_at = datetime('now')".to_string());
+
+    let sql = format!(
+        "UPDATE workspaces SET {} WHERE id = {}",
+        set_clauses.join(", "),
+        req.workspace_id
+    );
+
+    sea_orm::ConnectionTrait::execute_unprepared(state.db.conn(), &sql)
+        .await
+        .map_err(|e| format!("更新工作区失败: {}", e))?;
+
+    // Fetch updated workspace
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces WHERE id = {}",
+                req.workspace_id
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("工作区不存在".to_string())?;
+
+    let workspace = WorkspaceInfo {
+        id: row.try_get("", "id").unwrap_or(0),
+        name: row.try_get("", "name").unwrap_or_default(),
+        path: row.try_get("", "path").unwrap_or_default(),
+        adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
+        auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
+        clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
+        created_at: row.try_get("", "created_at").unwrap_or_default(),
+    };
+
+    // Update watcher based on auto_scan
+    if workspace.auto_scan {
+        if !state.watcher.is_watching(workspace.id) {
+            if let Err(e) = state.watcher.watch(workspace.id, std::path::Path::new(&workspace.path)) {
+                tracing::warn!("Failed to start watcher for workspace {}: {}", workspace.id, e);
+            }
+        }
+    } else {
+        state.watcher.unwatch(workspace.id);
+    }
+
+    tracing::info!("Workspace updated: {} (id={})", workspace.name, workspace.id);
+    Ok(workspace)
 }
 
 /// Detect adapter type for a given directory path

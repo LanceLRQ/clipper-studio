@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   WorkspaceInfo,
   CreateWorkspaceRequest,
+  UpdateWorkspaceRequest,
   AppInfo,
 } from "@/types/workspace";
 
@@ -17,6 +18,12 @@ export async function createWorkspace(
   req: CreateWorkspaceRequest
 ): Promise<WorkspaceInfo> {
   return invoke<WorkspaceInfo>("create_workspace", { req });
+}
+
+export async function updateWorkspace(
+  req: UpdateWorkspaceRequest
+): Promise<WorkspaceInfo> {
+  return invoke<WorkspaceInfo>("update_workspace", { req });
 }
 
 export async function deleteWorkspace(workspaceId: number): Promise<void> {
