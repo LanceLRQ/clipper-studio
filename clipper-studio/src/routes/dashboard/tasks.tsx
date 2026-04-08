@@ -7,7 +7,14 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
-import { XIcon, PlayIcon, FolderOpenIcon, Trash2Icon } from "lucide-react";
+import {
+  XIcon,
+  PlayIcon,
+  FolderOpenIcon,
+  Trash2Icon,
+  ListXIcon,
+  RefreshCwIcon,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -298,15 +305,37 @@ function TasksPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">任务中心</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           {hasFinishedTasks && (
-            <Button variant="outline" size="sm" onClick={handleClearAll}>
-              清除已完成
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    onClick={handleClearAll}
+                  />
+                }
+              >
+                <ListXIcon className="h-4 w-4" />
+              </TooltipTrigger>
+              <TooltipContent>清除已完成</TooltipContent>
+            </Tooltip>
           )}
-          <Button variant="outline" size="sm" onClick={loadTasks}>
-            刷新
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  onClick={loadTasks}
+                />
+              }
+            >
+              <RefreshCwIcon className="h-4 w-4" />
+            </TooltipTrigger>
+            <TooltipContent>刷新</TooltipContent>
+          </Tooltip>
         </div>
       </div>
 
