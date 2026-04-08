@@ -304,7 +304,7 @@ function StreamerVideosPage() {
   return (
     <div className="flex flex-col h-[calc(100vh-7rem)]">
       {/* Fixed header area */}
-      <div className="shrink-0 space-y-3 pb-3">
+      <div className="shrink-0 space-y-3 pb-3 relative z-10">
         {/* Title bar */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
