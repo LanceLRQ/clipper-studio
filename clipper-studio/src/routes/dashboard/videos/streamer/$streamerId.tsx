@@ -10,6 +10,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
 } from "lucide-react";
+import { DateRangePicker } from "@/components/video/date-range-picker";
 import type {
   SessionInfo,
   ListSessionsResponse,
@@ -350,7 +351,7 @@ function StreamerVideosPage() {
         </div>
 
         {/* Search + date filter */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <div className="relative flex-1 max-w-sm">
             <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -364,49 +365,26 @@ function StreamerVideosPage() {
           <Button variant="outline" size="sm" onClick={handleSearchSubmit}>
             搜索
           </Button>
-          <div className="flex items-center gap-1 text-sm text-muted-foreground">
-            <span>从</span>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) =>
-                updateSearch({
-                  dateFrom: e.target.value || undefined,
-                  page: 1,
-                })
-              }
-              className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-            <span>到</span>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) =>
-                updateSearch({
-                  dateTo: e.target.value || undefined,
-                  page: 1,
-                })
-              }
-              className="h-8 rounded-md border border-input bg-background px-2 py-1 text-sm"
-            />
-          </div>
-          {(search || dateFrom || dateTo) && (
+          {search && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setSearchInput("");
-                updateSearch({
-                  search: undefined,
-                  dateFrom: undefined,
-                  dateTo: undefined,
-                  page: 1,
-                });
+                updateSearch({ search: undefined, page: 1 });
               }}
             >
-              清除筛选
+              清除搜索
             </Button>
           )}
+          <div className="flex-1" />
+          <DateRangePicker
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onChange={(from, to) =>
+              updateSearch({ dateFrom: from, dateTo: to, page: 1 })
+            }
+          />
         </div>
 
         {/* Merge toolbar */}

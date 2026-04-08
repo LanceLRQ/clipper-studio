@@ -27,6 +27,7 @@
     "lucide-react": "^1.7.0",
     "mpegts.js": "^1.8.0",
     "react": "^19.2.4",
+    "react-day-picker": "^9.14.0",
     "react-dom": "^19.2.4",
     "shadcn": "^4.1.2",
     "tailwind-merge": "^3.5.0",
