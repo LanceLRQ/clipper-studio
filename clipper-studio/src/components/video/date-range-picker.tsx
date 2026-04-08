@@ -95,13 +95,12 @@ export function DateRangePicker({
             button_next:
               "h-7 w-7 inline-flex items-center justify-center rounded-md hover:bg-accent",
             weekday: "text-muted-foreground text-xs font-normal w-8 text-center",
-            day: "h-8 w-8 text-center text-sm",
+            day: "h-8 w-8 text-center text-sm [&.rdp-selected>.rdp-day_button]:bg-primary [&.rdp-selected>.rdp-day_button]:text-primary-foreground [&.rdp-selected>.rdp-day_button]:hover:bg-primary",
             day_button:
               "h-8 w-8 inline-flex items-center justify-center rounded-md hover:bg-accent transition-colors",
-            selected: "bg-primary text-primary-foreground hover:bg-primary",
             range_start: "rounded-l-md",
             range_end: "rounded-r-md",
-            range_middle: "bg-accent text-accent-foreground",
+            range_middle: "[&>.rdp-day_button]:bg-accent [&>.rdp-day_button]:text-accent-foreground",
             today: "font-bold",
             outside: "text-muted-foreground opacity-50",
           }}
