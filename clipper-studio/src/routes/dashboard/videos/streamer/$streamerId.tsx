@@ -413,7 +413,7 @@ function StreamerVideosPage() {
             {groupedSessions.map(([key, dateSessions]) => (
               <div key={key}>
                 {/* Period header */}
-                <div className="sticky top-0 z-[1] bg-background/95 backdrop-blur px-2 py-1.5 text-sm font-medium text-muted-foreground border-b">
+                <div className="bg-background/95 backdrop-blur px-2 py-1.5 text-sm font-medium text-muted-foreground border-b">
                   {formatGroupHeader(key)}
                   <span className="ml-2 text-xs font-normal">
                     {dateSessions.length} 个场次
