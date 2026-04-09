@@ -109,7 +109,7 @@ function WelcomePage() {
           </h1>
           {!hasExisting && (
             <p className="text-muted-foreground">
-              本地优先的桌面视频工作台，面向直播录播切片创作者
+              面向录播切片创作者的开源视频工作台
             </p>
           )}
         </div>
@@ -182,7 +182,7 @@ function WelcomePage() {
                   id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="例如：说说Crystal录播"
+                  placeholder="例如：Bilibili录播、抖音录播..."
                 />
               </div>
 

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::State;
 
 use crate::AppState;
@@ -590,6 +590,88 @@ pub async fn update_workspace(
 
     tracing::info!("Workspace updated: {} (id={})", workspace.name, workspace.id);
     Ok(workspace)
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiskUsageInfo {
+    pub output_dir: String,
+    pub dir_size_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub disk_available_bytes: u64,
+}
+
+/// Calculate directory size recursively
+fn calc_dir_size(path: &Path) -> u64 {
+    if !path.is_dir() {
+        return 0;
+    }
+    let mut total: u64 = 0;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let meta = entry.metadata();
+            if let Ok(m) = meta {
+                if m.is_file() {
+                    total += m.len();
+                } else if m.is_dir() {
+                    total += calc_dir_size(&entry.path());
+                }
+            }
+        }
+    }
+    total
+}
+
+/// Get disk usage info for workspace's clip output directory
+#[tauri::command]
+pub async fn get_disk_usage(
+    state: State<'_, AppState>,
+    workspace_id: i64,
+) -> Result<DiskUsageInfo, String> {
+    // Query workspace to get clip_output_dir and path
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT path, clip_output_dir FROM workspaces WHERE id = {}",
+                workspace_id
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or_else(|| "工作区不存在".to_string())?;
+
+    let ws_path: String = row.try_get("", "path").unwrap_or_default();
+    let clip_output_dir: Option<String> = row
+        .try_get::<Option<String>>("", "clip_output_dir")
+        .unwrap_or(None);
+
+    let output_dir = match clip_output_dir {
+        Some(ref dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(&ws_path).join("clips"),
+    };
+
+    let output_dir_str = output_dir.to_string_lossy().to_string();
+    let dir_size = calc_dir_size(&output_dir);
+
+    // Get disk space info — use the parent that exists for queries
+    let query_path = if output_dir.exists() {
+        output_dir.clone()
+    } else {
+        // Fall back to workspace path for disk queries
+        PathBuf::from(&ws_path)
+    };
+
+    let disk_total = fs2::total_space(&query_path).unwrap_or(0);
+    let disk_available = fs2::available_space(&query_path).unwrap_or(0);
+
+    Ok(DiskUsageInfo {
+        output_dir: output_dir_str,
+        dir_size_bytes: dir_size,
+        disk_total_bytes: disk_total,
+        disk_available_bytes: disk_available,
+    })
 }
 
 /// Detect adapter type for a given directory path

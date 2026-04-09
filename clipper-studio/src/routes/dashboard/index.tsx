@@ -162,7 +162,7 @@ function DashboardIndex() {
       : 0;
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 max-w-5xl p-6">
       <h2 className="text-2xl font-semibold">仪表盘</h2>
 
       {/* Overview Cards */}

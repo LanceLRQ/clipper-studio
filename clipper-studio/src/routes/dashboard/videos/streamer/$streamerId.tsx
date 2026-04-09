@@ -302,7 +302,7 @@ function StreamerVideosPage() {
     sid === -1 ? "未关联主播" : streamerInfo?.name ?? "加载中...";
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)]">
+    <div className="flex flex-col h-full p-6">
       {/* Fixed header area */}
       <div className="shrink-0 space-y-3 pb-3 relative z-10">
         {/* Title bar */}

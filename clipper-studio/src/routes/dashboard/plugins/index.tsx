@@ -112,10 +112,9 @@ function PluginsPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">插件管理</h2>
           <p className="text-sm text-muted-foreground">
             {plugins.length > 0
               ? `已发现 ${plugins.length} 个插件`

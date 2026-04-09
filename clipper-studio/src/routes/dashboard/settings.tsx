@@ -885,7 +885,7 @@ function SettingsPage() {
   const wsActiveId = useWorkspaceStore((s) => s.activeId);
   const wsVersion = useWorkspaceStore((s) => s.version);
   const workspaceListRef = useRef<HTMLDivElement>(null);
-  const settingsTopRef = useRef<HTMLDivElement>(null);
+
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -913,24 +913,25 @@ function SettingsPage() {
     loadWorkspaces();
   }, [wsActiveId, wsVersion, loadWorkspaces]);
 
-  // Auto-scroll based on section param
+  // Auto-scroll to workspace list when section=workspaces
   useEffect(() => {
-    if (!allWorkspaces.length) return;
+    if (section !== "workspaces" || !allWorkspaces.length) return;
     requestAnimationFrame(() => {
-      if (section === "workspaces") {
-        workspaceListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else {
-        settingsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
+      workspaceListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   }, [section, allWorkspaces]);
 
   return (
-    <div className="space-y-4">
-      <div ref={settingsTopRef} />
-      <h2 className="text-2xl font-semibold">设置</h2>
-
-      <Tabs defaultValue="workspace">
+    <div className="space-y-4 p-6">
+      <Tabs
+        value={
+          section && section !== "workspaces" && configPlugins.some((p) => p.id === section)
+            ? section
+            : section === "system"
+              ? "system"
+              : "workspace"
+        }
+      >
         <TabsList>
           <TabsTrigger value="workspace">工作区</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>

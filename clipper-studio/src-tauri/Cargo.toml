@@ -69,6 +69,9 @@ hex = "0.4"
 # XML parsing (for danmaku)
 quick-xml = "0.37"
 
+# Disk space queries
+fs2 = "0.4"
+
 # File system monitoring
 notify = "7"
 notify-debouncer-full = "0.4"

@@ -1,6 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Settings } from "lucide-react";
 import type { PluginInfo, RecorderRoom } from "@/services/plugin";
 import {
   listPlugins,
@@ -178,6 +179,7 @@ function GenericPluginPanel({ plugin }: { plugin: PluginInfo }) {
 // ===== Plugin Detail Page =====
 function PluginDetailPage() {
   const { pluginId } = Route.useParams();
+  const navigate = useNavigate();
   const [plugin, setPlugin] = useState<PluginInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,32 +210,37 @@ function PluginDetailPage() {
 
   if (error || !plugin) {
     return (
-      <div className="space-y-4">
-        <Link to="/dashboard/plugins">
-          <Button variant="ghost" size="sm">
-            &larr; 返回插件管理
-          </Button>
-        </Link>
+      <div className="space-y-4 p-6">
         <div className="text-red-500">{error ?? "插件未找到"}</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       {/* Header */}
-      <div className="flex items-center gap-3">
-        <Link to="/dashboard/plugins">
-          <Button variant="ghost" size="sm">
-            &larr;
-          </Button>
-        </Link>
+      <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">{plugin.name}</h2>
           <p className="text-sm text-muted-foreground">
             v{plugin.version} &middot; {plugin.plugin_type}
           </p>
         </div>
+        {plugin.has_config && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              navigate({
+                to: "/dashboard/settings",
+                search: { section: plugin.id },
+              })
+            }
+          >
+            <Settings className="h-4 w-4 mr-1" />
+            设置
+          </Button>
+        )}
       </div>
 
       {/* Plugin-specific panel */}

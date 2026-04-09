@@ -57,3 +57,16 @@ export async function detectWorkspaceAdapter(
 ): Promise<string> {
   return invoke<string>("detect_workspace_adapter", { path });
 }
+
+export interface DiskUsageInfo {
+  output_dir: string;
+  dir_size_bytes: number;
+  disk_total_bytes: number;
+  disk_available_bytes: number;
+}
+
+export async function getDiskUsage(
+  workspaceId: number
+): Promise<DiskUsageInfo> {
+  return invoke<DiskUsageInfo>("get_disk_usage", { workspaceId });
+}

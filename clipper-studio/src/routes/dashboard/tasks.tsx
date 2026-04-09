@@ -15,6 +15,7 @@ import {
   Trash2Icon,
   ListXIcon,
   RefreshCwIcon,
+  HardDriveIcon,
 } from "lucide-react";
 import {
   Dialog,
@@ -34,6 +35,9 @@ import {
   clearFinishedClipTasks,
 } from "@/services/clip";
 import { clearFinishedMediaTasks } from "@/services/media";
+import { getDiskUsage, type DiskUsageInfo } from "@/services/workspace";
+import { DateRangePicker } from "@/components/video/date-range-picker";
+import { formatFileSize } from "@/lib/video-utils";
 import { invoke } from "@tauri-apps/api/core";
 
 function formatTime(ms: number): string {
@@ -102,14 +106,27 @@ function TasksPage() {
     new Set(),
   );
 
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [diskUsage, setDiskUsage] = useState<DiskUsageInfo | null>(null);
+
   const workspaceId = useWorkspaceStore((s) => s.activeId);
   const wsVersion = useWorkspaceStore((s) => s.version);
   const wsRef = useRef(workspaceId);
   wsRef.current = workspaceId;
+  const dateFromRef = useRef(dateFrom);
+  dateFromRef.current = dateFrom;
+  const dateToRef = useRef(dateTo);
+  dateToRef.current = dateTo;
 
   const loadTasks = useCallback(async () => {
     try {
-      const t = await listClipTasks(undefined, wsRef.current);
+      const t = await listClipTasks(
+        undefined,
+        wsRef.current,
+        dateFromRef.current || undefined,
+        dateToRef.current || undefined,
+      );
       setTasks(t);
     } catch (e) {
       console.error("Failed to load tasks:", e);
@@ -121,7 +138,15 @@ function TasksPage() {
   useEffect(() => {
     setLoading(true);
     loadTasks();
-  }, [loadTasks, workspaceId, wsVersion]);
+  }, [loadTasks, workspaceId, wsVersion, dateFrom, dateTo]);
+
+  // Load disk usage info
+  useEffect(() => {
+    if (workspaceId == null) return;
+    getDiskUsage(workspaceId)
+      .then(setDiskUsage)
+      .catch(() => setDiskUsage(null));
+  }, [workspaceId, wsVersion]);
 
   // Listen for real-time task progress
   useEffect(() => {
@@ -309,9 +334,17 @@ function TasksPage() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-semibold">任务中心</h2>
+    <div className="flex flex-col h-full">
+      {/* Fixed header */}
+      <div className="shrink-0 flex items-center justify-between px-6 py-3 border-b">
+        <DateRangePicker
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onChange={(from, to) => {
+            setDateFrom(from ?? "");
+            setDateTo(to ?? "");
+          }}
+        />
         <div className="flex items-center gap-1">
           {hasFinishedTasks && (
             <Tooltip>
@@ -346,6 +379,8 @@ function TasksPage() {
         </div>
       </div>
 
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-auto p-6">
       {loading ? (
         <div className="text-muted-foreground">加载中...</div>
       ) : groups.length === 0 ? (
@@ -690,6 +725,24 @@ function TasksPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      </div>
+
+      {/* Fixed footer — disk usage */}
+      {diskUsage && (
+        <div className="shrink-0 flex items-center gap-1.5 px-6 py-2 border-t text-xs text-muted-foreground">
+          <HardDriveIcon className="h-3 w-3" />
+          <span className="truncate max-w-[300px]" title={diskUsage.output_dir}>
+            {diskUsage.output_dir}
+          </span>
+          <span>·</span>
+          <span>已占用 {formatFileSize(diskUsage.dir_size_bytes)}</span>
+          <span>·</span>
+          <span>
+            磁盘可用 {formatFileSize(diskUsage.disk_available_bytes)} / 总共 {formatFileSize(diskUsage.disk_total_bytes)}
+          </span>
         </div>
       )}
 

@@ -17,9 +17,11 @@ export async function cancelClip(taskId: number): Promise<boolean> {
 
 export async function listClipTasks(
   videoId?: number | null,
-  workspaceId?: number | null
+  workspaceId?: number | null,
+  dateFrom?: string,
+  dateTo?: string,
 ): Promise<ClipTaskInfo[]> {
-  return invoke<ClipTaskInfo[]>("list_clip_tasks", { videoId, workspaceId });
+  return invoke<ClipTaskInfo[]>("list_clip_tasks", { videoId, workspaceId, dateFrom, dateTo });
 }
 
 export async function listPresets(): Promise<EncodingPreset[]> {

@@ -258,6 +258,7 @@ pub fn run() {
             commands::workspace::set_active_workspace,
             commands::workspace::scan_workspace,
             commands::workspace::detect_workspace_adapter,
+            commands::workspace::get_disk_usage,
             commands::plugin::scan_plugins,
             commands::plugin::list_plugins,
             commands::plugin::load_plugin,

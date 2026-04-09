@@ -344,6 +344,8 @@ pub async fn list_clip_tasks(
     state: State<'_, AppState>,
     video_id: Option<i64>,
     workspace_id: Option<i64>,
+    date_from: Option<String>,
+    date_to: Option<String>,
 ) -> Result<Vec<ClipTaskInfo>, String> {
     let mut conditions: Vec<String> = Vec::new();
     if let Some(id) = video_id {
@@ -351,6 +353,12 @@ pub async fn list_clip_tasks(
     }
     if let Some(ws_id) = workspace_id {
         conditions.push(format!("v.workspace_id = {}", ws_id));
+    }
+    if let Some(ref from) = date_from {
+        conditions.push(format!("t.created_at >= '{} 00:00:00'", from.replace('\'', "")));
+    }
+    if let Some(ref to) = date_to {
+        conditions.push(format!("t.created_at <= '{} 23:59:59'", to.replace('\'', "")));
     }
     let where_clause = if conditions.is_empty() {
         String::new()

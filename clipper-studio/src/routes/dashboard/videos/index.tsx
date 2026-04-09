@@ -237,11 +237,10 @@ function VideosPage() {
       : flatVideos?.total ?? 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">视频列表</h2>
           {view === "cards" && streamersData && (
             <p className="text-sm text-muted-foreground">
               共 {streamersData.total} 个主播

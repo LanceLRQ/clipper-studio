@@ -231,7 +231,7 @@ function VideoDetailPage() {
 
   if (error) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 p-6">
         <Button
           variant="ghost"
           onClick={() => window.history.back()}
@@ -252,7 +252,7 @@ function VideoDetailPage() {
   const validClips = clips.filter((c) => c.end > c.start);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-7rem)]">
+    <div className="flex flex-col h-full p-6">
       {/* Header */}
       <div className="flex items-center gap-2 shrink-0 pb-2">
         <Button
