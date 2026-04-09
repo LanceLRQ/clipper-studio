@@ -876,6 +876,7 @@ interface SettingsSearchParams {
 
 function SettingsPage() {
   const { section } = Route.useSearch();
+  const [activeTab, setActiveTab] = useState<string>("workspace");
   const [configPlugins, setConfigPlugins] = useState<PluginInfo[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(
     null
@@ -921,17 +922,20 @@ function SettingsPage() {
     });
   }, [section, allWorkspaces]);
 
+  // Sync active tab from URL section param
+  useEffect(() => {
+    if (section && section !== "workspaces" && configPlugins.some((p) => p.id === section)) {
+      setActiveTab(section);
+    } else if (section === "system") {
+      setActiveTab("system");
+    } else {
+      setActiveTab("workspace");
+    }
+  }, [section, configPlugins]);
+
   return (
     <div className="space-y-4 p-6">
-      <Tabs
-        value={
-          section && section !== "workspaces" && configPlugins.some((p) => p.id === section)
-            ? section
-            : section === "system"
-              ? "system"
-              : "workspace"
-        }
-      >
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="workspace">工作区</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>
