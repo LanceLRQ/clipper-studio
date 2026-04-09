@@ -189,6 +189,197 @@ pub async fn get_settings(
     Ok(result)
 }
 
+// ==================== Dashboard Statistics ====================
+
+#[derive(Debug, Serialize)]
+pub struct DashboardStats {
+    pub video_count: i64,
+    pub total_duration_ms: i64,
+    pub total_storage_bytes: i64,
+    pub streamer_count: i64,
+    pub session_count: i64,
+    pub subtitle_video_count: i64,
+    pub danmaku_video_count: i64,
+    pub clip_total: i64,
+    pub clip_completed: i64,
+    pub clip_failed: i64,
+    pub clip_output_bytes: i64,
+    pub recent_clips: Vec<RecentClipInfo>,
+    pub top_streamers: Vec<TopStreamerInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecentClipInfo {
+    pub id: i64,
+    pub title: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TopStreamerInfo {
+    pub name: String,
+    pub video_count: i64,
+    pub total_duration_ms: i64,
+}
+
+#[tauri::command]
+pub async fn get_dashboard_stats(
+    state: State<'_, AppState>,
+) -> Result<DashboardStats, String> {
+    let db = state.db.conn();
+
+    // Video stats
+    let video_row = sea_orm::ConnectionTrait::query_one(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) as cnt, COALESCE(SUM(duration_ms),0) as dur, COALESCE(SUM(file_size),0) as sz, \
+             COALESCE(SUM(CASE WHEN has_subtitle=1 THEN 1 ELSE 0 END),0) as sub_cnt, \
+             COALESCE(SUM(CASE WHEN has_danmaku=1 THEN 1 ELSE 0 END),0) as dm_cnt \
+             FROM videos".to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let (video_count, total_duration_ms, total_storage_bytes, subtitle_video_count, danmaku_video_count) =
+        video_row
+            .map(|r| {
+                (
+                    r.try_get::<i64>("", "cnt").unwrap_or(0),
+                    r.try_get::<i64>("", "dur").unwrap_or(0),
+                    r.try_get::<i64>("", "sz").unwrap_or(0),
+                    r.try_get::<i64>("", "sub_cnt").unwrap_or(0),
+                    r.try_get::<i64>("", "dm_cnt").unwrap_or(0),
+                )
+            })
+            .unwrap_or((0, 0, 0, 0, 0));
+
+    // Streamer & session counts
+    let streamer_count = sea_orm::ConnectionTrait::query_one(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) as cnt FROM streamers".to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|r| r.try_get::<i64>("", "cnt").unwrap_or(0))
+    .unwrap_or(0);
+
+    let session_count = sea_orm::ConnectionTrait::query_one(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) as cnt FROM recording_sessions".to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|r| r.try_get::<i64>("", "cnt").unwrap_or(0))
+    .unwrap_or(0);
+
+    // Clip stats
+    let clip_row = sea_orm::ConnectionTrait::query_one(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) as total, \
+             COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) as done, \
+             COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) as fail \
+             FROM clip_tasks".to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let (clip_total, clip_completed, clip_failed) = clip_row
+        .map(|r| {
+            (
+                r.try_get::<i64>("", "total").unwrap_or(0),
+                r.try_get::<i64>("", "done").unwrap_or(0),
+                r.try_get::<i64>("", "fail").unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0, 0));
+
+    let clip_output_bytes = sea_orm::ConnectionTrait::query_one(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COALESCE(SUM(file_size),0) as sz FROM clip_outputs".to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .map(|r| r.try_get::<i64>("", "sz").unwrap_or(0))
+    .unwrap_or(0);
+
+    // Recent clips (last 10)
+    let recent_rows = sea_orm::ConnectionTrait::query_all(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT id, COALESCE(title,'') as title, status, created_at \
+             FROM clip_tasks ORDER BY created_at DESC LIMIT 10"
+                .to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let recent_clips: Vec<RecentClipInfo> = recent_rows
+        .iter()
+        .map(|r| RecentClipInfo {
+            id: r.try_get("", "id").unwrap_or(0),
+            title: r.try_get("", "title").unwrap_or_default(),
+            status: r.try_get("", "status").unwrap_or_default(),
+            created_at: r.try_get("", "created_at").unwrap_or_default(),
+        })
+        .collect();
+
+    // Top streamers (by video count, top 5)
+    let top_rows = sea_orm::ConnectionTrait::query_all(
+        db,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT st.name, COUNT(v.id) as vcnt, COALESCE(SUM(v.duration_ms),0) as dur \
+             FROM streamers st LEFT JOIN videos v ON st.id = v.streamer_id \
+             GROUP BY st.id ORDER BY vcnt DESC LIMIT 5"
+                .to_string(),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let top_streamers: Vec<TopStreamerInfo> = top_rows
+        .iter()
+        .map(|r| TopStreamerInfo {
+            name: r.try_get("", "name").unwrap_or_default(),
+            video_count: r.try_get("", "vcnt").unwrap_or(0),
+            total_duration_ms: r.try_get("", "dur").unwrap_or(0),
+        })
+        .collect();
+
+    Ok(DashboardStats {
+        video_count,
+        total_duration_ms,
+        total_storage_bytes,
+        streamer_count,
+        session_count,
+        subtitle_video_count,
+        danmaku_video_count,
+        clip_total,
+        clip_completed,
+        clip_failed,
+        clip_output_bytes,
+        recent_clips,
+        top_streamers,
+    })
+}
+
 /// Reveal a file in the system file manager (Finder/Explorer)
 #[tauri::command]
 pub fn reveal_file(path: String) -> Result<(), String> {

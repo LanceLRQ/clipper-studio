@@ -217,6 +217,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::system::get_app_info,
+            commands::system::get_dashboard_stats,
             commands::system::check_ffmpeg,
             commands::system::track_event,
             commands::system::get_setting,
