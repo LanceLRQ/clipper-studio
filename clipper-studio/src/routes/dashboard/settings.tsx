@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ import {
   getAppInfo,
   listWorkspaces,
   updateWorkspace,
+  deleteWorkspace,
 } from "@/services/workspace";
 import type { WorkspaceInfo } from "@/types/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -190,6 +192,100 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+// ===== Workspace List Section =====
+function WorkspaceListSection({
+  allWorkspaces,
+  onReload,
+}: {
+  allWorkspaces: WorkspaceInfo[];
+  onReload: () => void;
+}) {
+  const navigate = useNavigate();
+  const activeId = useWorkspaceStore((s) => s.activeId);
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+
+  const handleDelete = async (ws: WorkspaceInfo) => {
+    if (
+      !(await ask(
+        `确定要删除工作区「${ws.name}」吗？\n\n注意：仅删除工作区记录，不会删除磁盘上的文件。`,
+        { title: "删除工作区", kind: "warning" }
+      ))
+    )
+      return;
+    try {
+      await deleteWorkspace(ws.id);
+      const remaining = await listWorkspaces();
+      if (ws.id === activeId) {
+        if (remaining.length > 0) {
+          await switchWorkspace(remaining[0].id);
+        } else {
+          navigate({ to: "/welcome", replace: true });
+          return;
+        }
+      }
+      onReload();
+    } catch (e) {
+      console.error("Failed to delete workspace:", e);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium text-lg">所有工作区</h3>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate({ to: "/welcome" })}
+        >
+          + 添加工作区
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {allWorkspaces.map((ws) => (
+          <div
+            key={ws.id}
+            className={`flex items-center justify-between rounded-md border p-3 ${ws.id === activeId ? "border-primary bg-accent/30" : ""}`}
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm">{ws.name}</span>
+                {ws.id === activeId && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary text-primary-foreground">
+                    当前
+                  </span>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground truncate">
+                {ws.path}
+              </div>
+            </div>
+            <div className="flex gap-1.5 shrink-0 ml-3">
+              {ws.id !== activeId && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => switchWorkspace(ws.id)}
+                >
+                  切换
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-red-500 hover:text-red-600"
+                onClick={() => handleDelete(ws)}
+              >
+                删除
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -773,14 +869,34 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 // ===== Main Settings Page =====
+
+interface SettingsSearchParams {
+  section?: string;
+}
+
 function SettingsPage() {
+  const { section } = Route.useSearch();
   const [configPlugins, setConfigPlugins] = useState<PluginInfo[]>([]);
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceInfo | null>(
     null
   );
+  const [allWorkspaces, setAllWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const wsActiveId = useWorkspaceStore((s) => s.activeId);
   const wsVersion = useWorkspaceStore((s) => s.version);
+  const workspaceListRef = useRef<HTMLDivElement>(null);
+  const settingsTopRef = useRef<HTMLDivElement>(null);
+
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const all = await listWorkspaces();
+      setAllWorkspaces(all);
+      const ws = all.find((w) => w.id === wsActiveId) ?? null;
+      setActiveWorkspace(ws);
+    } catch (e) {
+      console.error("Failed to load workspaces:", e);
+    }
+  }, [wsActiveId]);
 
   useEffect(() => {
     setLoading(true);
@@ -793,24 +909,30 @@ function SettingsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
 
-    // Load active workspace info
-    if (wsActiveId != null) {
-      listWorkspaces()
-        .then((all) => {
-          const ws = all.find((w) => w.id === wsActiveId) ?? null;
-          setActiveWorkspace(ws);
-        })
-        .catch(console.error);
-    }
-  }, [wsActiveId, wsVersion]);
+    // Load workspaces
+    loadWorkspaces();
+  }, [wsActiveId, wsVersion, loadWorkspaces]);
+
+  // Auto-scroll based on section param
+  useEffect(() => {
+    if (!allWorkspaces.length) return;
+    requestAnimationFrame(() => {
+      if (section === "workspaces") {
+        workspaceListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else {
+        settingsTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }, [section, allWorkspaces]);
 
   return (
     <div className="space-y-4">
+      <div ref={settingsTopRef} />
       <h2 className="text-2xl font-semibold">设置</h2>
 
       <Tabs defaultValue="workspace">
         <TabsList>
-          <TabsTrigger value="workspace">工作区设置</TabsTrigger>
+          <TabsTrigger value="workspace">工作区</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
@@ -819,12 +941,20 @@ function SettingsPage() {
           ))}
         </TabsList>
 
-        <TabsContent value="workspace" className="mt-4">
+        <TabsContent value="workspace" className="mt-4 space-y-6">
           {activeWorkspace ? (
             <WorkspaceSettingsTab workspace={activeWorkspace} />
           ) : (
             <div className="text-muted-foreground text-sm">加载工作区信息中...</div>
           )}
+
+          {/* Workspace list */}
+          <div ref={workspaceListRef}>
+            <WorkspaceListSection
+              allWorkspaces={allWorkspaces}
+              onReload={loadWorkspaces}
+            />
+          </div>
         </TabsContent>
 
         <TabsContent value="system" className="mt-4">
@@ -847,4 +977,7 @@ function SettingsPage() {
 
 export const Route = createFileRoute("/dashboard/settings")({
   component: SettingsPage,
+  validateSearch: (search: Record<string, unknown>): SettingsSearchParams => ({
+    section: (search.section as string) || undefined,
+  }),
 });

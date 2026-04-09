@@ -34,7 +34,6 @@ const staticNavItems: NavItem[] = [
   { to: "/dashboard", label: "首页", exact: true },
   { to: "/dashboard/videos", label: "视频列表" },
   { to: "/dashboard/tasks", label: "任务中心" },
-  { to: "/dashboard/workspaces", label: "工作区" },
   {
     to: "/dashboard/plugins",
     label: "插件",

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,6 +8,7 @@ import {
   createWorkspace,
   scanWorkspace,
   detectWorkspaceAdapter,
+  listWorkspaces,
 } from "@/services/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
 
@@ -16,11 +17,20 @@ type WizardStep = "choose" | "import" | "create";
 function WelcomePage() {
   const navigate = useNavigate();
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const wsActiveId = useWorkspaceStore((s) => s.activeId);
+  const [hasExisting, setHasExisting] = useState(false);
   const [step, setStep] = useState<WizardStep>("choose");
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Check if workspaces already exist (adding vs first-time)
+  useEffect(() => {
+    listWorkspaces()
+      .then((ws) => setHasExisting(ws.length > 0))
+      .catch(() => {});
+  }, []);
 
   const handlePickFolder = async () => {
     const selected = await open({ directory: true, multiple: false });
@@ -76,14 +86,32 @@ function WelcomePage() {
     }
   };
 
+  const handleGoBack = () => {
+    navigate({ to: "/dashboard", replace: true });
+  };
+
   return (
-    <div className="flex h-screen items-center justify-center">
+    <div className="relative flex h-screen items-center justify-center">
+      {hasExisting && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="absolute top-4 left-4"
+          onClick={handleGoBack}
+        >
+          ← 返回
+        </Button>
+      )}
       <div className="mx-auto max-w-lg space-y-8 p-8">
         <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold">欢迎使用 ClipperStudio</h1>
-          <p className="text-muted-foreground">
-            本地优先的桌面视频工作台，面向直播录播切片创作者
-          </p>
+          <h1 className="text-3xl font-bold">
+            {hasExisting ? "添加工作区" : "欢迎使用 ClipperStudio"}
+          </h1>
+          {!hasExisting && (
+            <p className="text-muted-foreground">
+              本地优先的桌面视频工作台，面向直播录播切片创作者
+            </p>
+          )}
         </div>
 
         {step === "choose" && (

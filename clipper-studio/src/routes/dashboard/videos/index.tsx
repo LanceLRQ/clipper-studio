@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SearchIcon } from "lucide-react";
+import { SearchIcon, FolderSyncIcon } from "lucide-react";
 import type { ListVideosResponse, ListStreamersResponse } from "@/types/video";
 import {
   listVideos,
@@ -13,6 +13,7 @@ import {
   deleteVideo,
 } from "@/services/video";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { scanWorkspace } from "@/services/workspace";
 import { mergeVideos } from "@/services/media";
 import { VideoRow } from "@/components/video/video-row";
 import { PaginationBar } from "@/components/video/pagination-bar";
@@ -42,6 +43,7 @@ function VideosPage() {
   );
   const [mergeMode, setMergeMode] = useState<"virtual" | "physical">("virtual");
   const [merging, setMerging] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [searchInput, setSearchInput] = useState(search);
 
   const updateSearch = useCallback(
@@ -215,6 +217,20 @@ function VideosPage() {
     });
   };
 
+  const handleScan = async () => {
+    if (!activeWs) return;
+    setScanning(true);
+    try {
+      const result = await scanWorkspace(activeWs);
+      await loadData();
+      alert(`扫描完成：${result.total_files} 个视频，${result.total_sessions} 个场次`);
+    } catch (e) {
+      alert("扫描失败: " + String(e));
+    } finally {
+      setScanning(false);
+    }
+  };
+
   const totalItems =
     view === "cards"
       ? streamersData?.total ?? 0
@@ -257,6 +273,14 @@ function VideosPage() {
               </button>
             ))}
           </div>
+          <Button
+            variant="outline"
+            onClick={handleScan}
+            disabled={scanning}
+          >
+            <FolderSyncIcon className="h-4 w-4 mr-1" />
+            {scanning ? "扫描中..." : "扫描目录"}
+          </Button>
           <Button onClick={handleImport} disabled={importing}>
             {importing ? "导入中..." : "+ 导入视频"}
           </Button>

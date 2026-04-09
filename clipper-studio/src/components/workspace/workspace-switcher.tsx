@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderOpenIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { FolderOpenIcon, PlusIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -62,10 +62,21 @@ export function WorkspaceSwitcher() {
           添加工作区
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => navigate({ to: "/dashboard/workspaces" })}
+          onClick={() =>
+            navigate({
+              to: "/dashboard/settings",
+              search: { section: "workspaces" },
+            })
+          }
         >
           <SettingsIcon className="h-4 w-4 mr-1" />
           管理工作区
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => navigate({ to: "/dashboard/settings" })}
+        >
+          <SlidersHorizontalIcon className="h-4 w-4 mr-1" />
+          工作区设置
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
