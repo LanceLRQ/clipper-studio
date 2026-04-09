@@ -1,8 +1,9 @@
-import { createFileRoute, Outlet, Link, useMatches } from "@tanstack/react-router";
+import { createFileRoute, Outlet, Link, useMatches, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 import bannerImg from "@/assets/banner.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
@@ -67,6 +68,11 @@ function ThemeToggle() {
 }
 
 function DashboardLayout() {
+  const navigate = useNavigate();
+  const wsInitialized = useWorkspaceStore((s) => s.initialized);
+  const wsNoWorkspaces = useWorkspaceStore((s) => s.noWorkspaces);
+  const wsActiveId = useWorkspaceStore((s) => s.activeId);
+
   const [version, setVersion] = useState("");
   const [enabledPlugins, setEnabledPlugins] = useState<PluginInfo[]>([]);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
@@ -138,6 +144,13 @@ function DashboardLayout() {
     return item;
   });
 
+  // Workspace guard: redirect to welcome if no workspaces
+  useEffect(() => {
+    if (wsInitialized && wsNoWorkspaces) {
+      navigate({ to: "/welcome", replace: true });
+    }
+  }, [wsInitialized, wsNoWorkspaces, navigate]);
+
   const toggleMenu = (to: string) => {
     setExpandedMenus((prev) => {
       const next = new Set(prev);
@@ -149,6 +162,15 @@ function DashboardLayout() {
       return next;
     });
   };
+
+  // Wait for workspace initialization
+  if (!wsInitialized || wsNoWorkspaces || wsActiveId == null) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="text-muted-foreground text-sm">加载中...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen flex-col">

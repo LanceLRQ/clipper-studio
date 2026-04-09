@@ -9,11 +9,13 @@ import {
   scanWorkspace,
   detectWorkspaceAdapter,
 } from "@/services/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 type WizardStep = "choose" | "import" | "create";
 
 function WelcomePage() {
   const navigate = useNavigate();
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const [step, setStep] = useState<WizardStep>("choose");
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
@@ -52,6 +54,9 @@ function WelcomePage() {
         path: path.trim(),
         adapter_id: adapterId,
       });
+
+      // Activate the newly created workspace
+      await switchWorkspace(ws.id);
 
       // Auto-scan after creation (for "import" mode)
       if (step === "import") {

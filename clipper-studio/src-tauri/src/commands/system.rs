@@ -226,18 +226,25 @@ pub struct TopStreamerInfo {
 #[tauri::command]
 pub async fn get_dashboard_stats(
     state: State<'_, AppState>,
+    workspace_id: Option<i64>,
 ) -> Result<DashboardStats, String> {
     let db = state.db.conn();
+    let vid_where = workspace_id
+        .map(|id| format!("WHERE workspace_id = {}", id))
+        .unwrap_or_default();
 
     // Video stats
     let video_row = sea_orm::ConnectionTrait::query_one(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) as cnt, COALESCE(SUM(duration_ms),0) as dur, COALESCE(SUM(file_size),0) as sz, \
-             COALESCE(SUM(CASE WHEN has_subtitle=1 THEN 1 ELSE 0 END),0) as sub_cnt, \
-             COALESCE(SUM(CASE WHEN has_danmaku=1 THEN 1 ELSE 0 END),0) as dm_cnt \
-             FROM videos".to_string(),
+            format!(
+                "SELECT COUNT(*) as cnt, COALESCE(SUM(duration_ms),0) as dur, COALESCE(SUM(file_size),0) as sz, \
+                 COALESCE(SUM(CASE WHEN has_subtitle=1 THEN 1 ELSE 0 END),0) as sub_cnt, \
+                 COALESCE(SUM(CASE WHEN has_danmaku=1 THEN 1 ELSE 0 END),0) as dm_cnt \
+                 FROM videos {}",
+                vid_where
+            ),
         ),
     )
     .await
@@ -256,24 +263,33 @@ pub async fn get_dashboard_stats(
             })
             .unwrap_or((0, 0, 0, 0, 0));
 
-    // Streamer & session counts
+    // Streamer count: only streamers that have videos in this workspace
+    let streamer_sql = match workspace_id {
+        Some(ws_id) => format!(
+            "SELECT COUNT(DISTINCT streamer_id) as cnt FROM videos \
+             WHERE workspace_id = {} AND streamer_id IS NOT NULL",
+            ws_id
+        ),
+        None => "SELECT COUNT(*) as cnt FROM streamers".to_string(),
+    };
     let streamer_count = sea_orm::ConnectionTrait::query_one(
         db,
-        sea_orm::Statement::from_string(
-            sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) as cnt FROM streamers".to_string(),
-        ),
+        sea_orm::Statement::from_string(sea_orm::DatabaseBackend::Sqlite, streamer_sql),
     )
     .await
     .map_err(|e| e.to_string())?
     .map(|r| r.try_get::<i64>("", "cnt").unwrap_or(0))
     .unwrap_or(0);
 
+    // Session count
+    let sess_where = workspace_id
+        .map(|id| format!("WHERE workspace_id = {}", id))
+        .unwrap_or_default();
     let session_count = sea_orm::ConnectionTrait::query_one(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) as cnt FROM recording_sessions".to_string(),
+            format!("SELECT COUNT(*) as cnt FROM recording_sessions {}", sess_where),
         ),
     )
     .await
@@ -281,15 +297,23 @@ pub async fn get_dashboard_stats(
     .map(|r| r.try_get::<i64>("", "cnt").unwrap_or(0))
     .unwrap_or(0);
 
-    // Clip stats
+    // Clip stats (JOIN videos for workspace filter)
+    let clip_join = workspace_id
+        .map(|id| format!(
+            "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}", id
+        ))
+        .unwrap_or_default();
     let clip_row = sea_orm::ConnectionTrait::query_one(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COUNT(*) as total, \
-             COALESCE(SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END),0) as done, \
-             COALESCE(SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),0) as fail \
-             FROM clip_tasks".to_string(),
+            format!(
+                "SELECT COUNT(*) as total, \
+                 COALESCE(SUM(CASE WHEN t.status='completed' THEN 1 ELSE 0 END),0) as done, \
+                 COALESCE(SUM(CASE WHEN t.status='failed' THEN 1 ELSE 0 END),0) as fail \
+                 FROM clip_tasks t {}",
+                clip_join
+            ),
         ),
     )
     .await
@@ -305,11 +329,16 @@ pub async fn get_dashboard_stats(
         })
         .unwrap_or((0, 0, 0));
 
+    let clip_out_join = workspace_id
+        .map(|id| format!(
+            "INNER JOIN videos v ON co.video_id = v.id WHERE v.workspace_id = {}", id
+        ))
+        .unwrap_or_default();
     let clip_output_bytes = sea_orm::ConnectionTrait::query_one(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT COALESCE(SUM(file_size),0) as sz FROM clip_outputs".to_string(),
+            format!("SELECT COALESCE(SUM(co.file_size),0) as sz FROM clip_outputs co {}", clip_out_join),
         ),
     )
     .await
@@ -318,13 +347,20 @@ pub async fn get_dashboard_stats(
     .unwrap_or(0);
 
     // Recent clips (last 10)
+    let recent_join = workspace_id
+        .map(|id| format!(
+            "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}", id
+        ))
+        .unwrap_or_default();
     let recent_rows = sea_orm::ConnectionTrait::query_all(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT id, COALESCE(title,'') as title, status, created_at \
-             FROM clip_tasks ORDER BY created_at DESC LIMIT 10"
-                .to_string(),
+            format!(
+                "SELECT t.id, COALESCE(t.title,'') as title, t.status, t.created_at \
+                 FROM clip_tasks t {} ORDER BY t.created_at DESC LIMIT 10",
+                recent_join
+            ),
         ),
     )
     .await
@@ -341,14 +377,19 @@ pub async fn get_dashboard_stats(
         .collect();
 
     // Top streamers (by video count, top 5)
+    let top_vid_where = workspace_id
+        .map(|id| format!("WHERE v.workspace_id = {}", id))
+        .unwrap_or_default();
     let top_rows = sea_orm::ConnectionTrait::query_all(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT st.name, COUNT(v.id) as vcnt, COALESCE(SUM(v.duration_ms),0) as dur \
-             FROM streamers st LEFT JOIN videos v ON st.id = v.streamer_id \
-             GROUP BY st.id ORDER BY vcnt DESC LIMIT 5"
-                .to_string(),
+            format!(
+                "SELECT st.name, COUNT(v.id) as vcnt, COALESCE(SUM(v.duration_ms),0) as dur \
+                 FROM streamers st INNER JOIN videos v ON st.id = v.streamer_id \
+                 {} GROUP BY st.id ORDER BY vcnt DESC LIMIT 5",
+                top_vid_where
+            ),
         ),
     )
     .await

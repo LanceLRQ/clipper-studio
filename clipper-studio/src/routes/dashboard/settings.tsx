@@ -18,11 +18,11 @@ import {
 } from "@/lib/theme-presets";
 import {
   getAppInfo,
-  getActiveWorkspace,
   listWorkspaces,
   updateWorkspace,
 } from "@/services/workspace";
 import type { WorkspaceInfo } from "@/types/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 import {
   listPlugins,
   type PluginInfo,
@@ -779,6 +779,8 @@ function SettingsPage() {
     null
   );
   const [loading, setLoading] = useState(true);
+  const wsActiveId = useWorkspaceStore((s) => s.activeId);
+  const wsVersion = useWorkspaceStore((s) => s.version);
 
   useEffect(() => {
     setLoading(true);
@@ -791,26 +793,24 @@ function SettingsPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
 
-    // Load active workspace
-    getActiveWorkspace()
-      .then(async (wsId) => {
-        if (wsId == null) return;
-        const all = await listWorkspaces();
-        const ws = all.find((w) => w.id === wsId) ?? null;
-        setActiveWorkspace(ws);
-      })
-      .catch(console.error);
-  }, []);
+    // Load active workspace info
+    if (wsActiveId != null) {
+      listWorkspaces()
+        .then((all) => {
+          const ws = all.find((w) => w.id === wsActiveId) ?? null;
+          setActiveWorkspace(ws);
+        })
+        .catch(console.error);
+    }
+  }, [wsActiveId, wsVersion]);
 
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">设置</h2>
 
-      <Tabs defaultValue={activeWorkspace ? "workspace" : "system"}>
+      <Tabs defaultValue="workspace">
         <TabsList>
-          {activeWorkspace && (
-            <TabsTrigger value="workspace">工作区设置</TabsTrigger>
-          )}
+          <TabsTrigger value="workspace">工作区设置</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
@@ -819,11 +819,13 @@ function SettingsPage() {
           ))}
         </TabsList>
 
-        {activeWorkspace && (
-          <TabsContent value="workspace" className="mt-4">
+        <TabsContent value="workspace" className="mt-4">
+          {activeWorkspace ? (
             <WorkspaceSettingsTab workspace={activeWorkspace} />
-          </TabsContent>
-        )}
+          ) : (
+            <div className="text-muted-foreground text-sm">加载工作区信息中...</div>
+          )}
+        </TabsContent>
 
         <TabsContent value="system" className="mt-4">
           <SystemSettingsTab />

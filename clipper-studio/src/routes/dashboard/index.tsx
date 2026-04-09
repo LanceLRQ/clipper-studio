@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useWorkspaceStore } from "@/stores/workspace";
 import {
   Video,
   Clock,
@@ -120,10 +121,15 @@ function DashboardIndex() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
   const [loading, setLoading] = useState(true);
+  const workspaceId = useWorkspaceStore((s) => s.activeId);
+  const wsVersion = useWorkspaceStore((s) => s.version);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([
-      invoke<DashboardStats>("get_dashboard_stats"),
+      invoke<DashboardStats>("get_dashboard_stats", {
+        workspaceId,
+      }),
       invoke<AppInfo>("get_app_info"),
     ])
       .then(([s, a]) => {
@@ -132,7 +138,7 @@ function DashboardIndex() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [workspaceId, wsVersion]);
 
   if (loading) {
     return (

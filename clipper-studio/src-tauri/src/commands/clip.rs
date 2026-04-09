@@ -343,10 +343,19 @@ pub async fn cancel_clip(
 pub async fn list_clip_tasks(
     state: State<'_, AppState>,
     video_id: Option<i64>,
+    workspace_id: Option<i64>,
 ) -> Result<Vec<ClipTaskInfo>, String> {
-    let where_clause = match video_id {
-        Some(id) => format!("WHERE video_id = {}", id),
-        None => String::new(),
+    let mut conditions: Vec<String> = Vec::new();
+    if let Some(id) = video_id {
+        conditions.push(format!("t.video_id = {}", id));
+    }
+    if let Some(ws_id) = workspace_id {
+        conditions.push(format!("v.workspace_id = {}", ws_id));
+    }
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
     };
 
     let rows = sea_orm::ConnectionTrait::query_all(
@@ -356,8 +365,9 @@ pub async fn list_clip_tasks(
             format!(
                 "SELECT t.*, co.output_path FROM clip_tasks t \
                  LEFT JOIN clip_outputs co ON co.clip_task_id = t.id \
+                 LEFT JOIN videos v ON t.video_id = v.id \
                  {} ORDER BY t.created_at DESC",
-                if where_clause.is_empty() { String::new() } else { where_clause.replace("WHERE", "WHERE t.") }
+                where_clause
             ),
         ),
     )

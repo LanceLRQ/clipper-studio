@@ -12,7 +12,7 @@ import {
   importVideo,
   deleteVideo,
 } from "@/services/video";
-import { getActiveWorkspace } from "@/services/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { mergeVideos } from "@/services/media";
 import { VideoRow } from "@/components/video/video-row";
 import { PaginationBar } from "@/components/video/pagination-bar";
@@ -58,10 +58,12 @@ function VideosPage() {
     [navigate]
   );
 
+  const activeWs = useWorkspaceStore((s) => s.activeId);
+  const wsVersion = useWorkspaceStore((s) => s.version);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const activeWs = await getActiveWorkspace();
       if (view === "cards") {
         const [strs, unassoc] = await Promise.all([
           listStreamers({
@@ -93,7 +95,7 @@ function VideosPage() {
     } finally {
       setLoading(false);
     }
-  }, [view, page, search]);
+  }, [view, page, search, activeWs, wsVersion]);
 
   useEffect(() => {
     loadData();
@@ -174,10 +176,9 @@ function VideosPage() {
 
       setImporting(true);
       const paths = Array.isArray(selected) ? selected : [selected];
-      const activeWs = await getActiveWorkspace();
       for (const filePath of paths) {
         try {
-          await importVideo({ file_path: filePath, workspace_id: activeWs });
+          await importVideo({ file_path: filePath, workspace_id: activeWs ?? undefined });
         } catch (e) {
           console.error(`Failed to import ${filePath}:`, e);
         }

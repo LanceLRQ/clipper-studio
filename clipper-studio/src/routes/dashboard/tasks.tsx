@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useWorkspaceStore } from "@/stores/workspace";
 import { listen } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import {
@@ -101,20 +102,26 @@ function TasksPage() {
     new Set(),
   );
 
-  const loadTasks = async () => {
+  const workspaceId = useWorkspaceStore((s) => s.activeId);
+  const wsVersion = useWorkspaceStore((s) => s.version);
+  const wsRef = useRef(workspaceId);
+  wsRef.current = workspaceId;
+
+  const loadTasks = useCallback(async () => {
     try {
-      const t = await listClipTasks();
+      const t = await listClipTasks(undefined, wsRef.current);
       setTasks(t);
     } catch (e) {
       console.error("Failed to load tasks:", e);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
+    setLoading(true);
     loadTasks();
-  }, []);
+  }, [loadTasks, workspaceId, wsVersion]);
 
   // Listen for real-time task progress
   useEffect(() => {

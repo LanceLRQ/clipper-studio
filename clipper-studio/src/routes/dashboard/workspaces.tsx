@@ -4,9 +4,12 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import type { WorkspaceInfo } from "@/types/workspace";
 import { listWorkspaces, deleteWorkspace, scanWorkspace } from "@/services/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 function WorkspacesPage() {
   const navigate = useNavigate();
+  const activeId = useWorkspaceStore((s) => s.activeId);
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -31,7 +34,17 @@ function WorkspacesPage() {
     }
     try {
       await deleteWorkspace(ws.id);
-      await loadWorkspaces();
+      const remaining = await listWorkspaces();
+      setWorkspaces(remaining);
+      // If deleted workspace was the active one, switch or redirect
+      if (ws.id === activeId) {
+        if (remaining.length > 0) {
+          await switchWorkspace(remaining[0].id);
+        } else {
+          navigate({ to: "/welcome", replace: true });
+          return;
+        }
+      }
     } catch (e) {
       console.error("Failed to delete workspace:", e);
     }

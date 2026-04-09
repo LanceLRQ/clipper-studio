@@ -9,41 +9,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { WorkspaceInfo } from "@/types/workspace";
-import {
-  listWorkspaces,
-  getActiveWorkspace,
-  setActiveWorkspace,
-} from "@/services/workspace";
+import { listWorkspaces } from "@/services/workspace";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 export function WorkspaceSwitcher() {
   const navigate = useNavigate();
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(null);
-
-  const loadData = async () => {
-    try {
-      const [ws, active] = await Promise.all([
-        listWorkspaces(),
-        getActiveWorkspace(),
-      ]);
-      setWorkspaces(ws);
-      setActiveId(active);
-    } catch (e) {
-      console.error("Failed to load workspaces:", e);
-    }
-  };
+  const activeId = useWorkspaceStore((s) => s.activeId);
+  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
 
   useEffect(() => {
-    loadData();
+    listWorkspaces()
+      .then(setWorkspaces)
+      .catch(console.error);
   }, []);
 
   const activeWorkspace = workspaces.find((w) => w.id === activeId);
-  const displayName = activeId === null ? "全部工作区" : activeWorkspace?.name ?? "未知";
-
-  const handleSwitch = async (id: number | null) => {
-    await setActiveWorkspace(id);
-    setActiveId(id);
-  };
+  const displayName = activeWorkspace?.name ?? "加载中...";
 
   if (workspaces.length === 0) {
     return null;
@@ -58,17 +40,10 @@ export function WorkspaceSwitcher() {
         <span className="max-w-[180px] truncate">{displayName}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
-        <DropdownMenuItem
-          onClick={() => handleSwitch(null)}
-          className={activeId === null ? "bg-accent" : ""}
-        >
-          全部工作区
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
         {workspaces.map((ws) => (
           <DropdownMenuItem
             key={ws.id}
-            onClick={() => handleSwitch(ws.id)}
+            onClick={() => switchWorkspace(ws.id)}
             className={ws.id === activeId ? "bg-accent" : ""}
           >
             <div className="flex flex-col">

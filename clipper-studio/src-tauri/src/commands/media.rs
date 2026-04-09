@@ -243,7 +243,9 @@ pub async fn merge_videos(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT id, file_path, file_name FROM videos WHERE id IN ({}) ORDER BY INSTR(',{},', ',' || id || ',')",
+                "SELECT v.id, v.file_path, v.file_name, w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v LEFT JOIN workspaces w ON v.workspace_id = w.id \
+                 WHERE v.id IN ({}) ORDER BY INSTR(',{},', ',' || v.id || ',')",
                 ids_str, ids_str,
             ),
         ),
@@ -261,6 +263,9 @@ pub async fn merge_videos(
         .collect();
 
     let first_name: String = rows[0].try_get("", "file_name").unwrap_or_default();
+    let ws_clip_output_dir: Option<String> = rows[0]
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
 
     // Check compatibility for virtual merge
     if req.mode == "virtual" {
@@ -274,13 +279,19 @@ pub async fn merge_videos(
         }
     }
 
-    // Determine output path
+    // Determine output path: user override > workspace clip_output_dir > source dir
     let output_dir = match &req.output_dir {
         Some(dir) => PathBuf::from(dir),
-        None => input_paths[0]
-            .parent()
-            .unwrap_or(&PathBuf::from("."))
-            .to_path_buf(),
+        None => {
+            if let Some(ref dir) = ws_clip_output_dir {
+                PathBuf::from(dir)
+            } else {
+                input_paths[0]
+                    .parent()
+                    .unwrap_or(&PathBuf::from("."))
+                    .to_path_buf()
+            }
+        }
     };
 
     let stem = first_name.rsplit('.').last().unwrap_or(&first_name);
