@@ -64,6 +64,27 @@ export async function searchSubtitles(
   return invoke<SubtitleSegment[]>("search_subtitles", { query, videoId });
 }
 
+export interface SubtitleSearchResult {
+  id: number;
+  video_id: number;
+  language: string;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  source: string;
+  video_file_name: string;
+  video_duration_ms: number | null;
+  streamer_name: string | null;
+  stream_title: string | null;
+  recorded_at: string | null;
+}
+
+export async function searchSubtitlesGlobal(
+  query: string
+): Promise<SubtitleSearchResult[]> {
+  return invoke<SubtitleSearchResult[]>("search_subtitles_global", { query });
+}
+
 export async function checkASRHealth(): Promise<ASRHealthInfo> {
   return invoke<ASRHealthInfo>("check_asr_health");
 }

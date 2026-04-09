@@ -7,6 +7,15 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSettings, setSetting } from "@/services/settings";
 import { checkASRHealth, type ASRHealthInfo } from "@/services/asr";
+import { useThemeStore, type ThemeMode } from "@/stores/theme";
+import {
+  THEME_PRESETS,
+  THEME_COLOR_OPTIONS,
+  THEME_ACCENT_PRESETS,
+  THEME_ACCENT_OPTIONS,
+  type ThemeColor,
+  type ThemeAccent,
+} from "@/lib/theme-presets";
 import {
   getAppInfo,
   getActiveWorkspace,
@@ -280,8 +289,102 @@ function SystemSettingsTab() {
     }
   };
 
+  const themeMode = useThemeStore((s) => s.mode);
+  const setThemeMode = useThemeStore((s) => s.setMode);
+  const colorScheme = useThemeStore((s) => s.colorScheme);
+  const setColorScheme = useThemeStore((s) => s.setColorScheme);
+  const accent = useThemeStore((s) => s.accent);
+  const setAccent = useThemeStore((s) => s.setAccent);
+
   return (
     <div className="space-y-6">
+      {/* Appearance */}
+      <section className="rounded-lg border p-5 space-y-4">
+        <h3 className="font-medium text-lg">外观</h3>
+
+        <div className="flex flex-wrap items-end gap-4">
+          {/* Theme Mode */}
+          <div className="space-y-1">
+            <Label className="text-sm">主题模式</Label>
+            <div className="flex rounded-md border w-fit">
+              {(
+                [
+                  { value: "light", label: "浅色" },
+                  { value: "dark", label: "深色" },
+                  { value: "system", label: "跟随系统" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  className={`px-4 py-1.5 text-sm ${themeMode === opt.value ? "bg-accent font-medium" : ""}`}
+                  onClick={() => setThemeMode(opt.value as ThemeMode)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Base Color */}
+          <div className="space-y-1">
+            <Label className="text-sm">底色</Label>
+            <select
+              value={colorScheme}
+              onChange={(e) => setColorScheme(e.target.value as ThemeColor)}
+              className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+            >
+              {THEME_COLOR_OPTIONS.map((color) => (
+                <option key={color} value={color}>
+                  {THEME_PRESETS[color].label} — {THEME_PRESETS[color].description}
+                </option>
+              ))}
+            </select>
+          </div>
+
+        </div>
+
+        {/* Accent Color Swatches */}
+        <div className="space-y-1">
+          <Label className="text-sm">主题色</Label>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Default (no accent) */}
+            <button
+              title="默认（跟随底色）"
+              className={`h-7 w-7 rounded-full border-2 flex items-center justify-center transition-all ${
+                accent === "default"
+                  ? "border-foreground scale-110"
+                  : "border-transparent hover:border-muted-foreground/40"
+              }`}
+              onClick={() => setAccent("default")}
+            >
+              <span className="h-5 w-5 rounded-full border-2 border-dashed border-muted-foreground/50" />
+            </button>
+            {THEME_ACCENT_OPTIONS.filter((a) => a !== "default").map(
+              (accentOpt) => {
+                const preset = THEME_ACCENT_PRESETS[accentOpt];
+                return (
+                  <button
+                    key={accentOpt}
+                    title={preset.label}
+                    className={`h-7 w-7 rounded-full border-2 flex items-center justify-center transition-all ${
+                      accent === accentOpt
+                        ? "border-foreground scale-110"
+                        : "border-transparent hover:border-muted-foreground/40"
+                    }`}
+                    onClick={() => setAccent(accentOpt as ThemeAccent)}
+                  >
+                    <span
+                      className="h-5 w-5 rounded-full"
+                      style={{ background: preset.preview }}
+                    />
+                  </button>
+                );
+              }
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* ASR Settings */}
       <section className="rounded-lg border p-5 space-y-4">
         <h3 className="font-medium text-lg">ASR 语音识别</h3>

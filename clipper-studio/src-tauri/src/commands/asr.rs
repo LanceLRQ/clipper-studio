@@ -5,7 +5,7 @@ use tauri::State;
 use crate::asr::local::LocalASRProvider;
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
 use crate::asr::remote::RemoteASRProvider;
-use crate::asr::service::{self, ASRTaskInfo, SubtitleSegment};
+use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult, SubtitleSegment};
 use crate::AppState;
 
 /// Helper: read a setting from settings_kv
@@ -129,6 +129,15 @@ pub async fn search_subtitles(
     video_id: Option<i64>,
 ) -> Result<Vec<SubtitleSegment>, String> {
     service::search_subtitles(&state.db, &query, video_id).await
+}
+
+/// Search subtitles globally with video metadata (FTS5)
+#[tauri::command]
+pub async fn search_subtitles_global(
+    state: State<'_, AppState>,
+    query: String,
+) -> Result<Vec<SubtitleSearchResult>, String> {
+    service::search_subtitles_global(&state.db, &query).await
 }
 
 /// Check ASR engine health

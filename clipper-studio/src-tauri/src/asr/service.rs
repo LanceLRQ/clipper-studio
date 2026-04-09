@@ -505,6 +505,84 @@ pub async fn search_subtitles(
     Ok(rows.iter().map(row_to_segment).collect())
 }
 
+/// Global subtitle search result with video metadata
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitleSearchResult {
+    pub id: i64,
+    pub video_id: i64,
+    pub language: String,
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    pub source: String,
+    pub video_file_name: String,
+    pub video_duration_ms: Option<i64>,
+    pub streamer_name: Option<String>,
+    pub stream_title: Option<String>,
+    pub recorded_at: Option<String>,
+}
+
+/// Sanitize user input for FTS5 MATCH query
+fn sanitize_fts5_query(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Escape double quotes and wrap in quotes for phrase search
+    let escaped = trimmed.replace('"', "\"\"");
+    format!("\"{}\"", escaped)
+}
+
+/// Search subtitles globally with video metadata (FTS5)
+pub async fn search_subtitles_global(
+    db: &Database,
+    query: &str,
+) -> Result<Vec<SubtitleSearchResult>, String> {
+    let safe_query = sanitize_fts5_query(query);
+    if safe_query.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let sql = format!(
+        "SELECT s.id, s.video_id, s.language, s.start_ms, s.end_ms, s.text, s.source, \
+         v.file_name AS video_file_name, v.duration_ms AS video_duration_ms, \
+         st.name AS streamer_name, v.stream_title, v.recorded_at \
+         FROM subtitle_segments s \
+         INNER JOIN subtitle_fts fts ON s.id = fts.rowid \
+         LEFT JOIN videos v ON s.video_id = v.id \
+         LEFT JOIN streamers st ON v.streamer_id = st.id \
+         WHERE fts.text MATCH '{}' \
+         ORDER BY v.id, s.start_ms ASC \
+         LIMIT 200",
+        safe_query.replace('\'', "''"),
+    );
+
+    let rows = sea_orm::ConnectionTrait::query_all(
+        db.conn(),
+        sea_orm::Statement::from_string(sea_orm::DatabaseBackend::Sqlite, sql),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(rows
+        .iter()
+        .map(|row| SubtitleSearchResult {
+            id: row.try_get("", "id").unwrap_or(0),
+            video_id: row.try_get("", "video_id").unwrap_or(0),
+            language: row.try_get("", "language").unwrap_or_default(),
+            start_ms: row.try_get("", "start_ms").unwrap_or(0),
+            end_ms: row.try_get("", "end_ms").unwrap_or(0),
+            text: row.try_get("", "text").unwrap_or_default(),
+            source: row.try_get("", "source").unwrap_or_default(),
+            video_file_name: row.try_get("", "video_file_name").unwrap_or_default(),
+            video_duration_ms: row.try_get("", "video_duration_ms").ok(),
+            streamer_name: row.try_get("", "streamer_name").ok(),
+            stream_title: row.try_get("", "stream_title").ok(),
+            recorded_at: row.try_get("", "recorded_at").ok(),
+        })
+        .collect())
+}
+
 /// List ASR tasks for a video
 pub async fn list_asr_tasks(
     db: &Database,

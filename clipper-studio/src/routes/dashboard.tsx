@@ -6,6 +6,9 @@ import { getAppInfo } from "@/services/workspace";
 import bannerImg from "@/assets/banner.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
+import { useThemeStore } from "@/stores/theme";
+import { Sun, Moon, Monitor, Search } from "lucide-react";
+import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
 
 // ===== Types =====
 
@@ -42,10 +45,32 @@ const staticNavItems: NavItem[] = [
   { to: "/dashboard/settings", label: "设置" },
 ];
 
+const THEME_CYCLE = ["light", "dark", "system"] as const;
+const THEME_ICONS = { light: Sun, dark: Moon, system: Monitor };
+const THEME_TIPS = { light: "浅色模式", dark: "深色模式", system: "跟随系统" };
+
+function ThemeToggle() {
+  const mode = useThemeStore((s) => s.mode);
+  const setMode = useThemeStore((s) => s.setMode);
+  const Icon = THEME_ICONS[mode];
+
+  const cycle = () => {
+    const idx = THEME_CYCLE.indexOf(mode);
+    setMode(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length]);
+  };
+
+  return (
+    <Button variant="ghost" size="sm" onClick={cycle} title={THEME_TIPS[mode]}>
+      <Icon className="h-4 w-4" />
+    </Button>
+  );
+}
+
 function DashboardLayout() {
   const [version, setVersion] = useState("");
   const [enabledPlugins, setEnabledPlugins] = useState<PluginInfo[]>([]);
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+  const [searchOpen, setSearchOpen] = useState(false);
   const matches = useMatches();
 
   // Check if current route is under a given prefix
@@ -58,6 +83,18 @@ function DashboardLayout() {
     getAppInfo()
       .then((info) => setVersion(info.version))
       .catch(console.error);
+  }, []);
+
+  // Cmd+K / Ctrl+K keyboard shortcut for search
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   // Load enabled plugins for sidebar sub-items
@@ -125,7 +162,23 @@ function DashboardLayout() {
             </span>
           )}
         </div>
-        <WorkspaceSwitcher />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setSearchOpen(true)}
+            title="搜索字幕 (⌘K)"
+            className="gap-1.5 text-muted-foreground"
+          >
+            <Search className="h-4 w-4" />
+            <span className="hidden sm:inline text-xs">搜索</span>
+            <kbd className="hidden sm:inline-flex h-5 items-center rounded border bg-muted px-1.5 text-[10px] font-medium">
+              ⌘K
+            </kbd>
+          </Button>
+          <ThemeToggle />
+          <WorkspaceSwitcher />
+        </div>
       </header>
 
       {/* Main Content */}
@@ -206,6 +259,9 @@ function DashboardLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* Global Search Dialog */}
+      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
     </div>
   );
 }

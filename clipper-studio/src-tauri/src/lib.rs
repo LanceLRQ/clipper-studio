@@ -273,6 +273,7 @@ pub fn run() {
             commands::asr::list_asr_tasks,
             commands::asr::list_subtitles,
             commands::asr::search_subtitles,
+            commands::asr::search_subtitles_global,
             commands::asr::check_asr_health,
             commands::danmaku::load_danmaku,
             commands::danmaku::get_danmaku_density,

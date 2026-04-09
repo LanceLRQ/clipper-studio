@@ -53,6 +53,7 @@ function formatTime(secs: number): string {
 
 function VideoDetailPage() {
   const { videoId } = Route.useParams();
+  const { t: seekToTime } = Route.useSearch();
   const navigate = useNavigate();
   const [video, setVideo] = useState<VideoInfo | null>(null);
   const [error, setError] = useState("");
@@ -134,6 +135,29 @@ function VideoDetailPage() {
     const videoEl = document.querySelector("video");
     if (videoEl) videoEl.currentTime = timeSecs;
   };
+
+  // Seek to timestamp from search params (e.g. from global search)
+  useEffect(() => {
+    if (seekToTime == null || !mediaEl) return;
+
+    const doSeek = () => {
+      mediaEl.currentTime = seekToTime;
+      // Clear the search param after seeking
+      navigate({
+        to: ".",
+        search: {},
+        replace: true,
+      });
+    };
+
+    if (mediaEl.readyState >= 1) {
+      doSeek();
+    } else {
+      const onLoaded = () => doSeek();
+      mediaEl.addEventListener("loadedmetadata", onLoaded, { once: true });
+      return () => mediaEl.removeEventListener("loadedmetadata", onLoaded);
+    }
+  }, [seekToTime, mediaEl, navigate]);
 
   const handleExtractEnvelope = async () => {
     if (!video) return;
@@ -570,6 +594,13 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+type VideoDetailSearch = {
+  t?: number;
+};
+
 export const Route = createFileRoute("/dashboard/videos/$videoId")({
   component: VideoDetailPage,
+  validateSearch: (search: Record<string, unknown>): VideoDetailSearch => ({
+    t: typeof search.t === "number" ? search.t : undefined,
+  }),
 });
