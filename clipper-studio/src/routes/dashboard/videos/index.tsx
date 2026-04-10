@@ -314,34 +314,33 @@ function VideosPage() {
 
       {/* Search bar (flat view only) */}
       {view === "flat" && (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <div className="relative flex-1 max-w-sm">
-              <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder="搜索标题或文件名..."
-                className="pl-8 h-8 text-sm"
-              />
-            </div>
-            <Button variant="outline" size="sm" onClick={handleSearchSubmit}>
-              搜索
-            </Button>
-            {search && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setSearchInput("");
-                  updateSearch({ search: undefined, page: 1 });
-                }}
-              >
-                清除
-              </Button>
-            )}
+        <div className="flex gap-2">
+          <div className="relative flex-1 max-w-sm">
+            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
+              placeholder="搜索标题或文件名..."
+              className="pl-8 h-8 text-sm"
+            />
           </div>
+          <Button variant="outline" size="sm" className="h-8" onClick={handleSearchSubmit}>
+            搜索
+          </Button>
+          {search && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8"
+              onClick={() => {
+                setSearchInput("");
+                updateSearch({ search: undefined, page: 1 });
+              }}
+            >
+              清除
+            </Button>
+          )}
           <TagFilter
             selectedTagIds={filterTagIds}
             onChange={(ids) => {

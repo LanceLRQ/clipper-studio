@@ -626,7 +626,7 @@ function VideoDetailPage() {
                 <h3 className="font-medium text-sm">转码</h3>
                 <div className="flex items-center gap-2">
                   <select
-                    className="flex-1 rounded-md border bg-background px-2 py-1 text-xs"
+                    className="flex-1 rounded-md border bg-background px-2 h-8 text-xs"
                     value={selectedPresetId ?? ""}
                     onChange={(e) => setSelectedPresetId(Number(e.target.value) || null)}
                   >
