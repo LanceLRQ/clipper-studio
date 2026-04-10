@@ -13,17 +13,17 @@ export function StatusTags({ videos }: { videos: VideoInfo[] }) {
   return (
     <div className="flex gap-1.5 shrink-0">
       {videos.some((v) => v.has_danmaku) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
           弹幕
         </span>
       )}
       {videos.some((v) => v.has_subtitle) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
           字幕
         </span>
       )}
       {videos.some((v) => v.has_envelope) && (
-        <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300">
           热度
         </span>
       )}
@@ -100,8 +100,13 @@ export function VideoRow({
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {video.has_subtitle && (
+          <span className="text-xs px-1 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
+            字幕
+          </span>
+        )}
         {video.has_danmaku && (
-          <span className="text-xs px-1 py-0.5 rounded bg-blue-100 text-blue-700">
+          <span className="text-xs px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
             弹幕
           </span>
         )}
