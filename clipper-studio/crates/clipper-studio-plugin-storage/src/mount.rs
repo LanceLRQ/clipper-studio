@@ -346,6 +346,7 @@ impl MountBackend {
     // ==================== Helpers ====================
 
     /// Generate an automatic mount point path
+    #[allow(dead_code)]
     fn auto_mount_point(server: &str, share: &str) -> String {
         #[cfg(target_os = "windows")]
         {
