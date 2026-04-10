@@ -31,11 +31,10 @@ interface SubtitlePanelProps {
 function formatTime(secs: number): string {
   const h = Math.floor(secs / 3600);
   const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  const sStr = s.toFixed(1).padStart(4, "0");
+  const s = Math.floor(secs % 60);
   if (h > 0)
-    return `${h}:${m.toString().padStart(2, "0")}:${sStr}`;
-  return `${m.toString().padStart(2, "0")}:${sStr}`;
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
 export function SubtitlePanel({
@@ -314,7 +313,7 @@ export function SubtitlePanel({
 
       {/* Subtitle list */}
       {displaySegments.length > 0 && (
-        <div className="max-h-[400px] overflow-y-auto space-y-0.5">
+        <div className="max-h-[400px] overflow-y-auto space-y-0.5 pr-1">
           {displaySegments.map((seg) => {
             const isActive =
               !searchQuery && segments.indexOf(seg) === activeIndex;
@@ -325,44 +324,39 @@ export function SubtitlePanel({
               <div
                 key={seg.id}
                 ref={isActive ? activeRef : undefined}
-                className={`flex gap-2 px-2 py-1 rounded text-xs cursor-pointer hover:bg-accent/30 transition-colors ${
+                className={`group px-2.5 py-1.5 rounded cursor-pointer hover:bg-accent/30 transition-colors ${
                   isActive ? "bg-accent/50" : ""
                 }`}
                 onClick={() => onSeek?.(startSecs)}
               >
-                <span className="text-muted-foreground shrink-0 w-20">
-                  {formatTime(startSecs)}
-                </span>
-                <span className="flex-1 break-all">{seg.text}</span>
-                {/* Clip position helpers */}
-                {(onSetClipStart || onSetClipEnd) && (
-                  <div className="flex gap-0.5 shrink-0 opacity-0 hover:opacity-100">
-                    {onSetClipStart && (
-                      <button
-                        className="text-muted-foreground hover:text-primary"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSetClipStart(startSecs);
-                        }}
-                        title="设为起点"
-                      >
-                        [
-                      </button>
-                    )}
-                    {onSetClipEnd && (
-                      <button
-                        className="text-muted-foreground hover:text-primary"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSetClipEnd(endSecs);
-                        }}
-                        title="设为终点"
-                      >
-                        ]
-                      </button>
-                    )}
-                  </div>
-                )}
+                {/* Row 1: timestamp + clip buttons */}
+                <div className="flex items-center text-[11px] text-muted-foreground">
+                  <span>{formatTime(startSecs)} — {formatTime(endSecs)}</span>
+                  {(onSetClipStart || onSetClipEnd) && (
+                    <div className="flex gap-0.5 ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+                      {onSetClipStart && (
+                        <button
+                          className="px-1 py-0.5 rounded hover:bg-accent text-muted-foreground hover:text-primary transition-colors font-bold text-xs leading-none"
+                          onClick={(e) => { e.stopPropagation(); onSetClipStart(startSecs); }}
+                          title="设为切片起点"
+                        >
+                          [
+                        </button>
+                      )}
+                      {onSetClipEnd && (
+                        <button
+                          className="px-1 py-0.5 rounded hover:bg-accent text-muted-foreground hover:text-primary transition-colors font-bold text-xs leading-none"
+                          onClick={(e) => { e.stopPropagation(); onSetClipEnd(endSecs); }}
+                          title="设为切片终点"
+                        >
+                          ]
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {/* Row 2: text */}
+                <div className="text-xs break-all mt-0.5">{seg.text}</div>
               </div>
             );
           })}

@@ -37,6 +37,8 @@ interface ClipTimelineProps {
   burnAvailability?: BurnAvailability;
   /** Video ID (needed for auto-segment) */
   videoId?: number;
+  /** Called when clips are created via "新增" or "自动分段" */
+  onClipCreated?: () => void;
 }
 
 interface DragState {
@@ -60,6 +62,7 @@ export function ClipTimeline({
   onClipOptionsChange,
   burnAvailability,
   videoId,
+  onClipCreated,
 }: ClipTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -150,7 +153,8 @@ export function ClipTimeline({
     };
     onClipsChange?.([...clips, newClip]);
     onClipSelect?.(newClip.id);
-  }, [clips, currentTime, duration, maxClips, getDefaultClipDuration, onClipsChange, onClipSelect]);
+    onClipCreated?.();
+  }, [clips, currentTime, duration, maxClips, getDefaultClipDuration, onClipsChange, onClipSelect, onClipCreated]);
 
   const handleCopyClip = useCallback(() => {
     if (!selectedClipId || clips.length >= maxClips) return;
@@ -234,13 +238,14 @@ export function ClipTimeline({
         }));
       onClipsChange?.(newClips);
       onClipSelect?.(newClips[0]?.id ?? null);
+      onClipCreated?.();
       showToast(`检测到 ${newClips.length} 个片��`);
     } catch (e) {
       showToast("自动分段失败: " + String(e));
     } finally {
       setAutoSegLoading(false);
     }
-  }, [videoId, clips, maxClips, onClipsChange, onClipSelect, showToast]);
+  }, [videoId, clips, maxClips, onClipsChange, onClipSelect, onClipCreated, showToast]);
 
   // ===== Track interactions =====
 

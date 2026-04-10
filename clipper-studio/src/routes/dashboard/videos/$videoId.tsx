@@ -92,6 +92,9 @@ function VideoDetailPage() {
   // Tags state
   const [videoTags, setVideoTagsState] = useState<TagInfo[]>([]);
 
+  // Right panel tab (0=info, 1=clips, 2=subtitles)
+  const [activeTab, setActiveTab] = useState(0);
+
   // Resizable right panel
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -236,19 +239,23 @@ function VideoDetailPage() {
 
   // Set clip start/end from subtitle panel or other sources
   const handleSetClipStart = (timeSecs: number) => {
+    const rounded = Math.round(timeSecs);
     if (selectedClipId) {
-      // Update existing clip's start
       setClips((prev) =>
-        prev.map((c) =>
-          c.id === selectedClipId ? { ...c, start: Math.round(timeSecs) } : c
-        )
+        prev.map((c) => {
+          if (c.id !== selectedClipId) return c;
+          // If end is already set, start must not exceed it
+          if (c.end > 0 && rounded >= c.end) return c;
+          return { ...c, start: rounded };
+        })
       );
     } else {
-      // Create new clip
+      // Create new clip with default 10s duration
+      const maxEnd = Math.round(durationSecs);
       const newClip: ClipRegion = {
         id: `clip-${Date.now()}`,
-        start: Math.round(timeSecs),
-        end: 0,
+        start: rounded,
+        end: Math.min(rounded + 10, maxEnd),
         color: CLIP_COLORS[clips.length % CLIP_COLORS.length],
         name: `片段${clips.length + 1}`,
       };
@@ -258,17 +265,22 @@ function VideoDetailPage() {
   };
 
   const handleSetClipEnd = (timeSecs: number) => {
+    const rounded = Math.round(timeSecs);
     if (selectedClipId) {
       setClips((prev) =>
-        prev.map((c) =>
-          c.id === selectedClipId ? { ...c, end: Math.round(timeSecs) } : c
-        )
+        prev.map((c) => {
+          if (c.id !== selectedClipId) return c;
+          // End must not be less than start
+          if (c.start > 0 && rounded <= c.start) return c;
+          return { ...c, end: rounded };
+        })
       );
     } else {
+      // Create new clip with default 10s duration
       const newClip: ClipRegion = {
         id: `clip-${Date.now()}`,
-        start: 0,
-        end: Math.round(timeSecs),
+        start: Math.max(0, rounded - 10),
+        end: rounded,
         color: CLIP_COLORS[clips.length % CLIP_COLORS.length],
         name: `片段${clips.length + 1}`,
       };
@@ -402,6 +414,7 @@ function VideoDetailPage() {
               onClipOptionsChange={setClipOptions}
               burnAvailability={burnAvailability}
               videoId={video?.id}
+              onClipCreated={() => setActiveTab(1)}
             />
           </div>
         </div>
@@ -415,7 +428,7 @@ function VideoDetailPage() {
 
         {/* Right column: resizable Tabs */}
         <div className="shrink-0 flex flex-col min-h-0" style={{ width: rightPanelWidth }}>
-          <Tabs defaultValue={0} className="flex-1 flex flex-col min-h-0">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as number)} className="flex-1 flex flex-col min-h-0">
             <TabsList className="w-full shrink-0">
               <TabsTrigger value={0}>信息</TabsTrigger>
               <TabsTrigger value={1}>切片</TabsTrigger>
