@@ -27,10 +27,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { getPluginConfig, setPluginConfig } from "@/services/plugin";
 
 const PLUGIN_ID = "builtin.storage.smb";
 const HISTORY_KEY = "mount_history";
+const AUTO_UNMOUNT_KEY = "auto_unmount_on_exit";
 
 interface MountInfo {
   server: string;
@@ -62,6 +64,7 @@ export function StorageManager() {
   const [error, setError] = useState("");
   const [history, setHistory] = useState<MountHistoryEntry[]>([]);
   const historyRef = useRef<MountHistoryEntry[]>([]);
+  const [autoUnmount, setAutoUnmount] = useState(false);
 
   // Form state
   const [server, setServer] = useState("");
@@ -128,7 +131,7 @@ export function StorageManager() {
       const checkResult = (await callPlugin("check")) as PlatformCheck;
       setCheck(checkResult);
 
-      // Load history first, then detect which are still mounted at OS level
+      // Load config (history + auto-unmount setting)
       let historyEntries: MountHistoryEntry[] = [];
       try {
         const cfg = await getPluginConfig(PLUGIN_ID);
@@ -138,6 +141,7 @@ export function StorageManager() {
           historyRef.current = historyEntries;
           setHistory(historyEntries);
         }
+        setAutoUnmount(cfg[AUTO_UNMOUNT_KEY] === "true");
       } catch {
         // Ignore parse errors
       }
@@ -552,13 +556,33 @@ export function StorageManager() {
         </section>
       )}
 
+      {/* Settings */}
+      <section className="rounded-lg border p-4 space-y-3">
+        <h4 className="font-medium text-sm">挂载设置</h4>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm">退出时自动卸载</p>
+            <p className="text-xs text-muted-foreground">
+              关闭应用时自动卸载所有已挂载的网络共享
+            </p>
+          </div>
+          <Switch
+            checked={autoUnmount}
+            onCheckedChange={async (checked) => {
+              setAutoUnmount(checked);
+              await setPluginConfig(PLUGIN_ID, AUTO_UNMOUNT_KEY, String(checked));
+            }}
+          />
+        </div>
+      </section>
+
       {/* Tips */}
       <section className="rounded-lg bg-muted/50 p-4 space-y-2">
         <h4 className="font-medium text-sm">使用说明</h4>
         <ul className="text-xs text-muted-foreground space-y-1">
           <li>• 输入 NAS 或网络共享的地址和共享名称，点击挂载</li>
           <li>• 挂载成功后，点击"创建工作区"将该路径添加为工作区</li>
-          <li>• 应用退出时会自动卸载所有已挂载的网络共享</li>
+          <li>• 默认退出应用时不会自动卸载挂载，如需自动卸载请在上方开启</li>
           {check?.platform === "linux" && (
             <li className="text-yellow-600">
               • Linux: 可能需要安装 cifs-utils 包并配置 sudo 权限

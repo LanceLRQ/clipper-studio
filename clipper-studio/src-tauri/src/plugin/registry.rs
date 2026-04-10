@@ -99,6 +99,20 @@ impl PluginRegistry {
     pub fn get_transport(&self, plugin_id: &str) -> Option<Arc<Box<dyn PluginTransport>>> {
         self.instances.read().unwrap().get(plugin_id).cloned()
     }
+
+    /// Shutdown all loaded builtin plugins (called on app exit)
+    pub async fn shutdown_all(&self) {
+        let instances: Vec<(String, Arc<Box<dyn PluginTransport>>)> = {
+            let mut guard = self.instances.write().unwrap();
+            guard.drain().collect()
+        };
+        for (id, trans) in instances {
+            tracing::info!("Shutting down builtin plugin: {}", id);
+            if let Err(e) = trans.shutdown().await {
+                tracing::warn!("Failed to shutdown builtin plugin {}: {}", id, e);
+            }
+        }
+    }
 }
 
 /// Serializable plugin info for frontend (used for builtin plugins)

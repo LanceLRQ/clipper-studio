@@ -298,6 +298,39 @@ pub fn run() {
             commands::tag::get_video_tags,
             commands::tag::set_video_tags,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running ClipperStudio");
+        .build(tauri::generate_context!())
+        .expect("error while building ClipperStudio")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                tracing::info!("ClipperStudio exiting, cleaning up plugins...");
+                let state = app_handle.state::<AppState>();
+                let plugin_manager = state.plugin_manager.clone();
+                let plugin_registry = state.plugin_registry.clone();
+                let db = state.db.clone();
+                tauri::async_runtime::block_on(async {
+                    // Shutdown managed plugin services (child processes)
+                    plugin_manager.shutdown_all().await;
+
+                    // Check if auto-unmount is enabled before shutting down builtin plugins
+                    let auto_unmount = match sea_orm::ConnectionTrait::query_one(
+                        db.conn(),
+                        sea_orm::Statement::from_string(
+                            sea_orm::DatabaseBackend::Sqlite,
+                            "SELECT value FROM settings_kv WHERE key = 'plugin:builtin.storage.smb:auto_unmount_on_exit'".to_string(),
+                        ),
+                    ).await {
+                        Ok(Some(row)) => row.try_get::<String>("", "value").unwrap_or_default() == "true",
+                        _ => false,
+                    };
+
+                    if auto_unmount {
+                        tracing::info!("Auto-unmount enabled, shutting down builtin plugins...");
+                        plugin_registry.shutdown_all().await;
+                    } else {
+                        tracing::info!("Auto-unmount disabled, skipping SMB unmount");
+                    }
+                });
+                tracing::info!("Plugin cleanup complete");
+            }
+        });
 }
