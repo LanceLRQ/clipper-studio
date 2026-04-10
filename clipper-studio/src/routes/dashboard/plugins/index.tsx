@@ -85,6 +85,8 @@ function PluginsPage() {
     try {
       await setPluginEnabled(pluginId, enabled);
       await loadData();
+      // Notify sidebar to refresh plugin list
+      window.dispatchEvent(new CustomEvent("plugins-changed"));
     } catch (e) {
       alert(`操作失败: ${String(e)}`);
     } finally {

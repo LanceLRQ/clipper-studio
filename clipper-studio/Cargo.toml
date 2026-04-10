@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/clipper-studio-plugin-core",
     "crates/clipper-studio-plugin-recorder",
+    "crates/clipper-studio-plugin-storage",
 ]
 exclude = ["plugins/*"]
 

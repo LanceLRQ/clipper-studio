@@ -81,10 +81,11 @@ clipper-studio-plugin-core = { path = "../crates/clipper-studio-plugin-core" }
 
 # Builtin plugins
 clipper-studio-plugin-recorder = { path = "../crates/clipper-studio-plugin-recorder", optional = true }
+clipper-studio-plugin-storage = { path = "../crates/clipper-studio-plugin-storage", optional = true }
 
 [features]
 default = ["builtin-plugins"]
-builtin-plugins = ["dep:clipper-studio-plugin-recorder"]
+builtin-plugins = ["dep:clipper-studio-plugin-recorder", "dep:clipper-studio-plugin-storage"]
 
 [dev-dependencies]
 tempfile = "3"

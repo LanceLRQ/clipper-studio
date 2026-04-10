@@ -8,6 +8,7 @@ import {
   callPlugin,
   getPluginConfig,
 } from "@/services/plugin";
+import { StorageManager } from "@/components/storage/storage-manager";
 
 // ===== Recorder Panel =====
 function RecorderPanel({ plugin }: { plugin: PluginInfo }) {
@@ -246,6 +247,8 @@ function PluginDetailPage() {
       {/* Plugin-specific panel */}
       {plugin.plugin_type === "Recorder" ? (
         <RecorderPanel plugin={plugin} />
+      ) : plugin.plugin_type === "StorageProvider" ? (
+        <StorageManager />
       ) : (
         <GenericPluginPanel plugin={plugin} />
       )}

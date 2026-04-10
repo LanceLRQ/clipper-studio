@@ -161,9 +161,11 @@ pub fn run() {
             #[cfg(feature = "builtin-plugins")]
             {
                 use clipper_studio_plugin_recorder::BilibiliRecorderPluginBuilder;
+                use clipper_studio_plugin_storage::StorageProviderPluginBuilder;
                 tracing::info!("Registering builtin plugins...");
                 plugin_registry.register(BilibiliRecorderPluginBuilder::new());
-                tracing::info!("Builtin BilibiliRecorder plugin registered");
+                plugin_registry.register(StorageProviderPluginBuilder::new());
+                tracing::info!("Builtin plugins registered (BilibiliRecorder, StorageProvider)");
             }
             let plugin_registry = Arc::new(plugin_registry);
 

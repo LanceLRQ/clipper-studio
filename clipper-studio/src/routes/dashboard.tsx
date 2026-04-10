@@ -114,6 +114,10 @@ function DashboardLayout() {
 
   useEffect(() => {
     refreshPlugins();
+    // Refresh when plugins are enabled/disabled
+    const handler = () => refreshPlugins();
+    window.addEventListener("plugins-changed", handler);
+    return () => window.removeEventListener("plugins-changed", handler);
   }, [refreshPlugins]);
 
   // Auto-expand menu when route matches
