@@ -125,8 +125,13 @@ impl ASRProvider for LocalASRProvider {
     }
 
     async fn health(&self) -> Result<ASRHealthInfo, String> {
-        let resp = self
-            .client
+        // Use a short timeout for health checks (5s)
+        let health_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+
+        let resp = health_client
             .get(format!("{}/v1/health", self.base_url))
             .send()
             .await

@@ -139,7 +139,13 @@ impl ASRProvider for RemoteASRProvider {
     }
 
     async fn health(&self) -> Result<ASRHealthInfo, String> {
-        let mut req = self.client.get(format!("{}/v1/health", self.base_url));
+        // Use a short timeout for health checks (5s)
+        let health_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_default();
+
+        let mut req = health_client.get(format!("{}/v1/health", self.base_url));
         if let Some(ref key) = self.api_key {
             req = req.header("Authorization", format!("Bearer {}", key));
         }

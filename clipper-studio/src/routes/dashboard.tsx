@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
 import { getSettings } from "@/services/settings";
-import { getASRServiceStatus, type ASRServiceStatusInfo } from "@/services/asr";
+import { getASRServiceStatus, checkASRHealth, type ASRServiceStatusInfo } from "@/services/asr";
 import { useWorkspaceStore } from "@/stores/workspace";
 import bannerImg from "@/assets/banner.png";
 import bannerDarkImg from "@/assets/banner-dark.png";
@@ -72,43 +72,97 @@ function ThemeToggle() {
 
 function ASRStatusIndicator() {
   const navigate = useNavigate();
-  const [status, setStatus] = useState<ASRServiceStatusInfo | null>(null);
+  const [localStatus, setLocalStatus] = useState<ASRServiceStatusInfo | null>(null);
   const [asrMode, setAsrMode] = useState<string>("local");
+  const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
-    // Load ASR mode setting
     getSettings(["asr_mode"]).then((s) => {
-      if (s.asr_mode) setAsrMode(s.asr_mode);
+      const mode = s.asr_mode || "local";
+      setAsrMode(mode);
+
+      // For remote mode, check health on load
+      if (mode === "remote") {
+        checkASRHealth()
+          .then((h) => setRemoteHealthy(h.status === "ready"))
+          .catch(() => setRemoteHealthy(false));
+      }
     }).catch(console.error);
 
-    // Load initial status (only relevant for local mode)
-    getASRServiceStatus().then(setStatus).catch(console.error);
+    // Load local service status
+    getASRServiceStatus().then(setLocalStatus).catch(console.error);
   }, []);
 
-  // Listen for real-time status events
+  // Listen for real-time local service status events
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
-      setStatus(event.payload);
+      setLocalStatus(event.payload);
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
 
-  // Don't show indicator if ASR is disabled or in remote mode
-  if (asrMode === "disabled" || asrMode === "remote") return null;
+  // Periodically check remote health (every 30s)
+  useEffect(() => {
+    if (asrMode !== "remote") return;
+    const interval = setInterval(() => {
+      checkASRHealth()
+        .then((h) => setRemoteHealthy(h.status === "ready"))
+        .catch(() => setRemoteHealthy(false));
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [asrMode]);
 
-  const st = status?.status ?? "stopped";
-  const colorClass =
-    st === "running" ? "text-green-500"
-    : st === "starting" ? "text-yellow-500"
-    : st === "error" ? "text-red-500"
-    : "text-muted-foreground";
+  // Determine display state based on mode
+  let dotColor: string;
+  let tip: string;
+  let colorClass: string;
 
-  const tip =
-    st === "running" ? "ASR 服务运行中"
-    : st === "starting" ? "ASR 服务启动中..."
-    : st === "error" ? "ASR 服务异常"
-    : "ASR 服务未启动";
+  if (asrMode === "disabled") {
+    dotColor = "bg-gray-400";
+    tip = "ASR 已禁用，点击前往设置";
+    colorClass = "text-muted-foreground";
+  } else if (asrMode === "remote") {
+    if (remoteHealthy === null) {
+      dotColor = "bg-yellow-500 animate-pulse";
+      tip = "远程 ASR 服务检测中...";
+      colorClass = "text-yellow-500";
+    } else if (remoteHealthy) {
+      dotColor = "bg-green-500";
+      tip = "远程 ASR 服务已连接";
+      colorClass = "text-green-500";
+    } else {
+      dotColor = "bg-red-500";
+      tip = "远程 ASR 服务无法连接";
+      colorClass = "text-red-500";
+    }
+  } else {
+    // local mode
+    const st = localStatus?.status ?? "stopped";
+    if (st === "running") {
+      dotColor = "bg-green-500";
+      tip = "本地 ASR 服务运行中";
+      colorClass = "text-green-500";
+    } else if (st === "starting") {
+      dotColor = "bg-yellow-500 animate-pulse";
+      tip = "本地 ASR 服务启动中...";
+      colorClass = "text-yellow-500";
+    } else if (st === "error") {
+      dotColor = "bg-red-500";
+      tip = "本地 ASR 服务异常";
+      colorClass = "text-red-500";
+    } else {
+      dotColor = "bg-gray-400";
+      tip = "本地 ASR 服务未启动";
+      colorClass = "text-muted-foreground";
+    }
+  }
+
+  // Mode label for display
+  const modeLabel =
+    asrMode === "disabled" ? "禁用"
+    : asrMode === "remote" ? "远程"
+    : "本地";
 
   return (
     <Button
@@ -119,18 +173,8 @@ function ASRStatusIndicator() {
       onClick={() => navigate({ to: "/dashboard/settings", search: { section: "asr" } })}
     >
       <Mic className="h-4 w-4" />
-      {st === "starting" && (
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
-      )}
-      {st === "running" && (
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
-      )}
-      {st === "error" && (
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
-      )}
-      {st === "stopped" && (
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-400" />
-      )}
+      <span className="hidden sm:inline text-xs">{modeLabel}</span>
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
     </Button>
   );
 }
