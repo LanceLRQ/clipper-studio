@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,39 @@ function VideoDetailPage() {
 
   // Tags state
   const [videoTags, setVideoTagsState] = useState<TagInfo[]>([]);
+
+  // Resizable right panel
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const isDragging = useRef(false);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current || !containerRef.current) return;
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const maxWidth = containerRect.width * 0.5;
+      const minWidth = 260;
+      // Width = distance from right edge of container to mouse position
+      const newWidth = containerRect.right - ev.clientX;
+      setRightPanelWidth(Math.max(minWidth, Math.min(maxWidth, newWidth)));
+    };
+
+    const onMouseUp = () => {
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   // Track playback time
   useEffect(() => {
@@ -290,7 +323,7 @@ function VideoDetailPage() {
       )}
 
       {/* Main layout: Left (scrollable) + Right (full height tabs) */}
-      <div className="flex-1 flex gap-4 min-h-0">
+      <div ref={containerRef} className="flex-1 flex min-h-0">
         {/* Left column: Monitor (top, flex) + Timeline (bottom, fixed) — fills remaining space */}
         <div className="flex-1 flex flex-col min-h-0 min-w-0">
           {/* Monitor area: black bg, video centered, fills remaining space */}
@@ -373,8 +406,15 @@ function VideoDetailPage() {
           </div>
         </div>
 
-        {/* Right column: fixed width Tabs */}
-        <div className="w-[320px] shrink-0 flex flex-col min-h-0">
+        {/* Resize handle */}
+        <div
+          className="shrink-0 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors rounded-full mx-1"
+          onMouseDown={handleResizeStart}
+          title="拖动调整面板宽度"
+        />
+
+        {/* Right column: resizable Tabs */}
+        <div className="shrink-0 flex flex-col min-h-0" style={{ width: rightPanelWidth }}>
           <Tabs defaultValue={0} className="flex-1 flex flex-col min-h-0">
             <TabsList className="w-full shrink-0">
               <TabsTrigger value={0}>信息</TabsTrigger>
