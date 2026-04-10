@@ -1,15 +1,18 @@
 import { createFileRoute, Outlet, Link, useMatches, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
+import { getSettings } from "@/services/settings";
+import { getASRServiceStatus, type ASRServiceStatusInfo } from "@/services/asr";
 import { useWorkspaceStore } from "@/stores/workspace";
 import bannerImg from "@/assets/banner.png";
 import bannerDarkImg from "@/assets/banner-dark.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
 import { useThemeStore } from "@/stores/theme";
-import { Sun, Moon, Monitor, Search, AlertTriangle, RefreshCw } from "lucide-react";
+import { Sun, Moon, Monitor, Search, AlertTriangle, RefreshCw, Mic } from "lucide-react";
 import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
 
 // ===== Types =====
@@ -63,6 +66,71 @@ function ThemeToggle() {
   return (
     <Button variant="ghost" size="sm" onClick={cycle} title={THEME_TIPS[mode]}>
       <Icon className="h-4 w-4" />
+    </Button>
+  );
+}
+
+function ASRStatusIndicator() {
+  const navigate = useNavigate();
+  const [status, setStatus] = useState<ASRServiceStatusInfo | null>(null);
+  const [asrMode, setAsrMode] = useState<string>("local");
+
+  useEffect(() => {
+    // Load ASR mode setting
+    getSettings(["asr_mode"]).then((s) => {
+      if (s.asr_mode) setAsrMode(s.asr_mode);
+    }).catch(console.error);
+
+    // Load initial status (only relevant for local mode)
+    getASRServiceStatus().then(setStatus).catch(console.error);
+  }, []);
+
+  // Listen for real-time status events
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
+      setStatus(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // Don't show indicator if ASR is disabled or in remote mode
+  if (asrMode === "disabled" || asrMode === "remote") return null;
+
+  const st = status?.status ?? "stopped";
+  const colorClass =
+    st === "running" ? "text-green-500"
+    : st === "starting" ? "text-yellow-500"
+    : st === "error" ? "text-red-500"
+    : "text-muted-foreground";
+
+  const tip =
+    st === "running" ? "ASR 服务运行中"
+    : st === "starting" ? "ASR 服务启动中..."
+    : st === "error" ? "ASR 服务异常"
+    : "ASR 服务未启动";
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      title={tip}
+      className={`gap-1.5 ${colorClass}`}
+      onClick={() => navigate({ to: "/dashboard/settings", search: { section: "asr" } })}
+    >
+      <Mic className="h-4 w-4" />
+      {st === "starting" && (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-500 animate-pulse" />
+      )}
+      {st === "running" && (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
+      )}
+      {st === "error" && (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
+      )}
+      {st === "stopped" && (
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-400" />
+      )}
     </Button>
   );
 }
@@ -205,6 +273,7 @@ function DashboardLayout() {
               ⌘K
             </kbd>
           </Button>
+          <ASRStatusIndicator />
           <ThemeToggle />
           <WorkspaceSwitcher />
         </div>

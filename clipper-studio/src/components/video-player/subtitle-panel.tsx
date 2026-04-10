@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { SubtitleSegment, ASRTaskInfo } from "@/services/asr";
+import type { SubtitleSegment, ASRTaskInfo, ASRServiceStatusInfo } from "@/services/asr";
 import {
   submitASR,
   pollASR,
   listSubtitles,
   listASRTasks,
   checkASRHealth,
+  getASRServiceStatus,
   exportSubtitlesSrt,
   exportSubtitlesAss,
   exportSubtitlesVtt,
 } from "@/services/asr";
+import { getSettings } from "@/services/settings";
 
 interface SubtitlePanelProps {
   videoId: number;
@@ -50,11 +53,39 @@ export function SubtitlePanel({
   const activeRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ASR service availability
+  const [asrMode, setAsrMode] = useState<string>("local");
+  const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
+
+  // Whether ASR is available for use
+  const asrAvailable =
+    asrMode === "disabled" ? false
+    : asrMode === "remote" ? true  // remote mode always allows attempt
+    : serviceStatus?.status === "running";  // local mode requires running service
+
   const loadSubtitles = async () => {
     const resp = await listSubtitles(videoId);
     setSegments(resp.segments);
     setBaseTimeMs(resp.base_ms);
   };
+
+  // Load ASR mode and service status
+  useEffect(() => {
+    getSettings(["asr_mode"]).then((s) => {
+      if (s.asr_mode) setAsrMode(s.asr_mode);
+    }).catch(console.error);
+
+    getASRServiceStatus().then(setServiceStatus).catch(console.error);
+  }, []);
+
+  // Listen for real-time service status changes
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
+      setServiceStatus(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
 
   // Load subtitles and ASR task status
   useEffect(() => {
@@ -100,12 +131,22 @@ export function SubtitlePanel({
   }, [currentTime]);
 
   const handleSubmitASR = async () => {
+    // Pre-check: ASR must be available
+    if (asrMode === "disabled") {
+      alert("ASR 功能已禁用，请在「设置 → 语音识别」中启用");
+      return;
+    }
+    if (asrMode === "local" && serviceStatus?.status !== "running") {
+      alert("本地 ASR 服务未运行，请先在「设置 → 语音识别」中启动服务");
+      return;
+    }
+
     setLoading(true);
     try {
       // Check health first
       const health = await checkASRHealth();
       if (health.status !== "ready") {
-        alert("ASR 引擎未就绪，请先在插件页面启动 ASR 服务");
+        alert("ASR 引擎未就绪，请检查「设置 → 语音识别」中的服务状态");
         return;
       }
 
@@ -202,8 +243,8 @@ export function SubtitlePanel({
                   if (!(await ask("重新识别将覆盖当前字幕，确定继续？", { title: "重新 ASR 识别", kind: "warning" }))) return;
                   await handleSubmitASR();
                 }}
-                disabled={loading || (asrTask?.status === "processing" || asrTask?.status === "pending")}
-                title="重新识别（将覆盖当前字幕）"
+                disabled={!asrAvailable || loading || (asrTask?.status === "processing" || asrTask?.status === "pending")}
+                title={!asrAvailable ? "ASR 服务未就绪" : "重新识别（将覆盖当前字幕）"}
               >
                 重新生成
               </Button>
@@ -232,20 +273,33 @@ export function SubtitlePanel({
           <div className="text-xs text-red-500">
             ASR 失败: {asrTask.error_message}
           </div>
-          <Button size="sm" variant="outline" className="text-xs" onClick={handleSubmitASR}>
+          <Button size="sm" variant="outline" className="text-xs" onClick={handleSubmitASR}
+            disabled={!asrAvailable}>
             重试
           </Button>
         </div>
       ) : segments.length === 0 ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full text-xs"
-          onClick={handleSubmitASR}
-          disabled={loading}
-        >
-          {loading ? "提交中..." : "开始 ASR 语音识别"}
-        </Button>
+        <div className="space-y-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full text-xs"
+            onClick={handleSubmitASR}
+            disabled={!asrAvailable || loading}
+          >
+            {loading ? "提交中..." : "开始 ASR 语音识别"}
+          </Button>
+          {asrMode === "local" && !asrAvailable && (
+            <p className="text-[11px] text-muted-foreground text-center">
+              本地 ASR 服务未运行，请在「设置 → 语音识别」中启动
+            </p>
+          )}
+          {asrMode === "disabled" && (
+            <p className="text-[11px] text-muted-foreground text-center">
+              ASR 功能已禁用
+            </p>
+          )}
+        </div>
       ) : null}
 
       {/* Search */}
