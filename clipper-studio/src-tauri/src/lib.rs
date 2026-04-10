@@ -19,6 +19,7 @@ use tauri::Manager;
 
 use std::sync::Arc;
 
+use crate::asr::manager::ASRServiceManager;
 use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
@@ -41,6 +42,7 @@ pub struct AppState {
     pub watcher: Arc<WorkspaceWatcher>,
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_registry: Arc<PluginRegistry>,
+    pub asr_service_manager: Arc<ASRServiceManager>,
 }
 
 /// Build and configure the Tauri application
@@ -172,6 +174,9 @@ pub fn run() {
             // Initialize workspace file watcher
             let watcher = Arc::new(WorkspaceWatcher::new(app.handle().clone()));
 
+            // Initialize ASR service manager
+            let asr_service_manager = Arc::new(ASRServiceManager::new());
+
             // Set up system tray
             shell::tray::setup_tray(app)?;
 
@@ -188,6 +193,7 @@ pub fn run() {
                 watcher: watcher.clone(),
                 plugin_manager: plugin_manager.clone(),
                 plugin_registry: plugin_registry.clone(),
+                asr_service_manager: asr_service_manager.clone(),
             });
 
             // Start watching existing workspaces with auto_scan enabled
@@ -291,6 +297,11 @@ pub fn run() {
             commands::asr::export_subtitles_srt,
             commands::asr::export_subtitles_ass,
             commands::asr::export_subtitles_vtt,
+            commands::asr::validate_asr_path,
+            commands::asr::start_asr_service,
+            commands::asr::stop_asr_service,
+            commands::asr::get_asr_service_status,
+            commands::asr::get_asr_service_logs,
             commands::tag::create_tag,
             commands::tag::list_tags,
             commands::tag::update_tag,
@@ -302,8 +313,19 @@ pub fn run() {
         .expect("error while building ClipperStudio")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
-                tracing::info!("ClipperStudio exiting, cleaning up plugins...");
+                tracing::info!("ClipperStudio exiting, cleaning up...");
                 let state = app_handle.state::<AppState>();
+
+                // Stop managed ASR service if running
+                let asr_mgr = state.asr_service_manager.clone();
+                if asr_mgr.is_running() {
+                    tracing::info!("Stopping managed ASR service...");
+                    tauri::async_runtime::block_on(async {
+                        let _ = asr_mgr.stop().await;
+                    });
+                    tracing::info!("ASR service stopped");
+                }
+
                 let plugin_manager = state.plugin_manager.clone();
                 let plugin_registry = state.plugin_registry.clone();
                 let db = state.db.clone();

@@ -1,8 +1,10 @@
+use std::path::Path;
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::asr::local::LocalASRProvider;
+use crate::asr::manager::{ASRPathValidation, ASRServiceManager, ASRServiceStatusInfo, ASRStartConfig};
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
 use crate::asr::remote::RemoteASRProvider;
 use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult, SubtitleSegment};
@@ -482,4 +484,95 @@ fn to_vtt(segments: &[SubtitleSegment], base_ms: i64) -> String {
         ));
     }
     out
+}
+
+// ==================== ASR Service Management ====================
+
+/// Validate that a directory contains a valid qwen3-asr-service installation
+#[tauri::command]
+pub async fn validate_asr_path(path: String) -> Result<ASRPathValidation, String> {
+    Ok(ASRServiceManager::validate_path(Path::new(&path)))
+}
+
+/// Start the managed local ASR service using configured parameters
+#[tauri::command]
+pub async fn start_asr_service(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    let base_path = read_setting(&state, "asr_local_path")
+        .await
+        .ok_or("请先在设置中配置 ASR 服务路径")?;
+
+    if base_path.is_empty() {
+        return Err("请先在设置中配置 ASR 服务路径".to_string());
+    }
+
+    let port: u16 = read_setting(&state, "asr_port")
+        .await
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8765);
+
+    let config = ASRStartConfig {
+        port,
+        device: read_setting(&state, "asr_local_device")
+            .await
+            .unwrap_or_else(|| "auto".to_string()),
+        model_size: read_setting(&state, "asr_local_model_size")
+            .await
+            .unwrap_or_else(|| "auto".to_string()),
+        enable_align: read_setting(&state, "asr_local_enable_align")
+            .await
+            .map(|v| v != "false")
+            .unwrap_or(true),
+        enable_punc: read_setting(&state, "asr_local_enable_punc")
+            .await
+            .map(|v| v == "true")
+            .unwrap_or(true),
+        model_source: read_setting(&state, "asr_local_model_source")
+            .await
+            .unwrap_or_else(|| "modelscope".to_string()),
+        max_segment: read_setting(&state, "asr_local_max_segment")
+            .await
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5),
+        host: "127.0.0.1".to_string(),
+    };
+
+    state
+        .asr_service_manager
+        .start(Path::new(&base_path), config, app_handle)
+        .await
+}
+
+/// Stop the managed local ASR service
+#[tauri::command]
+pub async fn stop_asr_service(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    state.asr_service_manager.stop().await?;
+    // Emit stopped status to frontend
+    let _ = app_handle.emit(
+        "asr-service-status",
+        state.asr_service_manager.status_info(),
+    );
+    Ok(())
+}
+
+/// Get current ASR service status
+#[tauri::command]
+pub fn get_asr_service_status(
+    state: State<'_, AppState>,
+) -> Result<ASRServiceStatusInfo, String> {
+    Ok(state.asr_service_manager.status_info())
+}
+
+/// Get recent ASR service log lines
+#[tauri::command]
+pub fn get_asr_service_logs(
+    state: State<'_, AppState>,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    Ok(state.asr_service_manager.get_logs(limit.unwrap_or(200)))
 }

@@ -133,3 +133,42 @@ export async function exportSubtitlesAss(videoId: number): Promise<string> {
 export async function exportSubtitlesVtt(videoId: number): Promise<string> {
   return invoke<string>("export_subtitles_vtt", { videoId });
 }
+
+// ==================== ASR Service Management ====================
+
+export interface ASRPathValidation {
+  valid: boolean;
+  has_venv: boolean;
+  has_main: boolean;
+  python_path: string;
+}
+
+export interface ASRServiceStatusInfo {
+  status: "stopped" | "starting" | "running" | "stopping" | "error";
+  health_info: ASRHealthInfo | null;
+  message?: string;
+}
+
+export async function validateASRPath(
+  path: string
+): Promise<ASRPathValidation> {
+  return invoke<ASRPathValidation>("validate_asr_path", { path });
+}
+
+export async function startASRService(): Promise<void> {
+  return invoke("start_asr_service");
+}
+
+export async function stopASRService(): Promise<void> {
+  return invoke("stop_asr_service");
+}
+
+export async function getASRServiceStatus(): Promise<ASRServiceStatusInfo> {
+  return invoke<ASRServiceStatusInfo>("get_asr_service_status");
+}
+
+export async function getASRServiceLogs(
+  limit?: number
+): Promise<string[]> {
+  return invoke<string[]>("get_asr_service_logs", { limit });
+}
