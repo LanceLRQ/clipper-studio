@@ -210,6 +210,14 @@ impl MountBackend {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            // Error 1219: multiple connections with different credentials
+            if stderr.contains("1219") {
+                return Err(format!(
+                    "该服务器已存在使用其他凭据的连接，请先在命令行执行 \
+                     `net use \\\\{}\\{} /delete` 断开后重试",
+                    params.server, params.share
+                ));
+            }
             return Err(format!("net use failed: {}", stderr.trim()));
         }
 
@@ -347,7 +355,7 @@ impl MountBackend {
 
     /// Generate an automatic mount point path
     #[allow(dead_code)]
-    fn auto_mount_point(server: &str, share: &str) -> String {
+    fn auto_mount_point(_server: &str, _share: &str) -> String {
         #[cfg(target_os = "windows")]
         {
             // Windows: let net use auto-assign
@@ -356,7 +364,7 @@ impl MountBackend {
         #[cfg(not(target_os = "windows"))]
         {
             // Unix: /tmp/clipper-mounts/{server}_{share}
-            let dir_name = format!("{}_{}", server.replace('.', "-"), share);
+            let dir_name = format!("{}_{}", _server.replace('.', "-"), _share);
             let base = std::env::temp_dir().join("clipper-mounts").join(dir_name);
             base.to_string_lossy().to_string()
         }

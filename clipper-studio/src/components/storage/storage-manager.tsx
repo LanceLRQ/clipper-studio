@@ -20,6 +20,13 @@ import { useWorkspaceStore } from "@/stores/workspace";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { getPluginConfig, setPluginConfig } from "@/services/plugin";
 
 const PLUGIN_ID = "builtin.storage.smb";
@@ -197,12 +204,14 @@ export function StorageManager() {
     setMounting(true);
     setError("");
     try {
+      // "auto" means let the backend auto-assign
+      const mp = mountPoint === "auto" ? "" : mountPoint.trim();
       await doMount(
         server.trim(),
         share.trim(),
         username.trim(),
         password,
-        mountPoint.trim()
+        mp
       );
       // Clear form
       setServer("");
@@ -358,31 +367,47 @@ export function StorageManager() {
         </div>
 
         <div className="space-y-1">
-          <Label className="text-sm">本地挂载路径</Label>
-          <div className="flex gap-2">
-            <Input
-              value={mountPoint}
-              onChange={(e) => setMountPoint(e.target.value)}
-              placeholder={
-                check?.platform === "windows"
-                  ? "留空自动分配盘符（或指定如 Z:）"
-                  : "留空使用默认路径（/tmp/clipper-mounts/...）"
-              }
-              className="h-8 text-sm font-mono flex-1"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 px-2 shrink-0"
-              onClick={async () => {
-                const selected = await open({ directory: true, multiple: false });
-                if (selected) setMountPoint(selected as string);
-              }}
-            >
-              <FolderOpenIcon className="h-4 w-4" />
-            </Button>
-          </div>
+          <Label className="text-sm">
+            {check?.platform === "windows" ? "映射盘符" : "本地挂载路径"}
+          </Label>
+          {check?.platform === "windows" ? (
+            <Select value={mountPoint} onValueChange={setMountPoint}>
+              <SelectTrigger className="h-8 text-sm font-mono w-40">
+                <SelectValue placeholder="自动分配" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">自动分配</SelectItem>
+                {Array.from({ length: 26 }, (_, i) =>
+                  String.fromCharCode(65 + i)
+                ).map((letter) => (
+                  <SelectItem key={letter} value={`${letter}:`}>
+                    {letter}:
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex gap-2">
+              <Input
+                value={mountPoint}
+                onChange={(e) => setMountPoint(e.target.value)}
+                placeholder="留空使用默认路径（/tmp/clipper-mounts/...）"
+                className="h-8 text-sm font-mono flex-1"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 px-2 shrink-0"
+                onClick={async () => {
+                  const selected = await open({ directory: true, multiple: false });
+                  if (selected) setMountPoint(selected as string);
+                }}
+              >
+                <FolderOpenIcon className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {error && (
@@ -541,7 +566,7 @@ export function StorageManager() {
           )}
           {check?.platform === "windows" && (
             <li>
-              • Windows: 可指定盘符（如 Z:）或留空自动分配
+              • Windows: 选择要映射的盘符，或选择"自动分配"由系统决定
             </li>
           )}
         </ul>

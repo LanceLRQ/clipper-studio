@@ -11,7 +11,7 @@ rust-version = "1.77"
 
 [lib]
 name = "clipper_studio_lib"
-crate-type = ["lib", "staticlib", "cdylib"]
+crate-type = ["lib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
