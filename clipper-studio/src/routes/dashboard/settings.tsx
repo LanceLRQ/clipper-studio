@@ -259,6 +259,21 @@ function WorkspaceListSection({
                     当前
                   </span>
                 )}
+                {(() => {
+                  try {
+                    if (ws.adapter_config) {
+                      const cfg = JSON.parse(ws.adapter_config);
+                      if (cfg.source === "smb") {
+                        return (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                            SMB
+                          </span>
+                        );
+                      }
+                    }
+                  } catch { /* ignore */ }
+                  return null;
+                })()}
               </div>
               <div className="text-xs text-muted-foreground truncate">
                 {ws.path}

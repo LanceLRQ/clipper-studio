@@ -204,10 +204,15 @@ pub async fn call_plugin(
 ) -> Result<serde_json::Value, String> {
     // Check if it's a builtin plugin first
     if state.plugin_registry.is_builtin(&plugin_id) {
-        let transport = state
-            .plugin_registry
-            .get_transport(&plugin_id)
-            .ok_or_else(|| format!("Builtin plugin '{}' not loaded", plugin_id))?;
+        // Auto-load if not yet loaded
+        let transport = match state.plugin_registry.get_transport(&plugin_id) {
+            Some(t) => t,
+            None => {
+                tracing::info!("Builtin plugin '{}' not loaded, auto-loading...", plugin_id);
+                state.plugin_registry.load_builtin(&plugin_id).await
+                    .map_err(|e| format!("Failed to auto-load builtin plugin '{}': {}", plugin_id, e))?
+            }
+        };
 
         transport
             .request(&action, payload)

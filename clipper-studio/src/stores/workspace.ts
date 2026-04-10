@@ -3,6 +3,7 @@ import {
   getActiveWorkspace,
   setActiveWorkspace as setActiveWorkspaceApi,
   listWorkspaces,
+  checkWorkspacePath,
 } from "@/services/workspace";
 
 interface WorkspaceState {
@@ -13,8 +14,12 @@ interface WorkspaceState {
   initialized: boolean;
   /** 没有任何工作区，需引导用户创建 */
   noWorkspaces: boolean;
+  /** 当前工作区路径是否可达 */
+  pathAccessible: boolean;
   initialize: () => Promise<void>;
   switchWorkspace: (id: number) => Promise<void>;
+  /** Re-check path accessibility for current workspace */
+  recheckPath: () => Promise<void>;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -22,13 +27,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   version: 0,
   initialized: false,
   noWorkspaces: false,
+  pathAccessible: true,
 
   async initialize() {
     if (get().initialized) return;
     try {
       const id = await getActiveWorkspace();
       if (id != null) {
-        set({ activeId: id, initialized: true, noWorkspaces: false });
+        const accessible = await checkWorkspacePath(id).catch(() => true);
+        set({ activeId: id, initialized: true, noWorkspaces: false, pathAccessible: accessible });
         return;
       }
       // No active workspace persisted — try to auto-select the first one
@@ -36,7 +43,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       if (workspaces.length > 0) {
         const firstId = workspaces[0].id;
         await setActiveWorkspaceApi(firstId);
-        set({ activeId: firstId, initialized: true, noWorkspaces: false });
+        const accessible = await checkWorkspacePath(firstId).catch(() => true);
+        set({ activeId: firstId, initialized: true, noWorkspaces: false, pathAccessible: accessible });
       } else {
         set({ initialized: true, noWorkspaces: true });
       }
@@ -47,6 +55,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   async switchWorkspace(id: number) {
     await setActiveWorkspaceApi(id);
-    set((s) => ({ activeId: id, version: s.version + 1, noWorkspaces: false }));
+    const accessible = await checkWorkspacePath(id).catch(() => true);
+    set((s) => ({ activeId: id, version: s.version + 1, noWorkspaces: false, pathAccessible: accessible }));
+  },
+
+  async recheckPath() {
+    const id = get().activeId;
+    if (id == null) return;
+    const accessible = await checkWorkspacePath(id).catch(() => true);
+    set({ pathAccessible: accessible });
   },
 }));

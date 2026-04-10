@@ -72,6 +72,7 @@ impl PluginInstance for StorageProviderPlugin {
             "unmount" => self.handle_unmount(payload).await,
             "list_mounts" => self.handle_list_mounts().await,
             "check" => self.handle_check().await,
+            "detect_mounts" => self.handle_detect_mounts(payload).await,
             _ => Err(PluginError::UnsupportedAction(action.to_string())),
         }
     }
@@ -170,10 +171,52 @@ impl StorageProviderPlugin {
         Ok(serde_json::json!({"ok": true}))
     }
 
-    /// List active mounts
+    /// List active mounts (with live validation)
     async fn handle_list_mounts(&self) -> Result<serde_json::Value, PluginError> {
-        let mounts = self.active_mounts.read().await.clone();
-        Ok(serde_json::to_value(&mounts).unwrap_or_default())
+        // Validate each tracked mount is still alive
+        let current = self.active_mounts.read().await.clone();
+        let mut alive = Vec::new();
+        for info in &current {
+            if MountBackend::is_mount_point(&info.mount_point).await {
+                alive.push(info.clone());
+            }
+        }
+        // Update tracking to remove stale entries
+        if alive.len() != current.len() {
+            *self.active_mounts.write().await = alive.clone();
+        }
+        Ok(serde_json::to_value(&alive).unwrap_or_default())
+    }
+
+    /// Detect which mount points from a given list are still active at OS level.
+    /// Payload: { "candidates": [{ "server": "...", "share": "...", "mount_point": "..." }, ...] }
+    /// Returns the subset that are currently mounted, and syncs them into active_mounts.
+    async fn handle_detect_mounts(
+        &self,
+        payload: serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let candidates: Vec<MountInfo> = payload
+            .get("candidates")
+            .cloned()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default();
+
+        let mut detected = Vec::new();
+        for c in &candidates {
+            if !c.mount_point.is_empty() && MountBackend::is_mount_point(&c.mount_point).await {
+                detected.push(c.clone());
+            }
+        }
+
+        // Merge detected into active_mounts (avoid duplicates)
+        let mut mounts = self.active_mounts.write().await;
+        for d in &detected {
+            if !mounts.iter().any(|m| m.mount_point == d.mount_point) {
+                mounts.push(d.clone());
+            }
+        }
+
+        Ok(serde_json::to_value(&detected).unwrap_or_default())
     }
 
     /// Check platform support

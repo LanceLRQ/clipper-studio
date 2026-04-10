@@ -67,6 +67,8 @@ function VideosPage() {
 
   const activeWs = useWorkspaceStore((s) => s.activeId);
   const wsVersion = useWorkspaceStore((s) => s.version);
+  const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
+  const wsRecheckPath = useWorkspaceStore((s) => s.recheckPath);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -107,7 +109,9 @@ function VideosPage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    // Recheck workspace path accessibility on page load / workspace switch
+    wsRecheckPath();
+  }, [loadData, wsRecheckPath]);
 
   // Load tags for visible videos in flat view
   useEffect(() => {
@@ -296,12 +300,13 @@ function VideosPage() {
           <Button
             variant="outline"
             onClick={handleScan}
-            disabled={scanning}
+            disabled={scanning || !wsPathAccessible}
+            title={!wsPathAccessible ? "工作区目录不可访问" : undefined}
           >
             <FolderSyncIcon className="h-4 w-4 mr-1" />
             {scanning ? "扫描中..." : "扫描目录"}
           </Button>
-          <Button onClick={handleImport} disabled={importing}>
+          <Button onClick={handleImport} disabled={importing || !wsPathAccessible}>
             {importing ? "导入中..." : "+ 导入视频"}
           </Button>
         </div>

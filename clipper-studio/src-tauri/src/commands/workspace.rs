@@ -12,6 +12,7 @@ pub struct WorkspaceInfo {
     pub name: String,
     pub path: String,
     pub adapter_id: String,
+    pub adapter_config: Option<String>,
     pub auto_scan: bool,
     pub clip_output_dir: Option<String>,
     pub created_at: String,
@@ -31,6 +32,9 @@ pub struct CreateWorkspaceRequest {
     pub path: String,
     /// Adapter type: "bililive-recorder", "generic", etc.
     pub adapter_id: String,
+    /// Optional JSON config for the adapter (e.g. SMB mount info)
+    #[serde(default)]
+    pub adapter_config: Option<String>,
 }
 
 /// List all workspaces
@@ -42,7 +46,7 @@ pub async fn list_workspaces(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces ORDER BY created_at DESC"
+            "SELECT id, name, path, adapter_id, adapter_config, auto_scan, clip_output_dir, created_at FROM workspaces ORDER BY created_at DESC"
                 .to_string(),
         ),
     )
@@ -58,6 +62,7 @@ pub async fn list_workspaces(
                 name: row.try_get("", "name").unwrap_or_default(),
                 path: row.try_get("", "path").unwrap_or_default(),
                 adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
+                adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
                 auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
                 clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
                 created_at: row.try_get("", "created_at").unwrap_or_default(),
@@ -85,13 +90,18 @@ pub async fn create_workspace(
     }
 
     // Insert into database
+    let adapter_config_sql = match &req.adapter_config {
+        Some(cfg) if !cfg.is_empty() => format!("'{}'", cfg.replace('\'', "''")),
+        _ => "NULL".to_string(),
+    };
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
-            "INSERT INTO workspaces (name, path, adapter_id) VALUES ('{}', '{}', '{}')",
+            "INSERT INTO workspaces (name, path, adapter_id, adapter_config) VALUES ('{}', '{}', '{}', {})",
             req.name.replace('\'', "''"),
             req.path.replace('\'', "''"),
             req.adapter_id.replace('\'', "''"),
+            adapter_config_sql,
         ),
     )
     .await
@@ -103,7 +113,7 @@ pub async fn create_workspace(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces WHERE path = '{}'",
+                "SELECT id, name, path, adapter_id, adapter_config, auto_scan, clip_output_dir, created_at FROM workspaces WHERE path = '{}'",
                 req.path.replace('\'', "''")
             ),
         ),
@@ -118,6 +128,7 @@ pub async fn create_workspace(
         name: row.try_get("", "name").unwrap_or_default(),
         path: row.try_get("", "path").unwrap_or_default(),
         adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
+        adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
         auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
         clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
@@ -558,7 +569,7 @@ pub async fn update_workspace(
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT id, name, path, adapter_id, auto_scan, clip_output_dir, created_at FROM workspaces WHERE id = {}",
+                "SELECT id, name, path, adapter_id, adapter_config, auto_scan, clip_output_dir, created_at FROM workspaces WHERE id = {}",
                 req.workspace_id
             ),
         ),
@@ -572,6 +583,7 @@ pub async fn update_workspace(
         name: row.try_get("", "name").unwrap_or_default(),
         path: row.try_get("", "path").unwrap_or_default(),
         adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
+        adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
         auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
         clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
@@ -672,6 +684,28 @@ pub async fn get_disk_usage(
         disk_total_bytes: disk_total,
         disk_available_bytes: disk_available,
     })
+}
+
+/// Check if the workspace directory path is accessible
+#[tauri::command]
+pub async fn check_workspace_path(
+    state: State<'_, AppState>,
+    workspace_id: i64,
+) -> Result<bool, String> {
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!("SELECT path FROM workspaces WHERE id = {}", workspace_id),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("工作区不存在".to_string())?;
+
+    let ws_path: String = row.try_get("", "path").unwrap_or_default();
+    let path = Path::new(&ws_path);
+    Ok(path.exists() && path.is_dir())
 }
 
 /// Detect adapter type for a given directory path

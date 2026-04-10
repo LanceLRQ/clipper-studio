@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { FolderOpenIcon, PlusIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
+import { FolderOpenIcon, PlusIcon, SettingsIcon, SlidersHorizontalIcon, HardDriveIcon } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +24,16 @@ export function WorkspaceSwitcher() {
       .catch(console.error);
   }, []);
 
+  const isSmbWorkspace = (ws: WorkspaceInfo) => {
+    try {
+      if (ws.adapter_config) {
+        const cfg = JSON.parse(ws.adapter_config);
+        return cfg.source === "smb";
+      }
+    } catch { /* ignore */ }
+    return false;
+  };
+
   const activeWorkspace = workspaces.find((w) => w.id === activeId);
   const displayName = activeWorkspace?.name ?? "加载中...";
 
@@ -46,8 +56,16 @@ export function WorkspaceSwitcher() {
             onClick={() => switchWorkspace(ws.id)}
             className={ws.id === activeId ? "bg-accent" : ""}
           >
-            <div className="flex flex-col">
-              <span>{ws.name}</span>
+            <div className="flex flex-col min-w-0">
+              <span className="flex items-center gap-1.5">
+                {ws.name}
+                {isSmbWorkspace(ws) && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300 shrink-0">
+                    <HardDriveIcon className="h-2.5 w-2.5" />
+                    SMB
+                  </span>
+                )}
+              </span>
               <span className="text-xs text-muted-foreground truncate">
                 {ws.path}
               </span>

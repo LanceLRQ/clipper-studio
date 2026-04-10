@@ -10,6 +10,7 @@ interface ClipActionsProps {
   clips: ClipRegion[];
   presetId?: number | null;
   clipOptions?: Record<string, ClipOptions>;
+  disabled?: boolean;
 }
 
 export function ClipActions({
@@ -17,6 +18,7 @@ export function ClipActions({
   clips,
   presetId,
   clipOptions = {},
+  disabled = false,
 }: ClipActionsProps) {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -58,7 +60,7 @@ export function ClipActions({
     <Button
       className="w-full"
       onClick={handleSubmit}
-      disabled={loading || validClips.length === 0}
+      disabled={loading || validClips.length === 0 || disabled}
     >
       {loading
         ? "创建中..."

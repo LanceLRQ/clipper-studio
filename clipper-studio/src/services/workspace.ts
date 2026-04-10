@@ -58,6 +58,13 @@ export async function detectWorkspaceAdapter(
   return invoke<string>("detect_workspace_adapter", { path });
 }
 
+/** Check if workspace directory path is accessible */
+export async function checkWorkspacePath(
+  workspaceId: number
+): Promise<boolean> {
+  return invoke<boolean>("check_workspace_path", { workspaceId });
+}
+
 export interface DiskUsageInfo {
   output_dir: string;
   dir_size_bytes: number;

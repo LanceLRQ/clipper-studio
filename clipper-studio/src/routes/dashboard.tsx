@@ -8,7 +8,7 @@ import bannerImg from "@/assets/banner.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
 import { useThemeStore } from "@/stores/theme";
-import { Sun, Moon, Monitor, Search } from "lucide-react";
+import { Sun, Moon, Monitor, Search, AlertTriangle, RefreshCw } from "lucide-react";
 import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
 
 // ===== Types =====
@@ -71,6 +71,8 @@ function DashboardLayout() {
   const wsInitialized = useWorkspaceStore((s) => s.initialized);
   const wsNoWorkspaces = useWorkspaceStore((s) => s.noWorkspaces);
   const wsActiveId = useWorkspaceStore((s) => s.activeId);
+  const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
+  const wsRecheckPath = useWorkspaceStore((s) => s.recheckPath);
 
   const [version, setVersion] = useState("");
   const [enabledPlugins, setEnabledPlugins] = useState<PluginInfo[]>([]);
@@ -205,6 +207,25 @@ function DashboardLayout() {
           <WorkspaceSwitcher />
         </div>
       </header>
+
+      {/* Workspace path inaccessible warning */}
+      {!wsPathAccessible && (
+        <div className="shrink-0 flex items-center gap-2 bg-yellow-50 dark:bg-yellow-950/30 border-b border-yellow-200 dark:border-yellow-800 px-6 py-2">
+          <AlertTriangle className="h-4 w-4 text-yellow-600 shrink-0" />
+          <span className="text-sm text-yellow-800 dark:text-yellow-200">
+            当前工作区目录不可访问，可能是网络存储已断开。扫描、播放、切片等功能暂时不可用。
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto shrink-0 h-7 text-xs gap-1"
+            onClick={wsRecheckPath}
+          >
+            <RefreshCw className="h-3 w-3" />
+            重新检测
+          </Button>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="flex flex-1 overflow-hidden">

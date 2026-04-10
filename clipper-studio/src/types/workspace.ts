@@ -3,15 +3,25 @@ export interface WorkspaceInfo {
   name: string;
   path: string;
   adapter_id: string;
+  adapter_config: string | null;
   auto_scan: boolean;
   clip_output_dir: string | null;
   created_at: string;
+}
+
+/** SMB mount origin info stored in adapter_config */
+export interface SmbMountConfig {
+  source: "smb";
+  server: string;
+  share: string;
+  mount_point: string;
 }
 
 export interface CreateWorkspaceRequest {
   name: string;
   path: string;
   adapter_id: string;
+  adapter_config?: string;
 }
 
 export interface UpdateWorkspaceRequest {

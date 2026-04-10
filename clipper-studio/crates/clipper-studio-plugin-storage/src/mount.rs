@@ -295,6 +295,54 @@ impl MountBackend {
         Ok(())
     }
 
+    // ==================== Detection ====================
+
+    /// Check if a given path is currently a mount point
+    pub async fn is_mount_point(path: &str) -> bool {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            // Use `mount` command and grep for the path
+            let output = tokio::process::Command::new("mount")
+                .output()
+                .await;
+            match output {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout);
+                    // mount output: "//server/share on /mount/point ..."
+                    stdout.lines().any(|line| {
+                        line.split(" on ")
+                            .nth(1)
+                            .map(|rest| rest.split_whitespace().next().unwrap_or("") == path)
+                            .unwrap_or(false)
+                    })
+                }
+                Err(_) => false,
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, check if the drive letter / UNC path is accessible
+            let output = tokio::process::Command::new("net")
+                .arg("use")
+                .output()
+                .await;
+            match output {
+                Ok(o) => {
+                    let stdout = String::from_utf8_lossy(&o.stdout);
+                    let path_upper = path.to_uppercase();
+                    stdout.lines().any(|line| {
+                        line.to_uppercase().contains(&path_upper)
+                    })
+                }
+                Err(_) => false,
+            }
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+        false
+    }
+
     // ==================== Helpers ====================
 
     /// Generate an automatic mount point path

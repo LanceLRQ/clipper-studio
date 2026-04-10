@@ -156,7 +156,7 @@ impl BilibiliRecorderPlugin {
     pub fn new() -> Self {
         let manifest = PluginManifest {
             id: "builtin.recorder.bilibili".to_string(),
-            name: "mikufans录播姬".to_string(),
+            name: "Mikufans录播姬".to_string(),
             plugin_type: PluginType::Recorder,
             version: "1.0.0".to_string(),
             api_version: 1,

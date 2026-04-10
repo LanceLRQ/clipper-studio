@@ -14,14 +14,23 @@ import { useWorkspaceStore } from "@/stores/workspace";
 
 type WizardStep = "choose" | "import" | "create";
 
+interface WelcomeSearch {
+  name?: string;
+  path?: string;
+  step?: WizardStep;
+  /** JSON-encoded adapter_config (e.g. SMB mount info) */
+  adapter_config?: string;
+}
+
 function WelcomePage() {
   const navigate = useNavigate();
+  const { name: qName, path: qPath, step: qStep, adapter_config: qAdapterConfig } = Route.useSearch();
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const wsActiveId = useWorkspaceStore((s) => s.activeId);
   const [hasExisting, setHasExisting] = useState(false);
-  const [step, setStep] = useState<WizardStep>("choose");
-  const [name, setName] = useState("");
-  const [path, setPath] = useState("");
+  const [step, setStep] = useState<WizardStep>(qStep || "choose");
+  const [name, setName] = useState(qName || "");
+  const [path, setPath] = useState(qPath || "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -63,6 +72,7 @@ function WelcomePage() {
         name: name.trim(),
         path: path.trim(),
         adapter_id: adapterId,
+        adapter_config: qAdapterConfig || undefined,
       });
 
       // Activate the newly created workspace
@@ -207,4 +217,12 @@ function WelcomePage() {
 
 export const Route = createFileRoute("/welcome")({
   component: WelcomePage,
+  validateSearch: (search: Record<string, unknown>): WelcomeSearch => ({
+    name: (search.name as string) || undefined,
+    path: (search.path as string) || undefined,
+    step: (["import", "create"].includes(search.step as string)
+      ? (search.step as WizardStep)
+      : undefined),
+    adapter_config: (search.adapter_config as string) || undefined,
+  }),
 });

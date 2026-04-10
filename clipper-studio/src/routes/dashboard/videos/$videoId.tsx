@@ -28,6 +28,7 @@ import type { TagInfo } from "@/types/tag";
 import { getVideoTags, setVideoTags } from "@/services/tag";
 import { TagBadge } from "@/components/tag/tag-badge";
 import { TagSelector } from "@/components/tag/tag-selector";
+import { useWorkspaceStore } from "@/stores/workspace";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -60,6 +61,7 @@ function VideoDetailPage() {
   const { videoId } = Route.useParams();
   const { t: seekToTime } = Route.useSearch();
   const navigate = useNavigate();
+  const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
   const [video, setVideo] = useState<VideoInfo | null>(null);
   const [error, setError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
@@ -278,6 +280,15 @@ function VideoDetailPage() {
         <h2 className="text-lg font-semibold truncate">{video.file_name}</h2>
       </div>
 
+      {/* Path inaccessible warning */}
+      {!wsPathAccessible && (
+        <div className="shrink-0 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 mb-2 flex items-center gap-2">
+          <span className="text-sm text-yellow-800 dark:text-yellow-200">
+            ⚠ 工作区目录不可访问，视频播放和切片功能不可用。请检查网络存储连接。
+          </span>
+        </div>
+      )}
+
       {/* Main layout: Left (scrollable) + Right (full height tabs) */}
       <div className="flex-1 flex gap-4 min-h-0">
         {/* Left column: Monitor (top, flex) + Timeline (bottom, fixed) — fills remaining space */}
@@ -485,6 +496,7 @@ function VideoDetailPage() {
                       clips={clips}
                       presetId={selectedPresetId}
                       clipOptions={clipOptions}
+                      disabled={!wsPathAccessible}
                     />
                   </div>
                 </div>
