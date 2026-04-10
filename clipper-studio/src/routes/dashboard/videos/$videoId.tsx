@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -23,6 +24,10 @@ import {
 import { listPresets, checkVideoBurnAvailability } from "@/services/clip";
 import { loadDanmaku, type DanmakuItem } from "@/services/danmaku";
 import { transcodeVideo } from "@/services/media";
+import type { TagInfo } from "@/types/tag";
+import { getVideoTags, setVideoTags } from "@/services/tag";
+import { TagBadge } from "@/components/tag/tag-badge";
+import { TagSelector } from "@/components/tag/tag-selector";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -82,6 +87,9 @@ function VideoDetailPage() {
   const [burnAvailability, setBurnAvailability] = useState<BurnAvailability | undefined>(undefined);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
 
+  // Tags state
+  const [videoTags, setVideoTagsState] = useState<TagInfo[]>([]);
+
   // Track playback time
   useEffect(() => {
     const interval = setInterval(() => {
@@ -124,6 +132,11 @@ function VideoDetailPage() {
       setPresets(p);
       if (p.length > 0) setSelectedPresetId(p[0].id);
     });
+
+    // Load tags
+    getVideoTags(parseInt(videoId, 10))
+      .then(setVideoTagsState)
+      .catch(console.error);
 
     // Load burn availability
     checkVideoBurnAvailability(videoId)
@@ -353,13 +366,13 @@ function VideoDetailPage() {
         <div className="w-[320px] shrink-0 flex flex-col min-h-0">
           <Tabs defaultValue={0} className="flex-1 flex flex-col min-h-0">
             <TabsList className="w-full shrink-0">
-              <TabsTrigger value={0}>切片</TabsTrigger>
-              <TabsTrigger value={1}>字幕</TabsTrigger>
-              <TabsTrigger value={2}>信息</TabsTrigger>
+              <TabsTrigger value={0}>信息</TabsTrigger>
+              <TabsTrigger value={1}>切片</TabsTrigger>
+              <TabsTrigger value={2}>字幕</TabsTrigger>
             </TabsList>
 
             {/* Tab: Clips — full list + fixed bottom button */}
-            <TabsContent value={0} className="flex-1 flex flex-col min-h-0 pt-2">
+            <TabsContent value={1} className="flex-1 flex flex-col min-h-0 pt-2">
               {/* Preset selector */}
               <div className="shrink-0 mb-2">
                 <select
@@ -479,7 +492,7 @@ function VideoDetailPage() {
             </TabsContent>
 
             {/* Tab: Subtitles */}
-            <TabsContent value={1} className="flex-1 overflow-y-auto min-h-0 pt-2">
+            <TabsContent value={2} className="flex-1 overflow-y-auto min-h-0 pt-2">
               <SubtitlePanel
                 videoId={video.id}
                 currentTime={currentTime}
@@ -490,11 +503,20 @@ function VideoDetailPage() {
             </TabsContent>
 
             {/* Tab: Video Info */}
-            <TabsContent value={2} className="flex-1 overflow-y-auto min-h-0 pt-2 space-y-3">
+            <TabsContent value={0} className="flex-1 overflow-y-auto min-h-0 pt-2 space-y-3">
               <div className="rounded-lg border p-4 space-y-3">
                 <h3 className="font-medium">视频信息</h3>
                 <div className="space-y-2 text-sm">
-                  <InfoRow label="文件名" value={video.file_name} />
+                  <div className="flex justify-between gap-2">
+                    <span className="text-muted-foreground shrink-0 whitespace-nowrap">文件名</span>
+                    <span
+                      className="text-right truncate cursor-pointer hover:text-primary hover:underline"
+                      title={`在文件管理器中显示：${video.file_path}`}
+                      onClick={() => invoke("reveal_file", { path: video.file_path }).catch(console.error)}
+                    >
+                      {video.file_name}
+                    </span>
+                  </div>
                   <InfoRow label="时长" value={formatDuration(video.duration_ms)} />
                   <InfoRow
                     label="分辨率"
@@ -510,6 +532,56 @@ function VideoDetailPage() {
                       label="Blake3"
                       value={video.file_hash.slice(0, 16) + "..."}
                     />
+                  )}
+                </div>
+              </div>
+
+              {/* Tags */}
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium text-sm">标签</h3>
+                  {video && (
+                    <TagSelector
+                      selectedTags={videoTags}
+                      onChange={async (tags) => {
+                        setVideoTagsState(tags);
+                        try {
+                          await setVideoTags({
+                            video_id: video.id,
+                            tag_ids: tags.map((t) => t.id),
+                          });
+                        } catch (e) {
+                          console.error("Failed to save tags:", e);
+                        }
+                      }}
+                    />
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {videoTags.length === 0 ? (
+                    <span className="text-xs text-muted-foreground">暂无标签</span>
+                  ) : (
+                    videoTags.map((tag) => (
+                      <TagBadge
+                        key={tag.id}
+                        tag={tag}
+                        removable
+                        onRemove={async () => {
+                          const newTags = videoTags.filter((t) => t.id !== tag.id);
+                          setVideoTagsState(newTags);
+                          if (video) {
+                            try {
+                              await setVideoTags({
+                                video_id: video.id,
+                                tag_ids: newTags.map((t) => t.id),
+                              });
+                            } catch (e) {
+                              console.error("Failed to save tags:", e);
+                            }
+                          }
+                        }}
+                      />
+                    ))
                   )}
                 </div>
               </div>
@@ -587,9 +659,9 @@ function VideoDetailPage() {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-right">{value}</span>
+    <div className="flex justify-between gap-2">
+      <span className="text-muted-foreground shrink-0 whitespace-nowrap">{label}</span>
+      <span className="text-right truncate">{value}</span>
     </div>
   );
 }

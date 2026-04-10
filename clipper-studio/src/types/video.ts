@@ -37,6 +37,7 @@ export interface ListVideosRequest {
   date_to?: string;
   page?: number;
   page_size?: number;
+  tag_ids?: number[];
 }
 
 export interface ListVideosResponse {

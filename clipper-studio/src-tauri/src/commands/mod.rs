@@ -8,3 +8,4 @@ pub mod plugin;
 pub mod asr;
 pub mod danmaku;
 pub mod media;
+pub mod tag;

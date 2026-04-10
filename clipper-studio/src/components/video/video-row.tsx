@@ -1,5 +1,7 @@
 import { Button } from "@/components/ui/button";
 import type { VideoInfo } from "@/types/video";
+import type { TagInfo } from "@/types/tag";
+import { TagBadge } from "@/components/tag/tag-badge";
 import {
   formatDuration,
   formatFileSize,
@@ -37,6 +39,7 @@ export function VideoRow({
   onDelete,
   selected,
   onToggleSelect,
+  tags,
 }: {
   video: VideoInfo;
   compact?: boolean;
@@ -45,6 +48,7 @@ export function VideoRow({
   onDelete: (e: React.MouseEvent) => void;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
+  tags?: TagInfo[];
 }) {
   const title = buildVideoTitle(video);
   const showTitle = title !== video.file_name;
@@ -74,7 +78,7 @@ export function VideoRow({
           <div className="text-sm truncate font-medium">
             {showTitle ? title : video.file_name}
           </div>
-          <div className="flex gap-3 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
             {showTitle && (
               <span className="truncate max-w-[300px]">{video.file_name}</span>
             )}
@@ -83,6 +87,13 @@ export function VideoRow({
             {video.width && video.height && (
               <span>
                 {video.width}x{video.height}
+              </span>
+            )}
+            {tags && tags.length > 0 && (
+              <span className="flex gap-1">
+                {tags.map((tag) => (
+                  <TagBadge key={tag.id} tag={tag} size="sm" />
+                ))}
               </span>
             )}
           </div>

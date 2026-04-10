@@ -23,6 +23,7 @@ import {
   updateWorkspace,
   deleteWorkspace,
 } from "@/services/workspace";
+import { TagManager } from "@/components/tag/tag-manager";
 import type { WorkspaceInfo } from "@/types/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
 import {
@@ -924,7 +925,9 @@ function SettingsPage() {
 
   // Sync active tab from URL section param
   useEffect(() => {
-    if (section && section !== "workspaces" && configPlugins.some((p) => p.id === section)) {
+    if (section === "tags") {
+      setActiveTab("tags");
+    } else if (section && section !== "workspaces" && configPlugins.some((p) => p.id === section)) {
       setActiveTab(section);
     } else if (section === "system") {
       setActiveTab("system");
@@ -938,6 +941,7 @@ function SettingsPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="workspace">工作区</TabsTrigger>
+          <TabsTrigger value="tags">标签</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
@@ -960,6 +964,10 @@ function SettingsPage() {
               onReload={loadWorkspaces}
             />
           </div>
+        </TabsContent>
+
+        <TabsContent value="tags" className="mt-4">
+          <TagManager />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4">

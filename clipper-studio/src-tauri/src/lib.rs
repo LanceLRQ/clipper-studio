@@ -288,6 +288,12 @@ pub fn run() {
             commands::asr::export_subtitles_srt,
             commands::asr::export_subtitles_ass,
             commands::asr::export_subtitles_vtt,
+            commands::tag::create_tag,
+            commands::tag::list_tags,
+            commands::tag::update_tag,
+            commands::tag::delete_tag,
+            commands::tag::get_video_tags,
+            commands::tag::set_video_tags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipperStudio");

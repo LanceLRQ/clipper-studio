@@ -47,6 +47,7 @@ pub struct ListVideosRequest {
     pub date_to: Option<String>,
     pub page: Option<u32>,
     pub page_size: Option<u32>,
+    pub tag_ids: Option<Vec<i64>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -250,6 +251,23 @@ pub async fn list_videos(
             conditions.push(format!("v.recorded_at < '{}T'", d.replace('\'', "''")));
         }
     }
+
+    // Tag filter: videos that have ALL specified tags
+    let tag_join = if let Some(ref tag_ids) = req.tag_ids {
+        let ids: Vec<String> = tag_ids.iter().filter(|id| **id > 0).map(|id| id.to_string()).collect();
+        if !ids.is_empty() {
+            let id_list = ids.join(",");
+            let count = ids.len();
+            conditions.push(format!(
+                "v.id IN (SELECT video_id FROM video_tags WHERE tag_id IN ({}) GROUP BY video_id HAVING COUNT(DISTINCT tag_id) = {})",
+                id_list, count
+            ));
+        }
+        String::new()
+    } else {
+        String::new()
+    };
+    let _ = tag_join; // suppress unused warning
 
     let where_clause = if conditions.is_empty() {
         String::new()

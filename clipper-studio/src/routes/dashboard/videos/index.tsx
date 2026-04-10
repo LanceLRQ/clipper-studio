@@ -19,6 +19,9 @@ import { VideoRow } from "@/components/video/video-row";
 import { PaginationBar } from "@/components/video/pagination-bar";
 import { StreamerCard, UnassociatedCard } from "@/components/video/streamer-card";
 import { MergeToolbar } from "@/components/video/merge-toolbar";
+import { TagFilter } from "@/components/tag/tag-filter";
+import type { TagInfo } from "@/types/tag";
+import { getVideoTags } from "@/services/tag";
 
 interface VideoSearchParams {
   view?: "cards" | "flat";
@@ -45,6 +48,8 @@ function VideosPage() {
   const [merging, setMerging] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [searchInput, setSearchInput] = useState(search);
+  const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
+  const [videoTagsMap, setVideoTagsMap] = useState<Record<number, TagInfo[]>>({});
 
   const updateSearch = useCallback(
     (updates: Partial<VideoSearchParams>) => {
@@ -89,6 +94,7 @@ function VideosPage() {
           page,
           page_size: PAGE_SIZE,
           search: search || undefined,
+          tag_ids: filterTagIds.length > 0 ? filterTagIds : undefined,
         });
         setFlatVideos(flat);
       }
@@ -97,11 +103,26 @@ function VideosPage() {
     } finally {
       setLoading(false);
     }
-  }, [view, page, search, activeWs, wsVersion]);
+  }, [view, page, search, activeWs, wsVersion, filterTagIds]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Load tags for visible videos in flat view
+  useEffect(() => {
+    if (view !== "flat" || !flatVideos?.videos.length) return;
+    const ids = flatVideos.videos.map((v) => v.id);
+    Promise.all(ids.map((id) => getVideoTags(id).then((tags) => [id, tags] as const)))
+      .then((results) => {
+        const map: Record<number, TagInfo[]> = {};
+        for (const [id, tags] of results) {
+          if (tags.length > 0) map[id] = tags;
+        }
+        setVideoTagsMap(map);
+      })
+      .catch(console.error);
+  }, [flatVideos, view]);
 
   // Auto-refresh when watcher detects new files
   useEffect(() => {
@@ -288,32 +309,41 @@ function VideosPage() {
 
       {/* Search bar (flat view only) */}
       {view === "flat" && (
-        <div className="flex gap-2">
-          <div className="relative flex-1 max-w-sm">
-            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="搜索标题或文件名..."
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-          <Button variant="outline" size="sm" onClick={handleSearchSubmit}>
-            搜索
-          </Button>
-          {search && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setSearchInput("");
-                updateSearch({ search: undefined, page: 1 });
-              }}
-            >
-              清除
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1 max-w-sm">
+              <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="搜索标题或文件名..."
+                className="pl-8 h-8 text-sm"
+              />
+            </div>
+            <Button variant="outline" size="sm" onClick={handleSearchSubmit}>
+              搜索
             </Button>
-          )}
+            {search && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSearchInput("");
+                  updateSearch({ search: undefined, page: 1 });
+                }}
+              >
+                清除
+              </Button>
+            )}
+          </div>
+          <TagFilter
+            selectedTagIds={filterTagIds}
+            onChange={(ids) => {
+              setFilterTagIds(ids);
+              updateSearch({ page: 1 });
+            }}
+          />
         </div>
       )}
 
@@ -377,6 +407,7 @@ function VideosPage() {
                 }
                 selected={selectedVideoIds.has(video.id)}
                 onToggleSelect={toggleVideoSelect}
+                tags={videoTagsMap[video.id]}
               />
             ))}
           </div>
