@@ -5,6 +5,7 @@ import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
 import bannerImg from "@/assets/banner.png";
+import bannerDarkImg from "@/assets/banner-dark.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
 import { useThemeStore } from "@/stores/theme";
@@ -182,7 +183,8 @@ function DashboardLayout() {
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-6">
         <div className="flex items-center gap-2">
-          <img src={bannerImg} alt="ClipperStudio" className="h-8" />
+          <img src={bannerImg} alt="ClipperStudio" className="h-8 dark:hidden" />
+          <img src={bannerDarkImg} alt="ClipperStudio" className="h-8 hidden dark:block" />
           {version && (
             <span className="text-xs text-muted-foreground self-end pb-1.5">
               v{version}
