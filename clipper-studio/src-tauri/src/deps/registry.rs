@@ -90,6 +90,8 @@ pub struct DependencyDef {
     pub binaries: &'static [&'static str],
     pub version_check: Option<VersionCheck>,
     pub sources: &'static [DownloadSource],
+    /// Manual download URL (fallback for users who can't access auto-download sources)
+    pub manual_download_url: Option<&'static str>,
 }
 
 // ==================== Static Registry ====================
@@ -107,6 +109,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             args: &["-version"],
             regex: r"ffmpeg version (\S+)",
         }),
+        manual_download_url: Some("https://ffmpeg.org/download.html"),
         sources: &[
             DownloadSource {
                 platform: Platform::WindowsX86_64,
@@ -161,25 +164,27 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             args: &["--version"],
             regex: r"(\d+\.\d+\S*)",
         }),
+        manual_download_url: Some("https://hihkm.lanzoui.com/b01hgf1xe"),
         sources: &[
             DownloadSource {
                 platform: Platform::WindowsX86_64,
-                url: "https://github.com/hihkm/DanmakuFactory/releases/latest/download/DanmakuFactory_win_x64.zip",
+                url: "https://github.com/hihkm/DanmakuFactory/releases/download/v1.70/DanmakuFactory1.70_Release_CLI.zip",
                 archive_type: ArchiveType::Zip,
                 extract_mappings: &[
                     ExtractMapping {
-                        archive_glob: "DanmakuFactory.exe",
+                        archive_glob: "DanmakuFactory_REL1.70CLI.exe",
                         target_name: "DanmakuFactory.exe",
                     },
                 ],
             },
             DownloadSource {
                 platform: Platform::MacOSArm64,
-                url: "https://github.com/hihkm/DanmakuFactory/releases/latest/download/DanmakuFactory_mac.zip",
+                // TODO: replace with macOS-specific URL when available
+                url: "https://github.com/hihkm/DanmakuFactory/releases/download/v1.70/DanmakuFactory1.70_Release_CLI.zip",
                 archive_type: ArchiveType::Zip,
                 extract_mappings: &[
                     ExtractMapping {
-                        archive_glob: "DanmakuFactory",
+                        archive_glob: "DanmakuFactory_REL1.70CLI.exe",
                         target_name: "DanmakuFactory",
                     },
                 ],
@@ -194,6 +199,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
         dep_type: DepType::Runtime,
         binaries: &[],
         version_check: None,
+        manual_download_url: None,
         sources: &[
             // Windows: portable package maintained by LanceLRQ
             // URL TBD - will be configured later
@@ -327,6 +333,8 @@ pub struct DependencyStatus {
     pub error_message: Option<String>,
     /// Whether auto-install is available on the current platform
     pub auto_install_available: bool,
+    /// Manual download URL (fallback for users who can't access auto-download sources)
+    pub manual_download_url: Option<String>,
     /// Whether already found via config.toml / bin dir / system PATH (outside deps manager)
     pub system_available: bool,
     /// The path where it was found in system (if system_available)
@@ -383,6 +391,7 @@ pub fn build_status(
         custom_path,
         error_message,
         auto_install_available,
+        manual_download_url: def.manual_download_url.map(|s| s.to_string()),
         system_available: system.available,
         system_path: system.path,
         system_version: system.version,

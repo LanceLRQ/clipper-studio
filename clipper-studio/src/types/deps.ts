@@ -22,6 +22,8 @@ export interface DependencyStatus {
   custom_path: string | null;
   error_message: string | null;
   auto_install_available: boolean;
+  /** Manual download URL (fallback for users who can't access auto-download sources) */
+  manual_download_url: string | null;
   /** Whether already found via config.toml / bin dir / system PATH */
   system_available: boolean;
   /** Path where found in system */

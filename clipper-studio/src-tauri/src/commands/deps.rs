@@ -173,6 +173,36 @@ pub async fn set_dep_custom_path(
     Ok(())
 }
 
+/// Set HTTP proxy for dependency downloads (saves to config.toml and updates HTTP client)
+#[tauri::command]
+pub async fn set_deps_proxy(
+    proxy_url: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // Save to config.toml
+    let mut config = state.config.write().map_err(|e| e.to_string())?;
+    config.network.proxy_url = proxy_url.clone();
+    config
+        .save(&state.config_dir)
+        .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    // Update HTTP client immediately
+    let proxy = if proxy_url.is_empty() { None } else { Some(proxy_url.as_str()) };
+    state.dep_manager.update_proxy(proxy);
+
+    tracing::info!("Deps proxy updated: {}", if proxy_url.is_empty() { "(disabled)" } else { &proxy_url });
+    Ok(())
+}
+
+/// Get current proxy URL from config
+#[tauri::command]
+pub async fn get_deps_proxy(
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let config = state.config.read().map_err(|e| e.to_string())?;
+    Ok(config.network.proxy_url.clone())
+}
+
 /// Open the dependency installation directory in file manager
 #[tauri::command]
 pub async fn reveal_dep_dir(

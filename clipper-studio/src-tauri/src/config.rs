@@ -16,6 +16,8 @@ pub struct AppConfig {
     pub workspaces: WorkspacesConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
+    #[serde(default)]
+    pub network: NetworkConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -23,6 +25,13 @@ pub struct ToolsConfig {
     /// Override DanmakuFactory binary path (empty = auto-detect)
     #[serde(default)]
     pub danmaku_factory_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct NetworkConfig {
+    /// HTTP proxy URL for dependency downloads (e.g. "http://127.0.0.1:7890")
+    #[serde(default)]
+    pub proxy_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,6 +106,7 @@ impl Default for AppConfig {
             ffmpeg: FfmpegConfig::default(),
             workspaces: WorkspacesConfig::default(),
             tools: ToolsConfig::default(),
+            network: NetworkConfig::default(),
         }
     }
 }

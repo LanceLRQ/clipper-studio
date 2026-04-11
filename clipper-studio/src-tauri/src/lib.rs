@@ -92,7 +92,12 @@ pub fn run() {
 
             // Initialize dependency manager
             let deps_dir = data_dir.join("deps");
-            let dep_manager = Arc::new(DependencyManager::new(deps_dir.clone()));
+            let proxy_url = if app_config.network.proxy_url.is_empty() {
+                None
+            } else {
+                Some(app_config.network.proxy_url.as_str())
+            };
+            let dep_manager = Arc::new(DependencyManager::new(deps_dir.clone(), proxy_url));
             dep_manager.refresh_all();
 
             // Resolve FFmpeg paths: config override > deps dir > bin dir > system PATH
@@ -334,6 +339,8 @@ pub fn run() {
             commands::deps::uninstall_dep,
             commands::deps::set_dep_custom_path,
             commands::deps::reveal_dep_dir,
+            commands::deps::set_deps_proxy,
+            commands::deps::get_deps_proxy,
         ])
         .build(tauri::generate_context!())
         .expect("error while building ClipperStudio")

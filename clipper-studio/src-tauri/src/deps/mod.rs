@@ -14,16 +14,40 @@ use registry::{
 
 use crate::utils::ffmpeg;
 
+/// Build an HTTP client with optional proxy
+fn build_http_client(proxy_url: Option<&str>) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder()
+        .user_agent("ClipperStudio/0.1")
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .connect_timeout(std::time::Duration::from_secs(30));
+
+    if let Some(url) = proxy_url {
+        if !url.is_empty() {
+            match reqwest::Proxy::all(url) {
+                Ok(proxy) => {
+                    builder = builder.proxy(proxy);
+                    tracing::info!("HTTP proxy configured: {}", url);
+                }
+                Err(e) => {
+                    tracing::warn!("Invalid proxy URL '{}': {}", url, e);
+                }
+            }
+        }
+    }
+
+    builder.build().unwrap_or_default()
+}
+
 /// Manages third-party dependency detection, installation, and removal
 pub struct DependencyManager {
     deps_dir: PathBuf,
     registry: RwLock<LocalRegistry>,
-    http_client: reqwest::Client,
+    http_client: RwLock<reqwest::Client>,
 }
 
 impl DependencyManager {
     /// Create a new DependencyManager and load the local registry
-    pub fn new(deps_dir: PathBuf) -> Self {
+    pub fn new(deps_dir: PathBuf, proxy_url: Option<&str>) -> Self {
         std::fs::create_dir_all(&deps_dir).ok();
         let registry = LocalRegistry::load(&deps_dir);
         tracing::info!(
@@ -34,10 +58,15 @@ impl DependencyManager {
         Self {
             deps_dir,
             registry: RwLock::new(registry),
-            http_client: reqwest::Client::builder()
-                .user_agent("ClipperStudio/0.1")
-                .build()
-                .unwrap_or_default(),
+            http_client: RwLock::new(build_http_client(proxy_url)),
+        }
+    }
+
+    /// Update the HTTP client with a new proxy URL
+    pub fn update_proxy(&self, proxy_url: Option<&str>) {
+        let new_client = build_http_client(proxy_url);
+        if let Ok(mut client) = self.http_client.write() {
+            *client = new_client;
         }
     }
 
@@ -174,8 +203,9 @@ impl DependencyManager {
             };
 
             // Download
+            let client = self.http_client.read().map_err(|e| format!("Failed to acquire HTTP client: {}", e))?.clone();
             let download_result = installer::download_file(
-                &self.http_client,
+                &client,
                 source.url,
                 &archive_path,
                 dep_id,

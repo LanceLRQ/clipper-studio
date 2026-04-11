@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,8 @@ import {
   uninstallDep,
   revealDepDir,
   setDepCustomPath,
+  setDepsProxy,
+  getDepsProxy,
 } from "@/services/deps";
 import type {
   DependencyStatus,
@@ -754,6 +757,28 @@ function DependencyManagerTab() {
     null
   );
   const [customPathValue, setCustomPathValue] = useState("");
+  const [proxyUrl, setProxyUrl] = useState("");
+  const [proxyLoaded, setProxyLoaded] = useState(false);
+  const [proxySaving, setProxySaving] = useState(false);
+
+  // Load proxy setting
+  useEffect(() => {
+    getDepsProxy().then((url) => {
+      setProxyUrl(url);
+      setProxyLoaded(true);
+    });
+  }, []);
+
+  const handleProxySave = async () => {
+    setProxySaving(true);
+    try {
+      await setDepsProxy(proxyUrl.trim());
+    } catch (e) {
+      alert("保存代理设置失败: " + String(e));
+    } finally {
+      setProxySaving(false);
+    }
+  };
 
   const loadDeps = useCallback(async () => {
     try {
@@ -900,6 +925,31 @@ function DependencyManagerTab() {
         以下工具是 ClipperStudio 运行所需的第三方依赖。点击"安装"自动下载，或手动指定已有安装路径。
       </p>
 
+      {/* Proxy settings */}
+      {proxyLoaded && (
+        <section className="rounded-lg border p-4 space-y-2">
+          <h3 className="font-medium text-sm">下载代理</h3>
+          <p className="text-xs text-muted-foreground">
+            无法访问 GitHub 下载？设置 HTTP 代理地址后重试。
+          </p>
+          <div className="flex gap-2 items-center">
+            <Input
+              value={proxyUrl}
+              onChange={(e) => setProxyUrl(e.target.value)}
+              placeholder="http://127.0.0.1:7890"
+              className="text-sm h-8 font-mono flex-1"
+            />
+            <Button
+              size="sm"
+              onClick={handleProxySave}
+              disabled={proxySaving}
+            >
+              {proxySaving ? "保存中..." : "保存"}
+            </Button>
+          </div>
+        </section>
+      )}
+
       {deps.map((dep) => {
         const isInstalling = installingId === dep.id;
         const currentProgress =
@@ -991,6 +1041,15 @@ function DependencyManagerTab() {
                     }}
                   />
                 </div>
+                {/* Manual download hint during downloading phase */}
+                {currentProgress.phase === "downloading" && dep.manual_download_url && (
+                  <button
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0"
+                    onClick={() => shellOpen(dep.manual_download_url!)}
+                  >
+                    下载缓慢？尝试手动下载 →
+                  </button>
+                )}
               </div>
             )}
 
@@ -1053,22 +1112,33 @@ function DependencyManagerTab() {
                   </Button>
                 </>
               ) : dep.status === "not_installed" || dep.status === "error" ? (
-                dep.auto_install_available && (
-                  <Button
-                    size="sm"
-                    onClick={() => handleInstall(dep.id)}
-                    disabled={isInstalling}
-                  >
-                    {isInstalling ? "安装中..." : "安装"}
-                  </Button>
-                )
+                <>
+                  {dep.auto_install_available && (
+                    <Button
+                      size="sm"
+                      onClick={() => handleInstall(dep.id)}
+                      disabled={isInstalling}
+                    >
+                      {isInstalling ? "安装中..." : "安装"}
+                    </Button>
+                  )}
+                  {dep.manual_download_url && (
+                    <button
+                      className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0"
+                      onClick={() => shellOpen(dep.manual_download_url!)}
+                    >
+                      {dep.auto_install_available ? "无法下载？尝试手动下载 →" : "手动下载 →"}
+                    </button>
+                  )}
+                </>
               ) : null}
 
-              {/* Custom path button (always available when not installing) */}
+              {/* Custom path button - right aligned */}
               {!isInstalling && customPathEditing !== dep.id && (
                 <Button
                   variant="outline"
                   size="sm"
+                  className="ml-auto"
                   onClick={() => {
                     setCustomPathEditing(dep.id);
                     setCustomPathValue(dep.custom_path ?? "");

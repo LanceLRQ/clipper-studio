@@ -33,3 +33,13 @@ export async function setDepCustomPath(
 export async function revealDepDir(depId: string): Promise<void> {
   return invoke<void>("reveal_dep_dir", { depId });
 }
+
+/** Set HTTP proxy for dependency downloads */
+export async function setDepsProxy(proxyUrl: string): Promise<void> {
+  return invoke<void>("set_deps_proxy", { proxyUrl });
+}
+
+/** Get current proxy URL */
+export async function getDepsProxy(): Promise<string> {
+  return invoke<string>("get_deps_proxy");
+}
