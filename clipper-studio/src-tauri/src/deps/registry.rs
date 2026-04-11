@@ -78,6 +78,16 @@ pub struct DownloadSource {
     pub extract_mappings: &'static [ExtractMapping],
 }
 
+/// Python package source for a specific platform (installed via venv + pip)
+#[derive(Debug, Clone)]
+pub struct PythonPackageSource {
+    pub platform: Platform,
+    /// pip package name (e.g. "dmconvert")
+    pub pip_package: &'static str,
+    /// Entry point script name in venv/bin/ (e.g. "dmconvert")
+    pub entry_point: &'static str,
+}
+
 /// Static dependency definition (compile-time registered)
 #[derive(Debug, Clone)]
 pub struct DependencyDef {
@@ -90,6 +100,8 @@ pub struct DependencyDef {
     pub binaries: &'static [&'static str],
     pub version_check: Option<VersionCheck>,
     pub sources: &'static [DownloadSource],
+    /// Python package sources (alternative install method, typically for macOS)
+    pub python_sources: &'static [PythonPackageSource],
     /// Manual download URL (fallback for users who can't access auto-download sources)
     pub manual_download_url: Option<&'static str>,
 }
@@ -110,6 +122,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             regex: r"ffmpeg version (\S+)",
         }),
         manual_download_url: Some("https://ffmpeg.org/download.html"),
+        python_sources: &[],
         sources: &[
             DownloadSource {
                 platform: Platform::WindowsX86_64,
@@ -154,7 +167,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
     },
     DependencyDef {
         id: "danmaku-factory",
-        name: "DanmakuFactory",
+        name: "弹幕转换工具",
         description: "弹幕 XML 转 ASS 字幕文件",
         required: false,
         dep_type: DepType::Binary,
@@ -165,6 +178,13 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             regex: r"(\d+\.\d+\S*)",
         }),
         manual_download_url: Some("https://hihkm.lanzoui.com/b01hgf1xe"),
+        python_sources: &[
+            PythonPackageSource {
+                platform: Platform::MacOSArm64,
+                pip_package: "dmconvert",
+                entry_point: "dmconvert",
+            },
+        ],
         sources: &[
             DownloadSource {
                 platform: Platform::WindowsX86_64,
@@ -174,18 +194,6 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
                     ExtractMapping {
                         archive_glob: "DanmakuFactory_REL1.70CLI.exe",
                         target_name: "DanmakuFactory.exe",
-                    },
-                ],
-            },
-            DownloadSource {
-                platform: Platform::MacOSArm64,
-                // TODO: replace with macOS-specific URL when available
-                url: "https://github.com/hihkm/DanmakuFactory/releases/download/v1.70/DanmakuFactory1.70_Release_CLI.zip",
-                archive_type: ArchiveType::Zip,
-                extract_mappings: &[
-                    ExtractMapping {
-                        archive_glob: "DanmakuFactory_REL1.70CLI.exe",
-                        target_name: "DanmakuFactory",
                     },
                 ],
             },
@@ -200,6 +208,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
         binaries: &[],
         version_check: None,
         manual_download_url: None,
+        python_sources: &[],
         sources: &[
             // Windows: portable package maintained by LanceLRQ
             // URL TBD - will be configured later
@@ -222,9 +231,16 @@ pub fn get_sources_for_current_platform(def: &DependencyDef) -> Vec<&DownloadSou
     def.sources.iter().filter(|s| s.platform == platform).collect()
 }
 
+/// Get Python package source for the current platform (if any)
+pub fn get_python_source_for_current_platform(def: &DependencyDef) -> Option<&PythonPackageSource> {
+    let platform = Platform::current()?;
+    def.python_sources.iter().find(|s| s.platform == platform)
+}
+
 /// Check if auto-install is available for the current platform
 pub fn has_source_for_current_platform(def: &DependencyDef) -> bool {
     !get_sources_for_current_platform(def).is_empty()
+        || get_python_source_for_current_platform(def).is_some()
 }
 
 // ==================== Local State Registry (registry.json) ====================
@@ -379,10 +395,25 @@ pub fn build_status(
         None => (DepStatus::NotInstalled, None, None, None),
     };
 
+    // Platform-specific display name and description
+    let is_python = get_python_source_for_current_platform(def).is_some();
+    let name = if is_python && def.id == "danmaku-factory" {
+        "DanmakuConvert".to_string()
+    } else if !is_python && def.id == "danmaku-factory" {
+        "DanmakuFactory".to_string()
+    } else {
+        def.name.to_string()
+    };
+    let description = if is_python && def.id == "danmaku-factory" {
+        "弹幕 XML 转 ASS 字幕文件（Python）".to_string()
+    } else {
+        def.description.to_string()
+    };
+
     DependencyStatus {
         id: def.id.to_string(),
-        name: def.name.to_string(),
-        description: def.description.to_string(),
+        name,
+        description,
         required: def.required,
         dep_type: def.dep_type,
         status,

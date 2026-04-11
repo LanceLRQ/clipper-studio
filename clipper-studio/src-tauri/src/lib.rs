@@ -135,21 +135,22 @@ pub fn run() {
                 tracing::warn!("FFprobe not found! Media probe features will be unavailable.");
             }
 
-            // Detect DanmakuFactory binary: config > deps > bin dir > PATH
+            // Detect danmaku tool: config > deps (DanmakuFactory or dmconvert) > bin dir > PATH
             let danmaku_factory_path = if !app_config.tools.danmaku_factory_path.is_empty() {
-                tracing::info!("DanmakuFactory path from config: {}", app_config.tools.danmaku_factory_path);
+                tracing::info!("Danmaku tool path from config: {}", app_config.tools.danmaku_factory_path);
                 Some(app_config.tools.danmaku_factory_path.clone())
             } else if let Some(p) = dep_manager.get_binary_path("danmaku-factory", "DanmakuFactory") {
-                tracing::info!("DanmakuFactory found via deps manager: {}", p.display());
+                tracing::info!("Danmaku tool found via deps manager: {}", p.display());
                 Some(p.to_string_lossy().to_string())
             } else {
                 ffmpeg::detect_binary("DanmakuFactory", &bin_dir)
+                    .or_else(|| ffmpeg::detect_binary("dmconvert", &bin_dir))
             };
 
             if let Some(ref path) = danmaku_factory_path {
-                tracing::info!("DanmakuFactory found: {}", path);
+                tracing::info!("Danmaku tool found: {}", path);
             } else {
-                tracing::info!("DanmakuFactory not found. Danmaku ASS conversion will be unavailable.");
+                tracing::info!("Danmaku tool not found. Danmaku ASS conversion will be unavailable.");
             }
 
             // Initialize database (path from config)

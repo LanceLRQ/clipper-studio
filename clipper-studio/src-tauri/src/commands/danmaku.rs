@@ -74,7 +74,7 @@ pub async fn convert_danmaku_to_ass(
 ) -> Result<String, String> {
     let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
     if danmaku_factory_path.is_empty() {
-        return Err("DanmakuFactory 未安装。请在 config.toml 的 [tools] 中配置 danmaku_factory_path，或将 DanmakuFactory 放入系统 PATH".to_string());
+        return Err("弹幕转换工具未安装。请在设置 - 依赖管理中安装，或在 config.toml 的 [tools] 中配置 danmaku_factory_path".to_string());
     }
 
     // Get video file path

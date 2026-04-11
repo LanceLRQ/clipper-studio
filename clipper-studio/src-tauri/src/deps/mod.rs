@@ -147,8 +147,14 @@ impl DependencyManager {
         &self,
         dep_id: &str,
         app_handle: &AppHandle,
+        proxy_url: Option<&str>,
     ) -> Result<(), String> {
         let def = get_def(dep_id).ok_or_else(|| format!("Unknown dependency: {}", dep_id))?;
+
+        // Check if this platform uses Python package install
+        if let Some(py_source) = registry::get_python_source_for_current_platform(def) {
+            return self.install_python_dep(dep_id, def, py_source, proxy_url, app_handle);
+        }
 
         let sources = get_sources_for_current_platform(def);
         if sources.is_empty() {
@@ -332,6 +338,18 @@ impl DependencyManager {
     /// Returns None if not installed via deps manager
     pub fn get_binary_path(&self, dep_id: &str, binary_name: &str) -> Option<PathBuf> {
         let dep_dir = self.deps_dir.join(dep_id);
+
+        // For Python package deps, look in venv/bin/ for the entry_point
+        if let Some(def) = get_def(dep_id) {
+            if let Some(py_source) = registry::get_python_source_for_current_platform(def) {
+                #[cfg(target_os = "windows")]
+                let path = dep_dir.join("venv").join("Scripts").join(format!("{}.exe", py_source.entry_point));
+                #[cfg(not(target_os = "windows"))]
+                let path = dep_dir.join("venv").join("bin").join(py_source.entry_point);
+                return if path.exists() { Some(path) } else { None };
+            }
+        }
+
         let path = checker::get_binary_path(&dep_dir, binary_name);
         if path.exists() {
             Some(path)
@@ -379,6 +397,87 @@ impl DependencyManager {
                 }
             }
         }
+    }
+
+    // ==================== Python Package Install ====================
+
+    /// Install a dependency via Python venv + pip
+    fn install_python_dep(
+        &self,
+        dep_id: &str,
+        def: &registry::DependencyDef,
+        py_source: &registry::PythonPackageSource,
+        proxy_url: Option<&str>,
+        app_handle: &AppHandle,
+    ) -> Result<(), String> {
+        // Detect python3
+        let python3 = installer::detect_python3()
+            .ok_or_else(|| "未找到 Python3。请安装 Python 3（brew install python3 或从 python.org 下载）".to_string())?;
+
+        let dep_dir = self.deps_dir.join(dep_id);
+        let venv_dir = dep_dir.join("venv");
+
+        // Update status
+        self.update_registry(dep_id, InstalledDepState {
+            status: DepStatus::Installing,
+            version: None,
+            installed_at: None,
+            path: None,
+            error_message: None,
+        });
+
+        // Clean existing
+        if dep_dir.exists() {
+            let _ = std::fs::remove_dir_all(&dep_dir);
+        }
+        std::fs::create_dir_all(&dep_dir)
+            .map_err(|e| format!("Failed to create dep directory: {}", e))?;
+
+        // Install via venv + pip
+        if let Err(e) = installer::install_python_package(
+            &python3, &venv_dir, py_source.pip_package, proxy_url, dep_id, app_handle,
+        ) {
+            self.set_error(dep_id, &e);
+            let _ = std::fs::remove_dir_all(&dep_dir);
+            let _ = app_handle.emit(
+                "dep:install-error",
+                serde_json::json!({ "dep_id": dep_id, "error": e }),
+            );
+            return Err(e);
+        }
+
+        // Verify
+        installer::emit_progress_static(app_handle, dep_id, "verifying", 0.5, "正在验证...");
+        let version = match checker::health_check(&dep_dir, def) {
+            Ok(v) => v,
+            Err(e) => {
+                let err_msg = format!("安装验证失败: {}", e);
+                self.set_error(dep_id, &err_msg);
+                let _ = app_handle.emit(
+                    "dep:install-error",
+                    serde_json::json!({ "dep_id": dep_id, "error": err_msg }),
+                );
+                return Err(err_msg);
+            }
+        };
+
+        // Success
+        let now = chrono_now();
+        self.update_registry(dep_id, InstalledDepState {
+            status: DepStatus::Installed,
+            version: version.clone(),
+            installed_at: Some(now),
+            path: Some(dep_dir.to_string_lossy().to_string()),
+            error_message: None,
+        });
+
+        let _ = app_handle.emit(
+            "dep:install-complete",
+            serde_json::json!({ "dep_id": dep_id, "version": version }),
+        );
+
+        tracing::info!("Python dependency '{}' installed successfully", dep_id);
+        Ok(())
     }
 
     // ==================== Internal ====================

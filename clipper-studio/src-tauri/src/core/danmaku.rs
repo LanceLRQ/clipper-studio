@@ -198,37 +198,109 @@ impl Default for DanmakuAssOptions {
     }
 }
 
-/// Convert danmaku XML to ASS using DanmakuFactory CLI
+/// Detected danmaku converter tool type
+enum DanmakuTool {
+    DanmakuFactory,
+    DmConvert,
+}
+
+/// Detect which danmaku tool is being used based on the binary path
+fn detect_tool(tool_path: &str) -> DanmakuTool {
+    let path = std::path::Path::new(tool_path);
+    let name = path.file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if name.contains("dmconvert") {
+        DanmakuTool::DmConvert
+    } else {
+        DanmakuTool::DanmakuFactory
+    }
+}
+
+/// Build CLI arguments for DanmakuFactory
+fn build_danmaku_factory_args(
+    input_xml: &Path,
+    output_ass: &Path,
+    options: &DanmakuAssOptions,
+) -> Vec<String> {
+    vec![
+        "-o".into(), "ass".into(),
+        output_ass.to_string_lossy().to_string(),
+        "-i".into(), "xml".into(),
+        input_xml.to_string_lossy().to_string(),
+        "-r".into(), format!("{}x{}", options.width, options.height),
+        "-s".into(), options.scroll_time.to_string(),
+        "-S".into(), options.font_size.to_string(),
+        "-O".into(), options.opacity.to_string(),
+        "-d".into(), options.density.to_string(),
+        "--force".into(),
+    ]
+}
+
+/// Build CLI arguments for DanmakuConvert (dmconvert)
+fn build_dmconvert_args(
+    input_xml: &Path,
+    output_ass: &Path,
+    options: &DanmakuAssOptions,
+) -> Vec<String> {
+    // Convert opacity (0-255 integer) to alpha (0.0-1.0 float)
+    let alpha = options.opacity as f64 / 255.0;
+
+    // Convert density: DanmakuFactory -1 = non-overlap, 0 = unlimited
+    // dmconvert uses display_area (0.0-1.0), default 1.0
+    let display_area = match options.density {
+        -1 => "0.5".to_string(),
+        0 => "1.0".to_string(),
+        d if d > 0 => format!("{:.2}", (d as f64 / 20.0).min(1.0)),
+        _ => "1.0".to_string(),
+    };
+
+    vec![
+        "-i".into(), input_xml.to_string_lossy().to_string(),
+        "-o".into(), output_ass.to_string_lossy().to_string(),
+        "-x".into(), options.width.to_string(),
+        "-y".into(), options.height.to_string(),
+        "-r".into(), format!("{:.0}", options.scroll_time),
+        "-f".into(), options.font_size.to_string(),
+        "-a".into(), format!("{:.3}", alpha),
+        "-d".into(), display_area,
+    ]
+}
+
+/// Convert danmaku XML to ASS using DanmakuFactory or DanmakuConvert CLI
 pub fn convert_to_ass(
-    danmaku_factory_path: &str,
+    tool_path: &str,
     input_xml: &Path,
     output_ass: &Path,
     options: &DanmakuAssOptions,
 ) -> Result<(), String> {
-    if danmaku_factory_path.is_empty() {
-        return Err("DanmakuFactory not available".to_string());
+    if tool_path.is_empty() {
+        return Err("弹幕转换工具未安装".to_string());
     }
 
-    let status = std::process::Command::new(danmaku_factory_path)
-        .args([
-            "-o", "ass",
-            &output_ass.to_string_lossy(),
-            "-i", "xml",
-            &input_xml.to_string_lossy(),
-            "-r", &format!("{}x{}", options.width, options.height),
-            "-s", &options.scroll_time.to_string(),
-            "-S", &options.font_size.to_string(),
-            "-O", &options.opacity.to_string(),
-            "-d", &options.density.to_string(),
-            "--force",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .status()
-        .map_err(|e| format!("Failed to run DanmakuFactory: {}", e))?;
+    let tool = detect_tool(tool_path);
+    let tool_name = match &tool {
+        DanmakuTool::DanmakuFactory => "DanmakuFactory",
+        DanmakuTool::DmConvert => "DanmakuConvert",
+    };
 
-    if !status.success() {
-        return Err(format!("DanmakuFactory exited with code {:?}", status.code()));
+    let args = match tool {
+        DanmakuTool::DanmakuFactory => build_danmaku_factory_args(input_xml, output_ass, options),
+        DanmakuTool::DmConvert => build_dmconvert_args(input_xml, output_ass, options),
+    };
+
+    tracing::debug!("Running {} with args: {:?}", tool_name, args);
+
+    let output = std::process::Command::new(tool_path)
+        .args(&args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| format!("Failed to run {}: {}", tool_name, e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("{} exited with code {:?}: {}", tool_name, output.status.code(), stderr));
     }
 
     Ok(())

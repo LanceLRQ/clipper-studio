@@ -30,7 +30,12 @@ pub async fn install_dep(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.dep_manager.install_dep(&dep_id, &app_handle).await?;
+    let proxy_url = {
+        let config = state.config.read().map_err(|e| e.to_string())?;
+        let url = config.network.proxy_url.clone();
+        if url.is_empty() { None } else { Some(url) }
+    };
+    state.dep_manager.install_dep(&dep_id, &app_handle, proxy_url.as_deref()).await?;
 
     // Hot-refresh: update AppState paths so the new binary is usable immediately
     refresh_tool_paths(&dep_id, &state);
@@ -56,10 +61,11 @@ fn refresh_tool_paths(dep_id: &str, state: &AppState) {
             }
         }
         "danmaku-factory" => {
+            // get_binary_path handles both DanmakuFactory (Windows) and dmconvert (macOS venv)
             if let Some(p) = state.dep_manager.get_binary_path("danmaku-factory", "DanmakuFactory") {
                 if let Ok(mut path) = state.danmaku_factory_path.write() {
                     *path = p.to_string_lossy().to_string();
-                    tracing::info!("Hot-refreshed danmaku_factory_path: {}", *path);
+                    tracing::info!("Hot-refreshed danmaku tool path: {}", *path);
                 }
             }
         }
@@ -118,10 +124,11 @@ fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
                 Some(config.tools.danmaku_factory_path.clone())
             } else {
                 ffmpeg::detect_binary("DanmakuFactory", &state.bin_dir)
+                    .or_else(|| ffmpeg::detect_binary("dmconvert", &state.bin_dir))
             };
             if let Ok(mut path) = state.danmaku_factory_path.write() {
                 let val = new_path.unwrap_or_default();
-                tracing::info!("Re-detected danmaku_factory_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                tracing::info!("Re-detected danmaku tool path: {}", if val.is_empty() { "(empty)" } else { &val });
                 *path = val;
             }
         }

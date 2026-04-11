@@ -381,6 +381,101 @@ fn set_executable(path: &Path) {
     }
 }
 
+// ==================== Python Package Install ====================
+
+/// Detect python3 on the system, returns the full path if found
+pub fn detect_python3() -> Option<String> {
+    for name in &["python3", "python"] {
+        // Try running --version directly to verify it works
+        if let Ok(output) = std::process::Command::new(name)
+            .args(["--version"])
+            .output()
+        {
+            if output.status.success() {
+                let ver_str = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+                if ver_str.contains("Python 3") {
+                    // Resolve the full path via `which`
+                    if let Ok(which_out) = std::process::Command::new("which").arg(name).output() {
+                        if which_out.status.success() {
+                            let path = String::from_utf8_lossy(&which_out.stdout).trim().to_string();
+                            if !path.is_empty() {
+                                tracing::info!("Detected Python3: {} ({})", path, ver_str.trim());
+                                return Some(path);
+                            }
+                        }
+                    }
+                    // Fallback: use the name directly
+                    return Some(name.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Install a Python package into a venv via pip
+pub fn install_python_package(
+    python3_path: &str,
+    venv_dir: &Path,
+    pip_package: &str,
+    proxy_url: Option<&str>,
+    dep_id: &str,
+    app_handle: &AppHandle,
+) -> Result<(), String> {
+    // Step 1: Create venv
+    emit_progress(app_handle, dep_id, "installing", 0.1, "正在创建 Python 虚拟环境...");
+    tracing::info!("Creating venv at {} with {}", venv_dir.display(), python3_path);
+
+    let output = std::process::Command::new(python3_path)
+        .args(["-m", "venv", &venv_dir.to_string_lossy()])
+        .output()
+        .map_err(|e| format!("Failed to run python3 -m venv: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("Failed to create Python venv: {}", stderr));
+    }
+
+    // Step 2: pip install
+    emit_progress(app_handle, dep_id, "installing", 0.3, &format!("正在安装 {}...", pip_package));
+
+    #[cfg(target_os = "windows")]
+    let pip_path = venv_dir.join("Scripts").join("pip.exe");
+    #[cfg(not(target_os = "windows"))]
+    let pip_path = venv_dir.join("bin").join("pip");
+
+    if !pip_path.exists() {
+        return Err(format!("pip not found at {}", pip_path.display()));
+    }
+
+    let mut pip_args = vec!["install".to_string(), pip_package.to_string(), "--progress-bar".to_string(), "off".to_string()];
+    if let Some(proxy) = proxy_url {
+        if !proxy.is_empty() {
+            pip_args.push("--proxy".to_string());
+            pip_args.push(proxy.to_string());
+        }
+    }
+
+    tracing::info!("Running pip install: {:?} {:?}", pip_path, pip_args);
+    let output = std::process::Command::new(&pip_path)
+        .args(&pip_args)
+        .output()
+        .map_err(|e| format!("Failed to run pip install: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("pip install {} failed: {}", pip_package, stderr));
+    }
+
+    emit_progress(app_handle, dep_id, "installing", 1.0, "安装完成");
+    tracing::info!("Python package '{}' installed successfully", pip_package);
+    Ok(())
+}
+
 // ==================== Tests ====================
 
 #[cfg(test)]
