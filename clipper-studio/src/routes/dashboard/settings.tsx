@@ -1565,13 +1565,13 @@ function SettingsPage() {
           <TabsTrigger value="workspace">工作区</TabsTrigger>
           <TabsTrigger value="tags">标签</TabsTrigger>
           <TabsTrigger value="asr">语音识别</TabsTrigger>
-          <TabsTrigger value="deps">依赖管理</TabsTrigger>
-          <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
               {plugin.name}
             </TabsTrigger>
           ))}
+          <TabsTrigger value="deps">依赖管理</TabsTrigger>
+          <TabsTrigger value="system">系统设置</TabsTrigger>
         </TabsList>
 
         <TabsContent value="workspace" className="mt-4 space-y-6">
@@ -1598,6 +1598,12 @@ function SettingsPage() {
           <ASRSettingsTab />
         </TabsContent>
 
+        {configPlugins.map((plugin) => (
+          <TabsContent key={plugin.id} value={plugin.id} className="mt-4">
+            <PluginConfigTab plugin={plugin} />
+          </TabsContent>
+        ))}
+
         <TabsContent value="deps" className="mt-4">
           <DependencyManagerTab />
         </TabsContent>
@@ -1605,12 +1611,6 @@ function SettingsPage() {
         <TabsContent value="system" className="mt-4">
           <SystemSettingsTab />
         </TabsContent>
-
-        {configPlugins.map((plugin) => (
-          <TabsContent key={plugin.id} value={plugin.id} className="mt-4">
-            <PluginConfigTab plugin={plugin} />
-          </TabsContent>
-        ))}
       </Tabs>
 
       {loading && configPlugins.length === 0 && (
