@@ -177,7 +177,7 @@ function VideoDetailPage() {
       .catch(console.error);
 
     // Load burn availability
-    checkVideoBurnAvailability(videoId)
+    checkVideoBurnAvailability(parseInt(videoId, 10))
       .then(setBurnAvailability)
       .catch(() => setBurnAvailability(undefined));
   }, [videoId]);

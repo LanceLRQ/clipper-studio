@@ -45,6 +45,8 @@ export function ClipActions({
             audio_only: opts?.audio_only ?? false,
             include_danmaku: opts?.include_danmaku ?? false,
             include_subtitle: opts?.include_subtitle ?? false,
+            export_subtitle: opts?.export_subtitle ?? false,
+            export_danmaku: opts?.export_danmaku ?? false,
           };
         }),
       });

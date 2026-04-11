@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { listen } from "@tauri-apps/api/event";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -15,7 +16,9 @@ import {
   Trash2Icon,
   ListXIcon,
   RefreshCwIcon,
+  RotateCcwIcon,
   HardDriveIcon,
+  CircleHelpIcon,
 } from "lucide-react";
 import {
   Dialog,
@@ -30,6 +33,7 @@ import type { ClipTaskInfo, TaskProgressEvent } from "@/types/clip";
 import {
   listClipTasks,
   cancelClip,
+  retryClipTask,
   deleteClipTask,
   deleteClipBatch,
   clearFinishedClipTasks,
@@ -55,6 +59,33 @@ function formatDurationMs(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}分${s}秒`;
+}
+
+/** Analyze error message and return troubleshooting hints */
+function getErrorHint(errorMessage: string | null | undefined): string | null {
+  if (!errorMessage) return null;
+  const msg = errorMessage.toLowerCase();
+
+  // FFmpeg ass/subtitles filter not available (libass not compiled)
+  if (
+    msg.includes("unknown filter") && (msg.includes("'ass'") || msg.includes("'subtitles'"))
+    || msg.includes("no option name near") && msg.includes(".ass")
+    || msg.includes("error parsing filterchain") && msg.includes("ass=")
+  ) {
+    return "当前安装的 FFmpeg 缺少 libass 支持，无法烧录字幕/弹幕。\n\nmacOS 解决方法：\nbrew tap homebrew-ffmpeg/ffmpeg\nbrew install homebrew-ffmpeg/ffmpeg/ffmpeg\n（该版本默认包含 libass）\n\nWindows 建议使用依赖管理中的内置 FFmpeg（已包含 libass）。";
+  }
+
+  // FFmpeg not found
+  if (msg.includes("ffmpeg not available") || msg.includes("failed to start ffmpeg")) {
+    return "未检测到 FFmpeg，请在设置 - 依赖管理中安装 FFmpeg，或手动配置路径。";
+  }
+
+  // Danmaku tool not found
+  if (msg.includes("弹幕转换工具未安装") || msg.includes("danmakufactory")) {
+    return "弹幕转换工具未安装，请在设置 - 依赖管理中安装。";
+  }
+
+  return null;
 }
 
 const statusLabels: Record<
@@ -211,6 +242,22 @@ function TasksPage() {
   const handleCancel = async (taskId: number) => {
     await cancelClip(taskId);
     await loadTasks();
+  };
+
+  const handleRetry = async (taskId: number, isCompleted: boolean) => {
+    if (isCompleted) {
+      const confirmed = await ask(
+        "重新生成将覆盖已有的输出文件，确定要继续吗？",
+        { title: "重新生成", kind: "warning" },
+      );
+      if (!confirmed) return;
+    }
+    try {
+      await retryClipTask(taskId);
+      await loadTasks();
+    } catch (e) {
+      alert("重试失败: " + String(e));
+    }
   };
 
   const handleDeleteTask = (taskId: number) => {
@@ -470,6 +517,22 @@ function TasksPage() {
                           </Tooltip>
                         </>
                       )}
+                      {["completed", "failed", "cancelled"].includes(status) && (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() => handleRetry(task.id, status === "completed")}
+                              />
+                            }
+                          >
+                            <RotateCcwIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>{status === "completed" ? "重新生成" : "重试"}</TooltipContent>
+                        </Tooltip>
+                      )}
                       {["completed", "failed", "cancelled"].includes(
                         status,
                       ) && (
@@ -500,6 +563,19 @@ function TasksPage() {
                   {status === "failed" && task.error_message && (
                     <div className="text-xs text-red-500">
                       {task.error_message}
+                      {getErrorHint(task.error_message) && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help">
+                              <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
+                              <span className="underline">出现问题?</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap text-left">
+                            {getErrorHint(task.error_message)}
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </div>
                   )}
                 </div>
@@ -681,6 +757,26 @@ function TasksPage() {
                                     </Tooltip>
                                   </>
                                 )}
+                              {["completed", "failed", "cancelled"].includes(status) && (
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <Button
+                                        variant="ghost"
+                                        size="icon-sm"
+                                        className="h-6 w-6"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleRetry(task.id, status === "completed");
+                                        }}
+                                      />
+                                    }
+                                  >
+                                    <RotateCcwIcon className="h-3.5 w-3.5" />
+                                  </TooltipTrigger>
+                                  <TooltipContent>{status === "completed" ? "重新生成" : "重试"}</TooltipContent>
+                                </Tooltip>
+                              )}
                               {["completed", "failed", "cancelled"].includes(
                                 status,
                               ) && (
@@ -715,6 +811,19 @@ function TasksPage() {
                           {status === "failed" && task.error_message && (
                             <div className="text-xs text-red-500">
                               {task.error_message}
+                              {getErrorHint(task.error_message) && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help">
+                                      <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
+                                      <span className="underline">出现问题?</span>
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap text-left">
+                                    {getErrorHint(task.error_message)}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
                             </div>
                           )}
                         </div>

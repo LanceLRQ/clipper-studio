@@ -22,6 +22,10 @@ export interface ClipOptions {
   include_danmaku: boolean;
   /** Burn subtitle overlay into output video */
   include_subtitle: boolean;
+  /** Export subtitle as SRT file alongside video */
+  export_subtitle: boolean;
+  /** Export danmaku as XML file alongside video */
+  export_danmaku: boolean;
 }
 
 export interface BatchClipItem {
@@ -34,6 +38,8 @@ export interface BatchClipItem {
   audio_only: boolean;
   include_danmaku: boolean;
   include_subtitle: boolean;
+  export_subtitle: boolean;
+  export_danmaku: boolean;
 }
 
 /** Burn availability info returned by check_video_burn_availability */

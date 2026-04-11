@@ -58,25 +58,74 @@ pub async fn get_base_ms(db: &Database, video_id: i64) -> i64 {
     .unwrap_or(0)
 }
 
-/// Export subtitle segments as ASS content for a specific clip time range.
+/// Format milliseconds to SRT time format: HH:MM:SS,mmm
+fn format_srt_time(ms: i64) -> String {
+    let total_secs = ms / 1000;
+    let h = total_secs / 3600;
+    let m = (total_secs % 3600) / 60;
+    let s = total_secs % 60;
+    let ms_part = ms % 1000;
+    format!("{:02}:{:02}:{:02},{:03}", h, m, s, ms_part)
+}
+
+/// Export subtitle segments as SRT file for a specific clip time range.
 ///
-/// - `clip_start_ms` / `clip_end_ms`: video-relative milliseconds (not absolute)
-/// - The output ASS has timestamps starting at 0 (clip-relative).
-/// - Returns `None` if no subtitle segments found in the range.
-pub async fn export_ass_for_clip(
+/// Uses the same overlap/clamp logic as `export_ass_for_clip`:
+/// segments partially overlapping with the clip range are included with
+/// their start/end clamped to the clip boundaries.
+/// Returns `Ok(true)` if segments were found and written.
+pub async fn export_srt_for_clip(
     db: &Database,
     video_id: i64,
     clip_start_ms: i64,
     clip_end_ms: i64,
     output_path: &Path,
 ) -> Result<bool, String> {
-    let base_ms = get_base_ms(db, video_id).await;
+    let segments = query_clip_segments(db, video_id, clip_start_ms, clip_end_ms).await?;
 
-    // Convert clip range to absolute timestamps for DB query
+    if segments.is_empty() {
+        return Ok(false);
+    }
+
+    let clip_duration = clip_end_ms - clip_start_ms;
+    let mut out = String::new();
+    for (i, seg) in segments.iter().enumerate() {
+        let start = seg.start_ms.max(0);
+        let end = seg.end_ms.min(clip_duration);
+        out.push_str(&format!(
+            "{}\n{} --> {}\n{}\n\n",
+            i + 1,
+            format_srt_time(start),
+            format_srt_time(end),
+            seg.text,
+        ));
+    }
+
+    std::fs::write(output_path, &out)
+        .map_err(|e| format!("Failed to write SRT file: {}", e))?;
+
+    tracing::info!(
+        "Exported {} subtitle segments as SRT for clip [{}-{}ms] to {}",
+        segments.len(),
+        clip_start_ms,
+        clip_end_ms,
+        output_path.display(),
+    );
+
+    Ok(true)
+}
+
+/// Query subtitle segments overlapping with a clip range, returning clip-relative timestamps.
+async fn query_clip_segments(
+    db: &Database,
+    video_id: i64,
+    clip_start_ms: i64,
+    clip_end_ms: i64,
+) -> Result<Vec<SubtitleSegment>, String> {
+    let base_ms = get_base_ms(db, video_id).await;
     let abs_start = base_ms + clip_start_ms;
     let abs_end = base_ms + clip_end_ms;
 
-    // Query segments overlapping with the clip range
     let rows = sea_orm::ConnectionTrait::query_all(
         db.conn(),
         sea_orm::Statement::from_string(
@@ -92,12 +141,7 @@ pub async fn export_ass_for_clip(
     .await
     .map_err(|e| format!("Failed to query subtitles: {}", e))?;
 
-    if rows.is_empty() {
-        return Ok(false);
-    }
-
-    // Build segments with clip-relative timestamps
-    let segments: Vec<SubtitleSegment> = rows
+    Ok(rows
         .iter()
         .map(|row| {
             let start_ms: i64 = row.try_get("", "start_ms").unwrap_or(0);
@@ -106,14 +150,32 @@ pub async fn export_ass_for_clip(
                 id: row.try_get("", "id").unwrap_or(0),
                 video_id,
                 language: row.try_get("", "language").unwrap_or_default(),
-                // Convert absolute → clip-relative (base_ms cancels out: abs - base_ms - clip_start)
                 start_ms: (start_ms - abs_start).max(0),
                 end_ms: (end_ms - abs_start).min(clip_end_ms - clip_start_ms),
                 text: row.try_get("", "text").unwrap_or_default(),
                 source: row.try_get("", "source").unwrap_or_default(),
             }
         })
-        .collect();
+        .collect())
+}
+
+/// Export subtitle segments as ASS content for a specific clip time range.
+///
+/// - `clip_start_ms` / `clip_end_ms`: video-relative milliseconds (not absolute)
+/// - The output ASS has timestamps starting at 0 (clip-relative).
+/// - Returns `None` if no subtitle segments found in the range.
+pub async fn export_ass_for_clip(
+    db: &Database,
+    video_id: i64,
+    clip_start_ms: i64,
+    clip_end_ms: i64,
+    output_path: &Path,
+) -> Result<bool, String> {
+    let segments = query_clip_segments(db, video_id, clip_start_ms, clip_end_ms).await?;
+
+    if segments.is_empty() {
+        return Ok(false);
+    }
 
     // Generate ASS with base_ms=0 since timestamps are already clip-relative
     let ass_content = generate_ass(&segments, 0);

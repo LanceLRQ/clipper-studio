@@ -331,10 +331,16 @@ pub async fn execute_clip_with_burn(
     // Determine which ASS file to burn
     let ass_to_burn = if let Some(ref merged) = merged_ass {
         merged.clone()
-    } else if burn.burn_danmaku {
+    } else if burn.burn_danmaku && burn.danmaku_ass_path.is_some() {
         burn.danmaku_ass_path.clone().unwrap()
-    } else {
+    } else if burn.burn_subtitle && burn.subtitle_ass_path.is_some() {
         burn.subtitle_ass_path.clone().unwrap()
+    } else {
+        // No ASS file available to burn — skip burn pass, just rename intermediate to output
+        tracing::warn!("No ASS file available for burning, skipping burn pass");
+        std::fs::rename(&intermediate, output)
+            .map_err(|e| format!("Failed to rename intermediate file: {}", e))?;
+        return Ok(());
     };
 
     // === Pass 2: Burn ASS into clipped video ===

@@ -22,6 +22,12 @@ pub struct CreateClipRequest {
     /// Burn subtitle overlay into the output video
     #[serde(default)]
     pub include_subtitle: bool,
+    /// Export subtitle as SRT file alongside the output video
+    #[serde(default)]
+    pub export_subtitle: bool,
+    /// Export danmaku as XML file alongside the output video
+    #[serde(default)]
+    pub export_danmaku: bool,
     /// Batch ID for grouping multiple clips (auto-generated for batch operations)
     #[serde(default)]
     pub batch_id: Option<String>,
@@ -200,6 +206,9 @@ pub async fn create_clip(
     let video_id = req.video_id;
     let include_danmaku = req.include_danmaku;
     let include_subtitle = req.include_subtitle;
+    let export_subtitle = req.export_subtitle;
+    let export_danmaku = req.export_danmaku;
+    let video_path_clone = video_path.clone();
     let app = app_handle.clone();
     // Use filename stem (without ext) for completion notification
     let clip_title_for_notify = output_filename
@@ -287,6 +296,40 @@ pub async fn create_clip(
                     )
                     .await;
 
+                    // Export subtitle/danmaku files alongside the output video
+                    let output_stem = output.with_extension("");
+                    if export_subtitle {
+                        let srt_path = PathBuf::from(format!("{}.srt", output_stem.display()));
+                        match crate::core::subtitle::export_srt_for_clip(
+                            &db, video_id, start_ms, end_ms, &srt_path,
+                        ).await {
+                            Ok(true) => tracing::info!("Exported subtitle SRT: {}", srt_path.display()),
+                            Ok(false) => tracing::info!("No subtitles to export for clip [{}-{}ms]", start_ms, end_ms),
+                            Err(e) => tracing::warn!("Failed to export subtitle SRT: {}", e),
+                        }
+                    }
+                    if export_danmaku {
+                        let xml_path = PathBuf::from(format!("{}.xml", output_stem.display()));
+                        let source_xml = std::path::PathBuf::from(&video_path_clone).with_extension("xml");
+                        if source_xml.exists() {
+                            match crate::core::danmaku::parse_bilibili_xml(&source_xml) {
+                                Ok(items) => {
+                                    let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
+                                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms, scroll_ms);
+                                    if !filtered.is_empty() {
+                                        match crate::core::danmaku::write_bilibili_xml(&filtered, &xml_path) {
+                                            Ok(()) => tracing::info!("Exported danmaku XML: {}", xml_path.display()),
+                                            Err(e) => tracing::warn!("Failed to export danmaku XML: {}", e),
+                                        }
+                                    } else {
+                                        tracing::info!("No danmaku to export for clip [{}-{}ms]", start_ms, end_ms);
+                                    }
+                                }
+                                Err(e) => tracing::warn!("Failed to parse danmaku XML for export: {}", e),
+                            }
+                        }
+                    }
+
                     let _ = update_task_status(&db, task_id, "completed", None).await;
 
                     // Notify frontend
@@ -336,6 +379,271 @@ pub async fn cancel_clip(
         let _ = update_task_status(&state.db, task_id, "cancelled", None).await;
     }
     Ok(cancelled)
+}
+
+/// Retry a failed/cancelled clip task: reset status and re-enqueue with original parameters
+#[tauri::command]
+pub async fn retry_clip_task(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    task_id: i64,
+) -> Result<ClipTaskInfo, String> {
+    // Read original task parameters
+    let row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT t.video_id, t.start_time_ms, t.end_time_ms, t.title, t.preset_id, t.status, \
+                 t.batch_id, t.batch_title, co.output_path, co.include_danmaku, co.include_subtitle \
+                 FROM clip_tasks t \
+                 LEFT JOIN clip_outputs co ON co.clip_task_id = t.id \
+                 WHERE t.id = {}",
+                task_id
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("任务不存在".to_string())?;
+
+    let status: String = row.try_get("", "status").unwrap_or_default();
+    if status == "pending" || status == "processing" {
+        return Err("任务正在执行中，无法重试".to_string());
+    }
+
+    let video_id: i64 = row.try_get("", "video_id").unwrap_or(0);
+    let start_ms: i64 = row.try_get("", "start_time_ms").unwrap_or(0);
+    let end_ms: i64 = row.try_get("", "end_time_ms").unwrap_or(0);
+    let title: Option<String> = row.try_get("", "title").ok().filter(|s: &String| !s.is_empty());
+    let preset_id: Option<i64> = row.try_get("", "preset_id").ok();
+    let batch_id: Option<String> = row.try_get("", "batch_id").ok();
+    let batch_title: Option<String> = row.try_get("", "batch_title").ok();
+    let output_path: Option<String> = row.try_get("", "output_path").ok();
+    let include_danmaku: bool = row.try_get::<i32>("", "include_danmaku").unwrap_or(0) != 0;
+    let include_subtitle: bool = row.try_get::<i32>("", "include_subtitle").unwrap_or(0) != 0;
+
+    // Get video info for re-enqueue (same query as create_clip)
+    let video_row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT v.file_path, v.file_name, v.stream_title, v.recorded_at, \
+                 st.name as streamer_name, w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v \
+                 LEFT JOIN streamers st ON v.streamer_id = st.id \
+                 LEFT JOIN workspaces w ON v.workspace_id = w.id \
+                 WHERE v.id = {}",
+                video_id
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("视频不存在".to_string())?;
+
+    let video_path: String = video_row.try_get("", "file_path").unwrap_or_default();
+    let video_name: String = video_row.try_get("", "file_name").unwrap_or_default();
+    let streamer_name: Option<String> = video_row.try_get("", "streamer_name").ok();
+    let stream_title: Option<String> = video_row.try_get("", "stream_title").ok();
+    let recorded_at: Option<String> = video_row.try_get("", "recorded_at").ok();
+    let ws_clip_output_dir: Option<String> = video_row
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
+
+    // Determine output path: use original if available, otherwise regenerate (same logic as create_clip)
+    let output = if let Some(ref op) = output_path {
+        PathBuf::from(op)
+    } else {
+        let output_dir = if let Some(ref dir) = ws_clip_output_dir {
+            PathBuf::from(dir)
+        } else {
+            let src = PathBuf::from(&video_path);
+            src.parent().unwrap_or(&PathBuf::from(".")).join("clips")
+        };
+
+        let ext = "mp4";
+        let output_filename = if batch_id.is_some() {
+            let short_name = build_batch_clip_filename(
+                title.as_deref(),
+                recorded_at.as_deref(),
+                start_ms,
+                end_ms,
+            );
+            format!("{}.{}", sanitize_filename(&short_name), ext)
+        } else {
+            let clip_title = build_clip_name(
+                streamer_name.as_deref(),
+                stream_title.as_deref(),
+                title.as_deref(),
+                recorded_at.as_deref(),
+                start_ms,
+                end_ms,
+                &video_name,
+            );
+            format!("{}.{}", sanitize_filename(&clip_title), ext)
+        };
+        output_dir.join(&output_filename)
+    };
+
+    // Load preset
+    let preset_options = if let Some(pid) = preset_id {
+        load_preset(state.db.conn(), pid).await?
+    } else {
+        PresetOptions {
+            codec: "copy".to_string(),
+            crf: None,
+            audio_only: None,
+        }
+    };
+
+    // Reset task status: pending, clear error, clear completed_at
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!(
+            "UPDATE clip_tasks SET status = 'pending', progress = 0, error_message = NULL, completed_at = NULL WHERE id = {}",
+            task_id
+        ),
+    )
+    .await
+    .map_err(|e| format!("重置任务状态失败: {}", e))?;
+
+    // Delete old clip_outputs records (failed tasks usually have none, but just in case)
+    sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        &format!("DELETE FROM clip_outputs WHERE clip_task_id = {}", task_id),
+    )
+    .await
+    .ok();
+
+    // Re-enqueue to task queue
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
+    let db = state.db.clone();
+    let input_path = PathBuf::from(video_path.clone());
+    let output_clone = output.clone();
+    let app = app_handle.clone();
+    let output_filename = output.file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let clip_title_for_notify = output_filename
+        .rsplit_once('.')
+        .map(|(stem, _)| stem.to_string())
+        .unwrap_or_else(|| output_filename.clone());
+
+    state
+        .task_queue
+        .submit(task_id, move |cancel_token, progress_tx| async move {
+            let _ = update_task_status(&db, task_id, "processing", None).await;
+
+            let burn_options = prepare_burn_options(
+                &db,
+                &ffmpeg_path,
+                &danmaku_factory_path,
+                &video_path,
+                video_id,
+                start_ms,
+                end_ms,
+                include_danmaku,
+                include_subtitle,
+                task_id,
+            )
+            .await;
+
+            let progress_tx_clone = progress_tx.clone();
+            let result = clipper::execute_clip_with_burn(
+                &ffmpeg_path,
+                &input_path,
+                &output_clone,
+                start_ms,
+                end_ms,
+                &preset_options,
+                &burn_options,
+                cancel_token,
+                move |p| {
+                    let _ = progress_tx_clone.send(TaskProgressEvent {
+                        task_id,
+                        status: TaskStatus::Processing,
+                        progress: p.progress,
+                        message: format!(
+                            "{:.0}% (速度: {:.1}x)",
+                            p.progress * 100.0,
+                            p.speed.unwrap_or(0.0)
+                        ),
+                    });
+                },
+            )
+            .await;
+
+            // Cleanup temp ASS files
+            if let Some(ref p) = burn_options.danmaku_ass_path {
+                let _ = std::fs::remove_file(p);
+            }
+            if let Some(ref p) = burn_options.subtitle_ass_path {
+                let _ = std::fs::remove_file(p);
+            }
+
+            let did_burn_danmaku = burn_options.burn_danmaku && burn_options.danmaku_ass_path.is_some();
+            let did_burn_subtitle = burn_options.burn_subtitle && burn_options.subtitle_ass_path.is_some();
+
+            match &result {
+                Ok(()) => {
+                    let file_size = std::fs::metadata(&output_clone)
+                        .map(|m| m.len() as i64)
+                        .unwrap_or(0);
+
+                    let _ = sea_orm::ConnectionTrait::execute_unprepared(
+                        db.conn(),
+                        &format!(
+                            "INSERT INTO clip_outputs (clip_task_id, video_id, output_path, format, variant, file_size, include_danmaku, include_subtitle) \
+                             VALUES ({}, {}, '{}', '{}', 'original', {}, {}, {})",
+                            task_id,
+                            video_id,
+                            output_clone.to_string_lossy().replace('\'', "''"),
+                            output_clone.extension().unwrap_or_default().to_string_lossy(),
+                            file_size,
+                            did_burn_danmaku as i32,
+                            did_burn_subtitle as i32,
+                        ),
+                    )
+                    .await;
+
+                    // Retry does not re-export subtitle/danmaku files (original export flags not stored in DB)
+
+                    let _ = update_task_status(&db, task_id, "completed", None).await;
+                    let _ = app.emit("clip-completed", serde_json::json!({
+                        "task_id": task_id,
+                        "title": clip_title_for_notify,
+                        "output_path": output_clone.to_string_lossy(),
+                        "file_size": file_size,
+                    }));
+                }
+                Err(e) => {
+                    let s = if e == "Task cancelled" { "cancelled" } else { "failed" };
+                    let _ = update_task_status(&db, task_id, s, Some(e)).await;
+                }
+            }
+
+            result
+        })
+        .await;
+
+    Ok(ClipTaskInfo {
+        id: task_id,
+        video_id,
+        start_time_ms: start_ms,
+        end_time_ms: end_ms,
+        title,
+        status: "pending".to_string(),
+        progress: 0.0,
+        error_message: None,
+        output_path: Some(output.to_string_lossy().to_string()),
+        created_at: String::new(),
+        completed_at: None,
+        batch_id,
+        batch_title,
+    })
 }
 
 /// List clip tasks with optional video_id filter
@@ -744,6 +1052,10 @@ pub struct BatchClipItem {
     pub include_danmaku: bool,
     #[serde(default)]
     pub include_subtitle: bool,
+    #[serde(default)]
+    pub export_subtitle: bool,
+    #[serde(default)]
+    pub export_danmaku: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -809,6 +1121,8 @@ pub async fn create_batch_clips(
             output_dir: Some(batch_output_dir.to_string_lossy().to_string()),
             include_danmaku: item.include_danmaku,
             include_subtitle: item.include_subtitle,
+            export_subtitle: item.export_subtitle,
+            export_danmaku: item.export_danmaku,
             batch_id: Some(batch_id.clone()),
             batch_title: Some(batch_title.clone()),
         };
@@ -851,7 +1165,8 @@ async fn prepare_burn_options(
             match crate::core::danmaku::parse_bilibili_xml(&xml_path) {
                 Ok(items) => {
                     // Filter to clip range and shift timestamps
-                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms);
+                    let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
+                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms, scroll_ms);
                     if !filtered.is_empty() {
                         // Write filtered XML for DanmakuFactory
                         let tmp_xml = tmp_dir.join(format!("clipper_{}_danmaku.xml", task_id));

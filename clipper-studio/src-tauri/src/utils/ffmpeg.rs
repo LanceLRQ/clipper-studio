@@ -410,11 +410,22 @@ pub async fn burn_subtitle_with_progress(
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
-    args.extend(["-c:v".to_string(), video_codec]);
+    args.extend(["-c:v".to_string(), video_codec.clone()]);
 
-    // CRF quality
+    // Quality setting: hardware encoders need special handling, software encoders use -crf
     if let Some(crf_val) = crf {
-        args.extend(["-crf".to_string(), crf_val.to_string()]);
+        if video_codec.contains("videotoolbox") {
+            // VideoToolbox does not support -crf or -q:v; use default quality
+            tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
+        } else if video_codec.contains("nvenc")
+            || video_codec.contains("qsv")
+            || video_codec.contains("amf")
+        {
+            // nvenc/qsv/amf: use -q:v with similar CRF range
+            args.extend(["-q:v".to_string(), crf_val.to_string()]);
+        } else {
+            args.extend(["-crf".to_string(), crf_val.to_string()]);
+        }
     }
 
     // Audio: copy (no re-encoding needed)
@@ -486,13 +497,15 @@ pub async fn burn_subtitle_with_progress(
         }
     }
 
-    let status = child
-        .wait()
+    let output_result = child
+        .wait_with_output()
         .await
         .map_err(|e| format!("FFmpeg burn process error: {}", e))?;
 
-    if !status.success() {
-        return Err(format!("FFmpeg burn exited with code: {}", status));
+    if !output_result.status.success() {
+        let stderr = String::from_utf8_lossy(&output_result.stderr);
+        tracing::error!("FFmpeg burn failed ({}), stderr:\n{}", output_result.status, stderr);
+        return Err(format!("FFmpeg burn exited with code: {}, stderr: {}", output_result.status, stderr));
     }
 
     if !output.exists() {

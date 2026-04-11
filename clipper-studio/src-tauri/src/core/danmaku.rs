@@ -238,32 +238,20 @@ fn build_danmaku_factory_args(
 }
 
 /// Build CLI arguments for DanmakuConvert (dmconvert)
+///
+/// Note: current pip version (0.0.4) only supports: -f, -sf, -x, -y, -i, -o
+/// Advanced options (roll-time, alpha, displayarea) are not yet available.
 fn build_dmconvert_args(
     input_xml: &Path,
     output_ass: &Path,
     options: &DanmakuAssOptions,
 ) -> Vec<String> {
-    // Convert opacity (0-255 integer) to alpha (0.0-1.0 float)
-    let alpha = options.opacity as f64 / 255.0;
-
-    // Convert density: DanmakuFactory -1 = non-overlap, 0 = unlimited
-    // dmconvert uses display_area (0.0-1.0), default 1.0
-    let display_area = match options.density {
-        -1 => "0.5".to_string(),
-        0 => "1.0".to_string(),
-        d if d > 0 => format!("{:.2}", (d as f64 / 20.0).min(1.0)),
-        _ => "1.0".to_string(),
-    };
-
     vec![
         "-i".into(), input_xml.to_string_lossy().to_string(),
         "-o".into(), output_ass.to_string_lossy().to_string(),
         "-x".into(), options.width.to_string(),
         "-y".into(), options.height.to_string(),
-        "-r".into(), format!("{:.0}", options.scroll_time),
         "-f".into(), options.font_size.to_string(),
-        "-a".into(), format!("{:.3}", alpha),
-        "-d".into(), display_area,
     ]
 }
 
@@ -308,18 +296,27 @@ pub fn convert_to_ass(
 
 /// Filter danmaku items to a specific time range and shift timestamps.
 ///
-/// - Only keeps items where `start_ms <= time_ms < end_ms`
-/// - Shifts all timestamps by `-start_ms` so the output starts at 0
+/// - `scroll_duration_ms`: display duration of scrolling danmaku (e.g. 12000ms).
+///   A danmaku is considered visible during `[time_ms, time_ms + scroll_duration_ms)`.
+///   Items that started before `start_ms` but are still visible are included with
+///   their time clamped to 0.
+/// - Shifts all timestamps by `-start_ms` so the output starts at 0.
+/// - Items appearing after `end_ms` are excluded.
 pub fn filter_danmaku_by_range(
     items: &[DanmakuItem],
     start_ms: i64,
     end_ms: i64,
+    scroll_duration_ms: i64,
 ) -> Vec<DanmakuItem> {
     items
         .iter()
-        .filter(|d| d.time_ms >= start_ms && d.time_ms < end_ms)
+        .filter(|d| {
+            // Visible range: [time_ms, time_ms + scroll_duration_ms)
+            // Include if overlaps with [start_ms, end_ms)
+            d.time_ms + scroll_duration_ms > start_ms && d.time_ms < end_ms
+        })
         .map(|d| DanmakuItem {
-            time_ms: d.time_ms - start_ms,
+            time_ms: (d.time_ms - start_ms).max(0),
             text: d.text.clone(),
             mode: d.mode,
             color: d.color,
@@ -435,12 +432,21 @@ mod tests {
             DanmakuItem { time_ms: 2500, text: "c".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
             DanmakuItem { time_ms: 3500, text: "d".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
         ];
-        let filtered = filter_danmaku_by_range(&items, 1000, 3000);
+        // scroll_duration=0 behaves like the old exact-range filter
+        let filtered = filter_danmaku_by_range(&items, 1000, 3000, 0);
         assert_eq!(filtered.len(), 2);
         assert_eq!(filtered[0].text, "b");
         assert_eq!(filtered[0].time_ms, 500); // 1500 - 1000
         assert_eq!(filtered[1].text, "c");
         assert_eq!(filtered[1].time_ms, 1500); // 2500 - 1000
+
+        // With scroll_duration=1000ms, "a" at 500ms is still visible at 1000ms (500+1000>1000)
+        let filtered2 = filter_danmaku_by_range(&items, 1000, 3000, 1000);
+        assert_eq!(filtered2.len(), 3);
+        assert_eq!(filtered2[0].text, "a");
+        assert_eq!(filtered2[0].time_ms, 0); // clamped: 500-1000 = -500 → 0
+        assert_eq!(filtered2[1].text, "b");
+        assert_eq!(filtered2[2].text, "c");
     }
 
     #[test]

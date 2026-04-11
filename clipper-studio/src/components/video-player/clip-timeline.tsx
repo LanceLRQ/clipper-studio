@@ -276,8 +276,9 @@ export function ClipTimeline({
       };
       onClipsChange?.([...clips, newClip]);
       onClipSelect?.(newClip.id);
+      onClipCreated?.();
     },
-    [clips, duration, maxClips, getDefaultClipDuration, pixelToTime, onClipsChange, onClipSelect]
+    [clips, duration, maxClips, getDefaultClipDuration, pixelToTime, onClipsChange, onClipSelect, onClipCreated]
   );
 
   const handlePlayheadMouseDown = useCallback((e: React.MouseEvent) => {
@@ -577,7 +578,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
                     clip_offset_before: val,
                   },
                 });
@@ -598,7 +599,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
                     clip_offset_after: val,
                   },
                 });
@@ -612,7 +613,7 @@ export function ClipTimeline({
               type="checkbox"
               checked={clipOptions[selectedClip.id]?.audio_only ?? false}
               onChange={(e) => {
-                const opts = clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false };
+                const opts = clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false };
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
@@ -635,7 +636,7 @@ export function ClipTimeline({
             }`}
             title={
               !burnAvailability?.has_danmaku_factory
-                ? "需要安装 DanmakuFactory"
+                ? "需要安装弹幕转换工具"
                 : !burnAvailability?.has_danmaku_xml
                   ? "该视频没有弹幕文件"
                   : clipOptions[selectedClip.id]?.audio_only
@@ -655,7 +656,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
                     include_danmaku: e.target.checked,
                   },
                 });
@@ -689,7 +690,7 @@ export function ClipTimeline({
                 onClipOptionsChange({
                   ...clipOptions,
                   [selectedClip.id]: {
-                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false }),
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
                     include_subtitle: e.target.checked,
                   },
                 });
@@ -697,6 +698,64 @@ export function ClipTimeline({
               className="rounded"
             />
             烧录字幕
+          </label>
+          <label
+            className={`flex items-center gap-1.5 ${
+              !burnAvailability?.has_danmaku_xml
+                ? "opacity-40 cursor-not-allowed"
+                : "cursor-pointer"
+            }`}
+            title={
+              !burnAvailability?.has_danmaku_xml
+                ? "该视频没有弹幕文件"
+                : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              checked={clipOptions[selectedClip.id]?.export_danmaku ?? false}
+              disabled={!burnAvailability?.has_danmaku_xml}
+              onChange={(e) => {
+                onClipOptionsChange({
+                  ...clipOptions,
+                  [selectedClip.id]: {
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
+                    export_danmaku: e.target.checked,
+                  },
+                });
+              }}
+              className="rounded"
+            />
+            导出弹幕
+          </label>
+          <label
+            className={`flex items-center gap-1.5 ${
+              !burnAvailability?.has_subtitle
+                ? "opacity-40 cursor-not-allowed"
+                : "cursor-pointer"
+            }`}
+            title={
+              !burnAvailability?.has_subtitle
+                ? "该视频没有字幕"
+                : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              checked={clipOptions[selectedClip.id]?.export_subtitle ?? false}
+              disabled={!burnAvailability?.has_subtitle}
+              onChange={(e) => {
+                onClipOptionsChange({
+                  ...clipOptions,
+                  [selectedClip.id]: {
+                    ...(clipOptions[selectedClip.id] ?? { clip_offset_before: 0, clip_offset_after: 0, audio_only: false, include_danmaku: false, include_subtitle: false, export_subtitle: false, export_danmaku: false }),
+                    export_subtitle: e.target.checked,
+                  },
+                });
+              }}
+              className="rounded"
+            />
+            导出字幕
           </label>
         </div>
       )}
