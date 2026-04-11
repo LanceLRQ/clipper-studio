@@ -29,8 +29,11 @@ pub fn get_app_info(
         .map(|p: PathBuf| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let ffmpeg_version = if !state.ffmpeg_path.is_empty() {
-        ffmpeg::get_version(&state.ffmpeg_path)
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+
+    let ffmpeg_version = if !ffmpeg_path.is_empty() {
+        ffmpeg::get_version(&ffmpeg_path)
     } else {
         None
     };
@@ -49,7 +52,7 @@ pub fn get_app_info(
         .await;
         match result {
             Ok(Some(row)) => {
-                
+
                 let cnt: i32 = row.try_get("", "cnt").unwrap_or(0);
                 cnt > 0
             }
@@ -61,9 +64,9 @@ pub fn get_app_info(
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir,
         config_path,
-        ffmpeg_available: !state.ffmpeg_path.is_empty(),
+        ffmpeg_available: !ffmpeg_path.is_empty(),
         ffmpeg_version,
-        ffprobe_available: !state.ffprobe_path.is_empty(),
+        ffprobe_available: !ffprobe_path.is_empty(),
         has_workspaces,
         media_server_port: state.media_server_port,
     })
@@ -72,21 +75,24 @@ pub fn get_app_info(
 /// Check FFmpeg/FFprobe availability and return status
 #[tauri::command]
 pub fn check_ffmpeg(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let ffmpeg_version = if !state.ffmpeg_path.is_empty() {
-        ffmpeg::get_version(&state.ffmpeg_path)
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+
+    let ffmpeg_version = if !ffmpeg_path.is_empty() {
+        ffmpeg::get_version(&ffmpeg_path)
     } else {
         None
     };
 
     Ok(serde_json::json!({
         "ffmpeg": {
-            "available": !state.ffmpeg_path.is_empty(),
-            "path": &state.ffmpeg_path,
+            "available": !ffmpeg_path.is_empty(),
+            "path": &ffmpeg_path,
             "version": ffmpeg_version,
         },
         "ffprobe": {
-            "available": !state.ffprobe_path.is_empty(),
-            "path": &state.ffprobe_path,
+            "available": !ffprobe_path.is_empty(),
+            "path": &ffprobe_path,
         }
     }))
 }

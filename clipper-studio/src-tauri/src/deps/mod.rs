@@ -261,19 +261,11 @@ impl DependencyManager {
             },
         );
 
-        // Check if this dep provides binaries that are currently missing from AppState
-        // If so, signal the frontend that a restart is needed
-        let needs_restart = def.binaries.iter().any(|b| {
-            // If the binary wasn't found at startup, installing it now requires restart
-            *b == "ffmpeg" || *b == "ffprobe" || *b == "DanmakuFactory"
-        });
-
         let _ = app_handle.emit(
             "dep:install-complete",
             serde_json::json!({
                 "dep_id": dep_id,
                 "version": version,
-                "needs_restart": needs_restart,
             }),
         );
 

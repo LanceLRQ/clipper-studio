@@ -30,7 +30,41 @@ pub async fn install_dep(
     app_handle: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.dep_manager.install_dep(&dep_id, &app_handle).await
+    state.dep_manager.install_dep(&dep_id, &app_handle).await?;
+
+    // Hot-refresh: update AppState paths so the new binary is usable immediately
+    refresh_tool_paths(&dep_id, &state);
+
+    Ok(())
+}
+
+/// Refresh tool paths in AppState after install/uninstall
+fn refresh_tool_paths(dep_id: &str, state: &AppState) {
+    match dep_id {
+        "ffmpeg" => {
+            if let Some(p) = state.dep_manager.get_binary_path("ffmpeg", "ffmpeg") {
+                if let Ok(mut path) = state.ffmpeg_path.write() {
+                    *path = p.to_string_lossy().to_string();
+                    tracing::info!("Hot-refreshed ffmpeg_path: {}", *path);
+                }
+            }
+            if let Some(p) = state.dep_manager.get_binary_path("ffmpeg", "ffprobe") {
+                if let Ok(mut path) = state.ffprobe_path.write() {
+                    *path = p.to_string_lossy().to_string();
+                    tracing::info!("Hot-refreshed ffprobe_path: {}", *path);
+                }
+            }
+        }
+        "danmaku-factory" => {
+            if let Some(p) = state.dep_manager.get_binary_path("danmaku-factory", "DanmakuFactory") {
+                if let Ok(mut path) = state.danmaku_factory_path.write() {
+                    *path = p.to_string_lossy().to_string();
+                    tracing::info!("Hot-refreshed danmaku_factory_path: {}", *path);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Uninstall a dependency
@@ -39,7 +73,43 @@ pub async fn uninstall_dep(
     dep_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state.dep_manager.uninstall_dep(&dep_id)
+    state.dep_manager.uninstall_dep(&dep_id)?;
+
+    // Clear paths if the uninstalled dep was providing them
+    // (only clear if the current path points to deps dir)
+    clear_tool_paths_if_from_deps(&dep_id, &state);
+
+    Ok(())
+}
+
+/// Clear tool paths if they were provided by the deps manager
+fn clear_tool_paths_if_from_deps(dep_id: &str, state: &AppState) {
+    let deps_dir = state.dep_manager.deps_dir().to_string_lossy().to_string();
+    match dep_id {
+        "ffmpeg" => {
+            if let Ok(mut path) = state.ffmpeg_path.write() {
+                if path.contains(&deps_dir) {
+                    tracing::info!("Clearing ffmpeg_path (was from deps)");
+                    path.clear();
+                }
+            }
+            if let Ok(mut path) = state.ffprobe_path.write() {
+                if path.contains(&deps_dir) {
+                    tracing::info!("Clearing ffprobe_path (was from deps)");
+                    path.clear();
+                }
+            }
+        }
+        "danmaku-factory" => {
+            if let Ok(mut path) = state.danmaku_factory_path.write() {
+                if path.contains(&deps_dir) {
+                    tracing::info!("Clearing danmaku_factory_path (was from deps)");
+                    path.clear();
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Set a custom path for a dependency (writes to config.toml)

@@ -781,18 +781,12 @@ function DependencyManagerTab() {
       unlistenProgress = fn;
     });
 
-    listen<{ dep_id: string; version: string | null; needs_restart: boolean }>(
+    listen<{ dep_id: string; version: string | null }>(
       "dep:install-complete",
-      async (event) => {
+      (event) => {
         setInstallingId(null);
         setProgress(null);
         loadDeps();
-        if (event.payload.needs_restart) {
-          await ask(
-            "安装成功！需要重启应用才能使新安装的依赖生效。\n\n请手动关闭并重新打开 ClipperStudio。",
-            { title: "安装完成", kind: "info" }
-          );
-        }
       }
     ).then((fn) => {
       unlistenComplete = fn;

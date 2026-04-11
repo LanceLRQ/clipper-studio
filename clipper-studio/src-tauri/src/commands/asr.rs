@@ -76,10 +76,11 @@ pub async fn submit_asr(
             .await
             .unwrap_or_else(|| "Chinese".to_string()),
     };
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
     service::submit_asr(
         &state.db,
         &provider,
-        &state.ffmpeg_path,
+        &ffmpeg_path,
         video_id,
         Some(lang.as_str()),
         force.unwrap_or(false),

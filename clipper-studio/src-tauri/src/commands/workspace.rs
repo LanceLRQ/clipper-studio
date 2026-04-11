@@ -334,10 +334,11 @@ pub async fn scan_workspace(
 
     // Step 3: Fill duration_ms via FFprobe before grouping (needed for accurate session merging)
     let mut files_with_duration = scan.files.clone();
-    if !state.ffprobe_path.is_empty() {
+    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    if !ffprobe_path.is_empty() {
         for file in &mut files_with_duration {
             if file.duration_ms.is_none() {
-                if let Ok(probe) = ffmpeg::probe(&state.ffprobe_path, &file.file_path) {
+                if let Ok(probe) = ffmpeg::probe(&ffprobe_path, &file.file_path) {
                     file.duration_ms = probe.duration_ms;
                 }
             }
@@ -429,8 +430,8 @@ pub async fn scan_workspace(
                     .unwrap_or(0);
 
                 let dur = file.duration_ms;
-                let (w, h) = if !state.ffprobe_path.is_empty() {
-                    match ffmpeg::probe(&state.ffprobe_path, &file.file_path) {
+                let (w, h) = if !ffprobe_path.is_empty() {
+                    match ffmpeg::probe(&ffprobe_path, &file.file_path) {
                         Ok(p) => (p.width, p.height),
                         Err(_) => (None, None),
                     }

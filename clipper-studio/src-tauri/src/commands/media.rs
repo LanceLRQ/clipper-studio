@@ -90,7 +90,7 @@ pub async fn transcode_video(
     let task_id = get_last_insert_id(state.db.conn()).await?;
 
     // Submit to task queue
-    let ffmpeg_path = state.ffmpeg_path.clone();
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
     let db = state.db.clone();
     let input = PathBuf::from(file_path);
     let output = output_path.clone();
@@ -269,7 +269,7 @@ pub async fn merge_videos(
 
     // Check compatibility for virtual merge
     if req.mode == "virtual" {
-        let ffprobe_path = state.ffmpeg_path.replace("ffmpeg", "ffprobe");
+        let ffprobe_path = state.ffmpeg_path.read().unwrap().replace("ffmpeg", "ffprobe");
         let compatible = crate::core::merger::check_merge_compatibility(&ffprobe_path, &input_paths)
             .unwrap_or(false);
         if !compatible {
@@ -316,7 +316,7 @@ pub async fn merge_videos(
     let task_id = get_last_insert_id(state.db.conn()).await?;
 
     // Submit to task queue
-    let ffmpeg_path = state.ffmpeg_path.clone();
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
     let db = state.db.clone();
     let output = output_path.clone();
     let mode = req.mode.clone();

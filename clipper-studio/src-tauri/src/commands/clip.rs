@@ -190,8 +190,8 @@ pub async fn create_clip(
     let task_id: i64 = task_row.try_get("", "id").unwrap_or(0);
 
     // Submit to task queue
-    let ffmpeg_path = state.ffmpeg_path.clone();
-    let danmaku_factory_path = state.danmaku_factory_path.clone();
+    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
     let db = state.db.clone();
     let input_path = PathBuf::from(video_path.clone());
     let output = output_path.clone();
@@ -768,7 +768,8 @@ pub async fn create_batch_clips(
     let batch_title = build_batch_title(state.db.conn(), req.video_id).await;
 
     // Build batch subfolder: determine base output dir, then create subfolder
-    let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &state.ffprobe_path).await?;
+    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &ffprobe_path).await?;
     // Ensure the subfolder exists
     std::fs::create_dir_all(&batch_output_dir)
         .map_err(|e| format!("无法创建批次输出目录: {}", e))?;
@@ -957,7 +958,7 @@ pub async fn check_video_burn_availability(
     let has_danmaku_xml = xml_path.exists();
 
     // Check DanmakuFactory availability
-    let has_danmaku_factory = !state.danmaku_factory_path.is_empty();
+    let has_danmaku_factory = !state.danmaku_factory_path.read().unwrap().is_empty();
 
     Ok(BurnAvailability {
         has_danmaku_xml,

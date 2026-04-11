@@ -72,7 +72,8 @@ pub async fn convert_danmaku_to_ass(
     video_id: i64,
     options: Option<DanmakuAssOptions>,
 ) -> Result<String, String> {
-    if state.danmaku_factory_path.is_empty() {
+    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
+    if danmaku_factory_path.is_empty() {
         return Err("DanmakuFactory 未安装。请在 config.toml 的 [tools] 中配置 danmaku_factory_path，或将 DanmakuFactory 放入系统 PATH".to_string());
     }
 
@@ -113,7 +114,7 @@ pub async fn convert_danmaku_to_ass(
     }
 
     danmaku::convert_to_ass(
-        &state.danmaku_factory_path,
+        &danmaku_factory_path,
         &xml_path,
         &ass_path,
         &opts,
@@ -127,5 +128,5 @@ pub async fn convert_danmaku_to_ass(
 /// Check DanmakuFactory availability
 #[tauri::command]
 pub fn check_danmaku_factory(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(!state.danmaku_factory_path.is_empty())
+    Ok(!state.danmaku_factory_path.read().unwrap().is_empty())
 }
