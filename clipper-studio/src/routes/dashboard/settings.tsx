@@ -9,6 +9,18 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getSettings, setSetting } from "@/services/settings";
 import {
+  listDeps,
+  installDep,
+  uninstallDep,
+  revealDepDir,
+  setDepCustomPath,
+} from "@/services/deps";
+import type {
+  DependencyStatus,
+  InstallProgress,
+  DepStatus,
+} from "@/types/deps";
+import {
   checkASRHealth,
   validateASRPath,
   startASRService,
@@ -732,6 +744,353 @@ function ASRSettingsTab() {
   );
 }
 
+// ===== Dependency Manager Tab =====
+function DependencyManagerTab() {
+  const [deps, setDeps] = useState<DependencyStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  const [progress, setProgress] = useState<InstallProgress | null>(null);
+  const [customPathEditing, setCustomPathEditing] = useState<string | null>(
+    null
+  );
+  const [customPathValue, setCustomPathValue] = useState("");
+
+  const loadDeps = useCallback(async () => {
+    try {
+      setDeps(await listDeps());
+    } catch (e) {
+      console.error("Failed to load deps:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDeps();
+  }, [loadDeps]);
+
+  // Listen for install progress events
+  useEffect(() => {
+    let unlistenProgress: UnlistenFn | undefined;
+    let unlistenComplete: UnlistenFn | undefined;
+    let unlistenError: UnlistenFn | undefined;
+
+    listen<InstallProgress>("dep:install-progress", (event) => {
+      setProgress(event.payload);
+    }).then((fn) => {
+      unlistenProgress = fn;
+    });
+
+    listen<{ dep_id: string; version: string | null; needs_restart: boolean }>(
+      "dep:install-complete",
+      async (event) => {
+        setInstallingId(null);
+        setProgress(null);
+        loadDeps();
+        if (event.payload.needs_restart) {
+          await ask(
+            "安装成功！需要重启应用才能使新安装的依赖生效。\n\n请手动关闭并重新打开 ClipperStudio。",
+            { title: "安装完成", kind: "info" }
+          );
+        }
+      }
+    ).then((fn) => {
+      unlistenComplete = fn;
+    });
+
+    listen<{ dep_id: string; error: string }>(
+      "dep:install-error",
+      (event) => {
+        setInstallingId(null);
+        setProgress(null);
+        loadDeps();
+      }
+    ).then((fn) => {
+      unlistenError = fn;
+    });
+
+    return () => {
+      unlistenProgress?.();
+      unlistenComplete?.();
+      unlistenError?.();
+    };
+  }, [loadDeps]);
+
+  const handleInstall = async (depId: string) => {
+    setInstallingId(depId);
+    setProgress(null);
+    try {
+      await installDep(depId);
+    } catch (e) {
+      alert("安装失败: " + String(e));
+      setInstallingId(null);
+      setProgress(null);
+      loadDeps();
+    }
+  };
+
+  const handleUninstall = async (dep: DependencyStatus) => {
+    if (
+      !(await ask(
+        `确定要卸载「${dep.name}」吗？\n\n将删除已下载的文件。`,
+        { title: "卸载依赖", kind: "warning" }
+      ))
+    )
+      return;
+    try {
+      await uninstallDep(dep.id);
+      loadDeps();
+    } catch (e) {
+      alert("卸载失败: " + String(e));
+    }
+  };
+
+  const handleReveal = async (depId: string) => {
+    try {
+      await revealDepDir(depId);
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const handleCustomPathSave = async (depId: string) => {
+    try {
+      await setDepCustomPath(depId, customPathValue);
+      setCustomPathEditing(null);
+      setCustomPathValue("");
+      loadDeps();
+    } catch (e) {
+      alert("设置路径失败: " + String(e));
+    }
+  };
+
+  const handlePickCustomPath = async (depId: string) => {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title: "选择可执行文件",
+    });
+    if (selected) {
+      setCustomPathValue(selected as string);
+    }
+  };
+
+  const statusLabel = (dep: DependencyStatus): { text: string; className: string } => {
+    switch (dep.status) {
+      case "installed":
+        return { text: "已安装（依赖管理器）", className: "text-green-600" };
+      case "downloading":
+        return { text: "下载中", className: "text-blue-500" };
+      case "installing":
+        return { text: "安装中", className: "text-blue-500" };
+      case "error":
+        return { text: "错误", className: "text-red-500" };
+      default:
+        // Not installed via deps manager, but maybe found in system
+        if (dep.system_available) {
+          return { text: "系统已安装", className: "text-green-600" };
+        }
+        return { text: "未安装", className: "text-muted-foreground" };
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-muted-foreground text-sm p-4">加载依赖信息中...</div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        以下工具是 ClipperStudio 运行所需的第三方依赖。点击"安装"自动下载，或手动指定已有安装路径。
+      </p>
+
+      {deps.map((dep) => {
+        const isInstalling = installingId === dep.id;
+        const currentProgress =
+          isInstalling && progress && progress.dep_id === dep.id
+            ? progress
+            : null;
+        const sl = statusLabel(dep);
+
+        return (
+          <section key={dep.id} className="rounded-lg border p-5 space-y-3">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <h3 className="font-medium">{dep.name}</h3>
+                {dep.required && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
+                    核心
+                  </span>
+                )}
+                {!dep.required && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    可选
+                  </span>
+                )}
+                {(dep.version || dep.system_version) && (
+                  <span className="text-xs text-muted-foreground font-mono">
+                    v{dep.version || dep.system_version}
+                  </span>
+                )}
+              </div>
+              <span className={`text-sm font-medium ${sl.className}`}>
+                {sl.text}
+              </span>
+            </div>
+
+            {/* Description */}
+            <p className="text-sm text-muted-foreground">{dep.description}</p>
+
+            {/* Install path (deps manager) */}
+            {dep.status === "installed" && dep.installed_path && (
+              <p className="text-xs text-muted-foreground font-mono truncate">
+                路径: {dep.installed_path}
+              </p>
+            )}
+
+            {/* System path (when found via PATH/config but not in deps manager) */}
+            {dep.status !== "installed" && dep.system_available && dep.system_path && (
+              <p className="text-xs text-green-600 font-mono truncate">
+                系统路径: {dep.system_path}
+              </p>
+            )}
+
+            {/* Custom path override */}
+            {dep.custom_path && (
+              <p className="text-xs text-blue-600 font-mono truncate">
+                自定义路径: {dep.custom_path}
+              </p>
+            )}
+
+            {/* Error message */}
+            {dep.status === "error" && dep.error_message && (
+              <p className="text-sm text-red-500">{dep.error_message}</p>
+            )}
+
+            {/* Progress bar */}
+            {currentProgress && (
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>
+                    {currentProgress.phase === "downloading"
+                      ? "下载中"
+                      : currentProgress.phase === "extracting"
+                        ? "解压中"
+                        : "验证中"}
+                  </span>
+                  <span>{currentProgress.message}</span>
+                </div>
+                <div className="w-full bg-muted rounded-full h-2">
+                  <div
+                    className="bg-primary h-2 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.max(2, (() => {
+                        // Map phase progress to overall: download 0-50%, extract 50-90%, verify 90-100%
+                        const p = currentProgress.progress;
+                        if (currentProgress.phase === "downloading") return p * 50;
+                        if (currentProgress.phase === "extracting") return 50 + p * 40;
+                        return 90 + p * 10;
+                      })())}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* macOS ASR notice */}
+            {dep.id === "qwen3-asr" &&
+              !dep.auto_install_available &&
+              dep.status !== "installed" && (
+                <p className="text-xs text-amber-600">
+                  macOS 暂不支持自动安装，请参考文档手动安装后使用"自定义路径"指定。
+                </p>
+              )}
+
+            {/* Custom path editor */}
+            {customPathEditing === dep.id && (
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={customPathValue}
+                  onChange={(e) => setCustomPathValue(e.target.value)}
+                  placeholder="选择或输入可执行文件路径"
+                  className="text-sm h-8 font-mono flex-1"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handlePickCustomPath(dep.id)}
+                >
+                  浏览...
+                </Button>
+                <Button size="sm" onClick={() => handleCustomPathSave(dep.id)}>
+                  保存
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCustomPathEditing(null)}
+                >
+                  取消
+                </Button>
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-2 pt-1">
+              {dep.status === "installed" ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleReveal(dep.id)}
+                  >
+                    打开目录
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-500 hover:text-red-600"
+                    onClick={() => handleUninstall(dep)}
+                  >
+                    卸载
+                  </Button>
+                </>
+              ) : dep.status === "not_installed" || dep.status === "error" ? (
+                dep.auto_install_available && (
+                  <Button
+                    size="sm"
+                    onClick={() => handleInstall(dep.id)}
+                    disabled={isInstalling}
+                  >
+                    {isInstalling ? "安装中..." : "安装"}
+                  </Button>
+                )
+              ) : null}
+
+              {/* Custom path button (always available when not installing) */}
+              {!isInstalling && customPathEditing !== dep.id && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCustomPathEditing(dep.id);
+                    setCustomPathValue(dep.custom_path ?? "");
+                  }}
+                >
+                  自定义路径
+                </Button>
+              )}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 // ===== System Settings Tab =====
 function SystemSettingsTab() {
   const [saving, setSaving] = useState(false);
@@ -1194,6 +1553,8 @@ function SettingsPage() {
       setActiveTab("tags");
     } else if (section === "asr") {
       setActiveTab("asr");
+    } else if (section === "deps") {
+      setActiveTab("deps");
     } else if (section && section !== "workspaces" && configPlugins.some((p) => p.id === section)) {
       setActiveTab(section);
     } else if (section === "system") {
@@ -1210,6 +1571,7 @@ function SettingsPage() {
           <TabsTrigger value="workspace">工作区</TabsTrigger>
           <TabsTrigger value="tags">标签</TabsTrigger>
           <TabsTrigger value="asr">语音识别</TabsTrigger>
+          <TabsTrigger value="deps">依赖管理</TabsTrigger>
           <TabsTrigger value="system">系统设置</TabsTrigger>
           {configPlugins.map((plugin) => (
             <TabsTrigger key={plugin.id} value={plugin.id}>
@@ -1240,6 +1602,10 @@ function SettingsPage() {
 
         <TabsContent value="asr" className="mt-4">
           <ASRSettingsTab />
+        </TabsContent>
+
+        <TabsContent value="deps" className="mt-4">
+          <DependencyManagerTab />
         </TabsContent>
 
         <TabsContent value="system" className="mt-4">

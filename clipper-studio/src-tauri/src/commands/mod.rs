@@ -7,5 +7,6 @@ pub mod workspace;
 pub mod plugin;
 pub mod asr;
 pub mod danmaku;
+pub mod deps;
 pub mod media;
 pub mod tag;

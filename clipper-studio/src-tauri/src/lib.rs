@@ -2,6 +2,7 @@ pub mod commands;
 pub mod config;
 pub mod core;
 pub mod db;
+pub mod deps;
 pub mod shell;
 pub mod utils;
 
@@ -24,6 +25,7 @@ use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
 use crate::core::watcher::WorkspaceWatcher;
+use crate::deps::DependencyManager;
 use crate::plugin::manager::PluginManager;
 use crate::plugin::registry::PluginRegistry;
 use crate::db::Database;
@@ -43,6 +45,8 @@ pub struct AppState {
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_registry: Arc<PluginRegistry>,
     pub asr_service_manager: Arc<ASRServiceManager>,
+    pub dep_manager: Arc<DependencyManager>,
+    pub bin_dir: std::path::PathBuf,
 }
 
 /// Build and configure the Tauri application
@@ -86,13 +90,21 @@ pub fn run() {
             let app_config = AppConfig::load(&data_dir);
             tracing::info!("Log level from config: {}", app_config.general.log_level);
 
-            // Resolve FFmpeg paths: config override > bin dir > system PATH
+            // Initialize dependency manager
+            let deps_dir = data_dir.join("deps");
+            let dep_manager = Arc::new(DependencyManager::new(deps_dir.clone()));
+            dep_manager.refresh_all();
+
+            // Resolve FFmpeg paths: config override > deps dir > bin dir > system PATH
             let resource_dir = app.path().resource_dir().unwrap_or_default();
             let bin_dir = resource_dir.join("bin");
 
             let ffmpeg_path = if !app_config.ffmpeg.ffmpeg_path.is_empty() {
                 tracing::info!("FFmpeg path from config: {}", app_config.ffmpeg.ffmpeg_path);
                 Some(app_config.ffmpeg.ffmpeg_path.clone())
+            } else if let Some(p) = dep_manager.get_binary_path("ffmpeg", "ffmpeg") {
+                tracing::info!("FFmpeg found via deps manager: {}", p.display());
+                Some(p.to_string_lossy().to_string())
             } else {
                 ffmpeg::detect_binary("ffmpeg", &bin_dir)
             };
@@ -100,6 +112,9 @@ pub fn run() {
             let ffprobe_path = if !app_config.ffmpeg.ffprobe_path.is_empty() {
                 tracing::info!("FFprobe path from config: {}", app_config.ffmpeg.ffprobe_path);
                 Some(app_config.ffmpeg.ffprobe_path.clone())
+            } else if let Some(p) = dep_manager.get_binary_path("ffmpeg", "ffprobe") {
+                tracing::info!("FFprobe found via deps manager: {}", p.display());
+                Some(p.to_string_lossy().to_string())
             } else {
                 ffmpeg::detect_binary("ffprobe", &bin_dir)
             };
@@ -115,10 +130,13 @@ pub fn run() {
                 tracing::warn!("FFprobe not found! Media probe features will be unavailable.");
             }
 
-            // Detect DanmakuFactory binary
+            // Detect DanmakuFactory binary: config > deps > bin dir > PATH
             let danmaku_factory_path = if !app_config.tools.danmaku_factory_path.is_empty() {
                 tracing::info!("DanmakuFactory path from config: {}", app_config.tools.danmaku_factory_path);
                 Some(app_config.tools.danmaku_factory_path.clone())
+            } else if let Some(p) = dep_manager.get_binary_path("danmaku-factory", "DanmakuFactory") {
+                tracing::info!("DanmakuFactory found via deps manager: {}", p.display());
+                Some(p.to_string_lossy().to_string())
             } else {
                 ffmpeg::detect_binary("DanmakuFactory", &bin_dir)
             };
@@ -194,6 +212,8 @@ pub fn run() {
                 plugin_manager: plugin_manager.clone(),
                 plugin_registry: plugin_registry.clone(),
                 asr_service_manager: asr_service_manager.clone(),
+                dep_manager: dep_manager.clone(),
+                bin_dir: bin_dir.clone(),
             });
 
             // Start watching existing workspaces with auto_scan enabled
@@ -308,6 +328,12 @@ pub fn run() {
             commands::tag::delete_tag,
             commands::tag::get_video_tags,
             commands::tag::set_video_tags,
+            commands::deps::list_deps,
+            commands::deps::check_dep,
+            commands::deps::install_dep,
+            commands::deps::uninstall_dep,
+            commands::deps::set_dep_custom_path,
+            commands::deps::reveal_dep_dir,
         ])
         .build(tauri::generate_context!())
         .expect("error while building ClipperStudio")

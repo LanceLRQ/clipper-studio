@@ -72,6 +72,12 @@ quick-xml = "0.37"
 # Disk space queries
 fs2 = "0.4"
 
+# Archive extraction (dependency manager)
+zip = "2"
+flate2 = "1"
+tar = "0.4"
+futures-util = "0.3"
+
 # File system monitoring
 notify = "7"
 notify-debouncer-full = "0.4"
