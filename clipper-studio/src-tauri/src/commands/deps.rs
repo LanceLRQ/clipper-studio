@@ -75,37 +75,54 @@ pub async fn uninstall_dep(
 ) -> Result<(), String> {
     state.dep_manager.uninstall_dep(&dep_id)?;
 
-    // Clear paths if the uninstalled dep was providing them
-    // (only clear if the current path points to deps dir)
-    clear_tool_paths_if_from_deps(&dep_id, &state);
+    // Re-detect paths from remaining sources (config > bin_dir > PATH)
+    re_detect_tool_paths(&dep_id, &state);
 
     Ok(())
 }
 
-/// Clear tool paths if they were provided by the deps manager
-fn clear_tool_paths_if_from_deps(dep_id: &str, state: &AppState) {
-    let deps_dir = state.dep_manager.deps_dir().to_string_lossy().to_string();
+/// Re-detect tool paths after uninstall: config.toml > bin_dir > system PATH
+fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
+    use crate::utils::ffmpeg;
+
+    let config = state.config.read().unwrap();
+
     match dep_id {
         "ffmpeg" => {
+            // Re-detect ffmpeg
+            let new_ffmpeg = if !config.ffmpeg.ffmpeg_path.is_empty() {
+                Some(config.ffmpeg.ffmpeg_path.clone())
+            } else {
+                ffmpeg::detect_binary("ffmpeg", &state.bin_dir)
+            };
             if let Ok(mut path) = state.ffmpeg_path.write() {
-                if path.contains(&deps_dir) {
-                    tracing::info!("Clearing ffmpeg_path (was from deps)");
-                    path.clear();
-                }
+                let val = new_ffmpeg.unwrap_or_default();
+                tracing::info!("Re-detected ffmpeg_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                *path = val;
             }
+
+            // Re-detect ffprobe
+            let new_ffprobe = if !config.ffmpeg.ffprobe_path.is_empty() {
+                Some(config.ffmpeg.ffprobe_path.clone())
+            } else {
+                ffmpeg::detect_binary("ffprobe", &state.bin_dir)
+            };
             if let Ok(mut path) = state.ffprobe_path.write() {
-                if path.contains(&deps_dir) {
-                    tracing::info!("Clearing ffprobe_path (was from deps)");
-                    path.clear();
-                }
+                let val = new_ffprobe.unwrap_or_default();
+                tracing::info!("Re-detected ffprobe_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                *path = val;
             }
         }
         "danmaku-factory" => {
+            let new_path = if !config.tools.danmaku_factory_path.is_empty() {
+                Some(config.tools.danmaku_factory_path.clone())
+            } else {
+                ffmpeg::detect_binary("DanmakuFactory", &state.bin_dir)
+            };
             if let Ok(mut path) = state.danmaku_factory_path.write() {
-                if path.contains(&deps_dir) {
-                    tracing::info!("Clearing danmaku_factory_path (was from deps)");
-                    path.clear();
-                }
+                let val = new_path.unwrap_or_default();
+                tracing::info!("Re-detected danmaku_factory_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                *path = val;
             }
         }
         _ => {}
