@@ -138,9 +138,11 @@ export async function exportSubtitlesVtt(videoId: number): Promise<string> {
 
 export interface ASRPathValidation {
   valid: boolean;
-  has_venv: boolean;
+  has_python_env: boolean;
   has_main: boolean;
   python_path: string;
+  platform: "windows" | "macos" | "linux";
+  setup_hint: string | null;
 }
 
 export interface ASRServiceStatusInfo {
@@ -161,6 +163,10 @@ export async function startASRService(): Promise<void> {
 
 export async function stopASRService(): Promise<void> {
   return invoke("stop_asr_service");
+}
+
+export async function openASRSetupTerminal(): Promise<void> {
+  return invoke("open_asr_setup_terminal");
 }
 
 export async function getASRServiceStatus(): Promise<ASRServiceStatusInfo> {

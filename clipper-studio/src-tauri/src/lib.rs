@@ -327,6 +327,7 @@ pub fn run() {
             commands::asr::validate_asr_path,
             commands::asr::start_asr_service,
             commands::asr::stop_asr_service,
+            commands::asr::open_asr_setup_terminal,
             commands::asr::get_asr_service_status,
             commands::asr::get_asr_service_logs,
             commands::tag::create_tag,

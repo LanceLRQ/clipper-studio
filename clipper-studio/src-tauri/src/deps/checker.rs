@@ -70,9 +70,26 @@ pub fn validate_asr_runtime(base_dir: &Path) -> Result<String, String> {
         .join("app")
         .join("main.py");
 
-    if !python_path.exists() {
-        return Err("未找到 Python 虚拟环境（venv）".to_string());
+    #[cfg(target_os = "windows")]
+    {
+        let lib_dir = base_dir.join("asr-service").join("lib");
+        if !python_path.exists()
+            || !lib_dir.is_dir()
+            || std::fs::read_dir(&lib_dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true)
+        {
+            return Err("未找到便携 Python 环境（bin/python/python.exe 或 lib/）".to_string());
+        }
     }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if !python_path.exists() {
+            return Err("未找到 Python 虚拟环境（venv）".to_string());
+        }
+    }
+
     if !main_path.exists() {
         return Err("未找到 app/main.py 入口文件".to_string());
     }
@@ -86,8 +103,8 @@ fn get_asr_python_path(base_dir: &Path) -> std::path::PathBuf {
     {
         base_dir
             .join("asr-service")
-            .join("venv")
-            .join("Scripts")
+            .join("bin")
+            .join("python")
             .join("python.exe")
     }
     #[cfg(not(target_os = "windows"))]

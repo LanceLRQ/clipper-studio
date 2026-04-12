@@ -28,6 +28,7 @@ import {
   validateASRPath,
   startASRService,
   stopASRService,
+  openASRSetupTerminal,
   getASRServiceStatus,
   getASRServiceLogs,
   type ASRHealthInfo,
@@ -414,6 +415,19 @@ function ASRSettingsTab() {
     if (selected) handlePathChange(selected as string);
   };
 
+  const handleRefreshValidation = async () => {
+    if (!asrLocalPath.trim()) return;
+    setValidating(true);
+    try { setPathValidation(await validateASRPath(asrLocalPath)); }
+    catch { setPathValidation(null); }
+    finally { setValidating(false); }
+  };
+
+  const handleOpenSetupTerminal = async () => {
+    try { await openASRSetupTerminal(); }
+    catch (e) { alert("打开终端失败: " + String(e)); }
+  };
+
   const handleSave = async () => {
     setSaving(true); setSaved(false);
     try {
@@ -578,18 +592,42 @@ function ASRSettingsTab() {
                 <Button variant="outline" size="sm" onClick={handlePickAsrDir}>
                   浏览...
                 </Button>
+                <Button variant="outline" size="sm" onClick={handleRefreshValidation}
+                  disabled={validating || !asrLocalPath.trim()}>
+                  刷新
+                </Button>
               </div>
               {validating && (
                 <p className="text-xs text-muted-foreground">校验中...</p>
               )}
               {pathValidation && !validating && (
-                <p className={`text-xs ${pathValidation.valid ? "text-green-600" : "text-red-500"}`}>
-                  {pathValidation.valid
-                    ? `路径有效 (${pathValidation.python_path})`
-                    : !pathValidation.has_venv
-                      ? "未找到 Python 虚拟环境（asr-service/venv）"
-                      : "未找到入口文件（asr-service/app/main.py）"}
-                </p>
+                <div className="space-y-1">
+                  <p className={`text-xs ${pathValidation.valid ? "text-green-600" : "text-red-500"}`}>
+                    {pathValidation.valid
+                      ? `路径有效 (${pathValidation.python_path})`
+                      : !pathValidation.has_python_env
+                        ? pathValidation.platform === "windows"
+                          ? "未找到便携 Python 环境（bin/python/python.exe 或 lib/）"
+                          : "未找到 Python 虚拟环境（asr-service/venv）"
+                        : "未找到入口文件（asr-service/app/main.py）"}
+                  </p>
+                  {pathValidation.setup_hint && (
+                    <p className="text-xs text-amber-600">{pathValidation.setup_hint}</p>
+                  )}
+                  {pathValidation && !pathValidation.has_python_env && (
+                    <div className="flex gap-2 pt-1">
+                      {pathValidation.platform === "windows" ? (
+                        <p className="text-xs text-muted-foreground">
+                          请在命令行中运行 <code className="bg-muted px-1 py-0.5 rounded text-[11px]">setup.bat</code> 安装 Python 环境
+                        </p>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={handleOpenSetupTerminal}>
+                          打开终端运行 setup.sh
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -711,13 +749,18 @@ function ASRSettingsTab() {
             {/* Action buttons */}
             <div className="flex items-center gap-3">
               {serviceStatus?.status === "running" || serviceStatus?.status === "starting" ? (
-                <Button
-                  variant="destructive"
-                  onClick={handleStopService}
-                  disabled={serviceActionLoading || serviceStatus?.status === "stopping"}
-                >
-                  {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
-                </Button>
+                <>
+                  <Button
+                    variant="destructive"
+                    onClick={handleStopService}
+                    disabled={serviceActionLoading || serviceStatus?.status === "stopping"}
+                  >
+                    {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    服务在外部终端运行，请关闭终端窗口以完全停止
+                  </span>
+                </>
               ) : (
                 <Button
                   onClick={handleStartService}
@@ -726,6 +769,10 @@ function ASRSettingsTab() {
                   {serviceActionLoading ? "操作中..." : "启动服务"}
                 </Button>
               )}
+
+              <Button variant="outline" onClick={() => { handleRefreshValidation(); getASRServiceStatus().then(setServiceStatus).catch(console.error); }}>
+                刷新状态
+              </Button>
 
               <Button variant="outline" onClick={handleViewLogs}>
                 {showLogs ? "隐藏日志" : "查看日志"}

@@ -495,7 +495,7 @@ pub async fn validate_asr_path(path: String) -> Result<ASRPathValidation, String
     Ok(ASRServiceManager::validate_path(Path::new(&path)))
 }
 
-/// Start the managed local ASR service using configured parameters
+/// Start the managed local ASR service using configured parameters (external terminal)
 #[tauri::command]
 pub async fn start_asr_service(
     state: State<'_, AppState>,
@@ -542,7 +542,7 @@ pub async fn start_asr_service(
 
     state
         .asr_service_manager
-        .start(Path::new(&base_path), config, app_handle)
+        .start_external(Path::new(&base_path), config, app_handle)
         .await
 }
 
@@ -552,13 +552,30 @@ pub async fn stop_asr_service(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    state.asr_service_manager.stop().await?;
-    // Emit stopped status to frontend
+    // For external terminal mode, stop only updates status.
+    // The user should close the terminal window manually.
+    if let Err(e) = state.asr_service_manager.stop().await {
+        tracing::warn!("ASR stop error (external mode): {}", e);
+    }
     let _ = app_handle.emit(
         "asr-service-status",
         state.asr_service_manager.status_info(),
     );
     Ok(())
+}
+
+/// Open an external terminal to run the ASR setup script
+#[tauri::command]
+pub async fn open_asr_setup_terminal(
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let base_path = read_setting(&state, "asr_local_path")
+        .await
+        .ok_or("请先在设置中配置 ASR 服务路径")?;
+    if base_path.is_empty() {
+        return Err("请先在设置中配置 ASR 服务路径".to_string());
+    }
+    ASRServiceManager::open_setup_terminal(Path::new(&base_path))
 }
 
 /// Get current ASR service status
