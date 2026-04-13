@@ -279,3 +279,34 @@ async fn run_ffmpeg_with_progress(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_merge_compatibility_single_file() {
+        // Single file should always be "compatible"
+        let result = check_merge_compatibility("", &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_check_merge_compatibility_empty_inputs() {
+        let result = check_merge_compatibility("", &[]);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_check_merge_compatibility_invalid_probe() {
+        // Two files with invalid ffprobe path → should return error
+        let inputs = vec![
+            PathBuf::from("/nonexistent/file1.mp4"),
+            PathBuf::from("/nonexistent/file2.mp4"),
+        ];
+        let result = check_merge_compatibility("/nonexistent/ffprobe", &inputs);
+        assert!(result.is_err());
+    }
+}

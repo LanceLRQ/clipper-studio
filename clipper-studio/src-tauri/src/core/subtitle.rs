@@ -193,3 +193,95 @@ pub async fn export_ass_for_clip(
 
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== format_ass_time =====
+
+    #[test]
+    fn test_format_ass_time_zero() {
+        assert_eq!(format_ass_time(0), "0:00:00.00");
+    }
+
+    #[test]
+    fn test_format_ass_time_seconds_only() {
+        assert_eq!(format_ass_time(1500), "0:00:01.50");
+        assert_eq!(format_ass_time(10), "0:00:00.01"); // 1 centisecond
+    }
+
+    #[test]
+    fn test_format_ass_time_minutes() {
+        assert_eq!(format_ass_time(90000), "0:01:30.00");
+    }
+
+    #[test]
+    fn test_format_ass_time_hours() {
+        assert_eq!(format_ass_time(3661500), "1:01:01.50");
+        assert_eq!(format_ass_time(3600000), "1:00:00.00");
+    }
+
+    #[test]
+    fn test_format_ass_time_large_value() {
+        // 100 hours
+        assert_eq!(format_ass_time(360_000_000), "100:00:00.00");
+    }
+
+    // ===== generate_ass =====
+
+    fn make_segment(start_ms: i64, end_ms: i64, text: &str) -> SubtitleSegment {
+        SubtitleSegment {
+            id: 0,
+            video_id: 1,
+            language: "zh".into(),
+            start_ms,
+            end_ms,
+            text: text.into(),
+            source: "asr".into(),
+        }
+    }
+
+    #[test]
+    fn test_generate_ass_empty_segments() {
+        let segments: Vec<SubtitleSegment> = vec![];
+        let result = generate_ass(&segments, 0);
+        assert!(result.contains("[Script Info]"));
+        assert!(result.contains("[Events]"));
+        assert!(!result.contains("Dialogue:"));
+    }
+
+    #[test]
+    fn test_generate_ass_single_segment() {
+        let segments = vec![make_segment(1000, 3000, "Hello")];
+        let result = generate_ass(&segments, 0);
+        assert!(result.contains("Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,Hello\n"));
+    }
+
+    #[test]
+    fn test_generate_ass_with_base_offset() {
+        // Absolute start=1h, base=1h → relative start=0
+        let segments = vec![make_segment(3_600_000, 3_601_000, "offset test")];
+        let result = generate_ass(&segments, 3_600_000);
+        assert!(result.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,offset test\n"));
+    }
+
+    #[test]
+    fn test_generate_ass_clamps_negative_start() {
+        // start 0.5s before base → clamped to 0
+        let segments = vec![make_segment(500, 2000, "clamp test")];
+        let result = generate_ass(&segments, 1000);
+        assert!(result.contains("Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,clamp test\n"));
+    }
+
+    #[test]
+    fn test_generate_ass_multiple_segments() {
+        let segments = vec![
+            make_segment(1000, 3000, "first"),
+            make_segment(4000, 6000, "second"),
+        ];
+        let result = generate_ass(&segments, 0);
+        assert!(result.contains("Dialogue: 0,0:00:01.00,0:00:03.00,Default,,0,0,0,,first\n"));
+        assert!(result.contains("Dialogue: 0,0:00:04.00,0:00:06.00,Default,,0,0,0,,second\n"));
+    }
+}

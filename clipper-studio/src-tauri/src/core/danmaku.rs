@@ -476,4 +476,91 @@ mod tests {
         let density = compute_density(&items, 3000, 1000);
         assert_eq!(density, vec![2, 1, 0]);
     }
+
+    #[test]
+    fn test_compute_density_empty() {
+        let items: Vec<DanmakuItem> = vec![];
+        let density = compute_density(&items, 3000, 1000);
+        assert_eq!(density, vec![0, 0, 0]);
+    }
+
+    #[test]
+    fn test_compute_density_zero_duration() {
+        let items = vec![
+            DanmakuItem { time_ms: 100, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+        ];
+        let density = compute_density(&items, 0, 1000);
+        assert!(density.is_empty());
+    }
+
+    #[test]
+    fn test_compute_density_zero_window() {
+        let items = vec![
+            DanmakuItem { time_ms: 100, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+        ];
+        let density = compute_density(&items, 3000, 0);
+        assert!(density.is_empty());
+    }
+
+    #[test]
+    fn test_compute_density_burst() {
+        // All items in the same window
+        let items: Vec<DanmakuItem> = (0..5)
+            .map(|i| DanmakuItem {
+                time_ms: 100 + i,
+                text: format!("d{}", i),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            })
+            .collect();
+        let density = compute_density(&items, 3000, 1000);
+        assert_eq!(density, vec![5, 0, 0]);
+    }
+
+    #[test]
+    fn test_compute_density_out_of_range() {
+        // Item beyond duration should not overflow the vector
+        let items = vec![
+            DanmakuItem { time_ms: 9999, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+        ];
+        let density = compute_density(&items, 5000, 1000);
+        assert_eq!(density.len(), 5);
+        // The item at 9999ms falls in window index 9, which is beyond the vector
+        // It should be silently ignored (idx >= density.len())
+    }
+
+    // ===== normalize_density =====
+
+    #[test]
+    fn test_normalize_density_empty() {
+        let result = normalize_density(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_normalize_density_all_zero() {
+        let result = normalize_density(&[0, 0, 0]);
+        assert_eq!(result, vec![0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn test_normalize_density_single_peak() {
+        let result = normalize_density(&[1, 5, 2]);
+        assert!((result[0] - 0.2).abs() < f32::EPSILON);
+        assert!((result[1] - 1.0).abs() < f32::EPSILON);
+        assert!((result[2] - 0.4).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_normalize_density_uniform() {
+        let result = normalize_density(&[3, 3, 3]);
+        assert_eq!(result, vec![1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_normalize_density_single_value() {
+        let result = normalize_density(&[7]);
+        assert_eq!(result, vec![1.0]);
+    }
 }

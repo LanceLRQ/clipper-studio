@@ -633,3 +633,57 @@ fn row_to_task_info(row: &sea_orm::QueryResult) -> ASRTaskInfo {
         completed_at: row.try_get("", "completed_at").ok(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== parse_recorded_at_to_unix_ms =====
+
+    #[test]
+    fn test_parse_recorded_at_standard() {
+        let result = parse_recorded_at_to_unix_ms("2026-04-05 20:30:00");
+        assert!(result.is_some());
+        // (2026*365 + 4*30 + 5) * 86400 + 20*3600 + 30*60 + 0
+        let expected =
+            ((2026i64 * 365 + 4 * 30 + 5) * 86400 + 20 * 3600 + 30 * 60 + 0) * 1000;
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_midnight() {
+        let result = parse_recorded_at_to_unix_ms("2026-01-01 00:00:00");
+        assert!(result.is_some());
+        let expected = ((2026i64 * 365 + 1 * 30 + 1) * 86400) * 1000;
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_recorded_at_invalid() {
+        assert!(parse_recorded_at_to_unix_ms("").is_none());
+        assert!(parse_recorded_at_to_unix_ms("invalid").is_none());
+    }
+
+    #[test]
+    fn test_parse_recorded_at_incomplete() {
+        // Missing time portion → only 3 parts
+        assert!(parse_recorded_at_to_unix_ms("2026-04-05").is_none());
+        // Only hours and minutes → 5 parts
+        assert!(parse_recorded_at_to_unix_ms("2026-04-05 20:30").is_none());
+    }
+
+    #[test]
+    fn test_parse_recorded_at_non_numeric() {
+        assert!(parse_recorded_at_to_unix_ms("abcd-ef-gh ij:kl:mn").is_none());
+    }
+
+    #[test]
+    fn test_parse_recorded_at_consistency() {
+        // Two timestamps: later one should yield a larger value
+        let t1 = parse_recorded_at_to_unix_ms("2026-04-05 20:00:00").unwrap();
+        let t2 = parse_recorded_at_to_unix_ms("2026-04-05 21:00:00").unwrap();
+        assert!(t2 > t1);
+        // Difference should be approximately 1 hour
+        assert_eq!(t2 - t1, 3600 * 1000);
+    }
+}

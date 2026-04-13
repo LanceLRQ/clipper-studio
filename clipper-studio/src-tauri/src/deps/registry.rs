@@ -428,3 +428,210 @@ pub fn build_status(
         system_version: system.version,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ===== get_def =====
+
+    #[test]
+    fn test_get_def_existing() {
+        assert!(get_def("ffmpeg").is_some());
+        assert!(get_def("danmaku-factory").is_some());
+        assert!(get_def("qwen3-asr").is_some());
+    }
+
+    #[test]
+    fn test_get_def_nonexistent() {
+        assert!(get_def("nonexistent").is_none());
+        assert!(get_def("").is_none());
+    }
+
+    #[test]
+    fn test_get_def_fields() {
+        let def = get_def("ffmpeg").unwrap();
+        assert_eq!(def.id, "ffmpeg");
+        assert!(def.required);
+        assert_eq!(def.dep_type, DepType::Binary);
+        assert!(!def.sources.is_empty());
+    }
+
+    // ===== LocalRegistry =====
+
+    #[test]
+    fn test_local_registry_default() {
+        let registry = LocalRegistry::default();
+        assert_eq!(registry.version, 1);
+        assert!(registry.deps.is_empty());
+    }
+
+    #[test]
+    fn test_local_registry_set_get_remove() {
+        let mut registry = LocalRegistry::default();
+        assert!(registry.get("ffmpeg").is_none());
+
+        registry.set(
+            "ffmpeg",
+            InstalledDepState {
+                status: DepStatus::Installed,
+                version: Some("7.0".to_string()),
+                installed_at: Some("2026-04-05".to_string()),
+                path: Some("/path/to/ffmpeg".to_string()),
+                error_message: None,
+            },
+        );
+        assert!(registry.get("ffmpeg").is_some());
+        assert_eq!(registry.get("ffmpeg").unwrap().status, DepStatus::Installed);
+        assert_eq!(
+            registry.get("ffmpeg").unwrap().version.as_deref(),
+            Some("7.0")
+        );
+
+        registry.remove("ffmpeg");
+        assert!(registry.get("ffmpeg").is_none());
+    }
+
+    #[test]
+    fn test_local_registry_overwrite() {
+        let mut registry = LocalRegistry::default();
+        registry.set(
+            "ffmpeg",
+            InstalledDepState {
+                status: DepStatus::Downloading,
+                version: None,
+                installed_at: None,
+                path: None,
+                error_message: None,
+            },
+        );
+        assert_eq!(registry.get("ffmpeg").unwrap().status, DepStatus::Downloading);
+
+        registry.set(
+            "ffmpeg",
+            InstalledDepState {
+                status: DepStatus::Installed,
+                version: Some("7.0".to_string()),
+                installed_at: None,
+                path: None,
+                error_message: None,
+            },
+        );
+        assert_eq!(registry.get("ffmpeg").unwrap().status, DepStatus::Installed);
+    }
+
+    #[test]
+    fn test_local_registry_persistence() {
+        let dir = std::env::temp_dir().join("clipper_test_registry_persist");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let mut registry = LocalRegistry::default();
+        registry.set(
+            "ffmpeg",
+            InstalledDepState {
+                status: DepStatus::Installed,
+                version: Some("7.0".to_string()),
+                installed_at: None,
+                path: None,
+                error_message: None,
+            },
+        );
+        registry.save(&dir).unwrap();
+
+        let loaded = LocalRegistry::load(&dir);
+        assert_eq!(loaded.version, 1);
+        assert!(loaded.get("ffmpeg").is_some());
+        assert_eq!(
+            loaded.get("ffmpeg").unwrap().version.as_deref(),
+            Some("7.0")
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_local_registry_load_missing_file() {
+        let dir = std::env::temp_dir().join("clipper_test_registry_missing");
+        let _ = std::fs::create_dir_all(&dir);
+
+        let loaded = LocalRegistry::load(&dir);
+        assert_eq!(loaded.version, 1);
+        assert!(loaded.deps.is_empty());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ===== build_status =====
+
+    #[test]
+    fn test_build_status_not_installed() {
+        let def = get_def("ffmpeg").unwrap();
+        let status = build_status(def, None, None, SystemDetection::default());
+        assert_eq!(status.id, "ffmpeg");
+        assert_eq!(status.status, DepStatus::NotInstalled);
+        assert!(!status.system_available);
+        assert!(status.version.is_none());
+    }
+
+    #[test]
+    fn test_build_status_with_system_detection() {
+        let def = get_def("ffmpeg").unwrap();
+        let status = build_status(
+            def,
+            None,
+            None,
+            SystemDetection {
+                available: true,
+                path: Some("/usr/bin/ffmpeg".to_string()),
+                version: Some("7.0".to_string()),
+            },
+        );
+        assert!(status.system_available);
+        assert_eq!(status.system_path.as_deref(), Some("/usr/bin/ffmpeg"));
+        assert_eq!(status.system_version.as_deref(), Some("7.0"));
+    }
+
+    #[test]
+    fn test_build_status_with_installed_state() {
+        let def = get_def("ffmpeg").unwrap();
+        let state = InstalledDepState {
+            status: DepStatus::Installed,
+            version: Some("7.0".to_string()),
+            installed_at: Some("2026-04-05".to_string()),
+            path: Some("/deps/ffmpeg".to_string()),
+            error_message: None,
+        };
+        let status = build_status(def, Some(&state), None, SystemDetection::default());
+        assert_eq!(status.status, DepStatus::Installed);
+        assert_eq!(status.version.as_deref(), Some("7.0"));
+        assert_eq!(status.installed_path.as_deref(), Some("/deps/ffmpeg"));
+    }
+
+    #[test]
+    fn test_build_status_error_state() {
+        let def = get_def("ffmpeg").unwrap();
+        let state = InstalledDepState {
+            status: DepStatus::Error,
+            version: None,
+            installed_at: None,
+            path: None,
+            error_message: Some("download failed".to_string()),
+        };
+        let status = build_status(def, Some(&state), None, SystemDetection::default());
+        assert_eq!(status.status, DepStatus::Error);
+        assert_eq!(status.error_message.as_deref(), Some("download failed"));
+    }
+
+    #[test]
+    fn test_build_status_custom_path() {
+        let def = get_def("ffmpeg").unwrap();
+        let status = build_status(
+            def,
+            None,
+            Some("/custom/ffmpeg".to_string()),
+            SystemDetection::default(),
+        );
+        assert_eq!(status.custom_path.as_deref(), Some("/custom/ffmpeg"));
+    }
+}

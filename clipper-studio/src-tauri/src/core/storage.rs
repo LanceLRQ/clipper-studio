@@ -369,3 +369,131 @@ fn scan_dir_recursive(dir: &Path, results: &mut Vec<RecordingFileMeta>) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_meta(
+        room_id: &str,
+        recorded_at: &str,
+        duration_ms: Option<i64>,
+    ) -> RecordingFileMeta {
+        RecordingFileMeta {
+            room_id: Some(room_id.to_string()),
+            streamer_name: Some("test_streamer".to_string()),
+            stream_title: Some("test_title".to_string()),
+            recorded_at: Some(recorded_at.to_string()),
+            duration_ms,
+            file_path: PathBuf::from(format!("/test/{}.flv", recorded_at)),
+            file_name: format!("{}.flv", recorded_at),
+            extension: "flv".to_string(),
+            associated_files: vec![],
+        }
+    }
+
+    // ===== parse_timestamp_secs =====
+
+    #[test]
+    fn test_parse_timestamp_secs_valid() {
+        let secs = parse_timestamp_secs("2026-04-05 20:30:00");
+        assert!(secs.is_some());
+        // (2026*365 + 4*30 + 5) * 86400 + 20*3600 + 30*60 + 0
+        let expected = (2026i64 * 365 + 4 * 30 + 5) * 86400 + 20 * 3600 + 30 * 60;
+        assert_eq!(secs.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_timestamp_secs_invalid() {
+        assert!(parse_timestamp_secs("").is_none());
+        assert!(parse_timestamp_secs("invalid").is_none());
+        assert!(parse_timestamp_secs("2026-04-05").is_none()); // missing time part
+    }
+
+    // ===== group_into_sessions =====
+
+    #[test]
+    fn test_group_empty() {
+        let sessions = group_into_sessions(&[], 3600);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn test_group_single_file() {
+        let files = vec![make_meta("12345", "2026-04-05 20:00:00", Some(3600000))];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 1);
+        assert_eq!(sessions[0].room_id, "12345");
+    }
+
+    #[test]
+    fn test_group_same_session() {
+        // Two files 30min apart, both within 1h threshold
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)), // 20:00-20:30
+            make_meta("12345", "2026-04-05 20:30:00", Some(1800000)), // 20:30-21:00
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_split_by_large_gap() {
+        // Two files 2h apart, exceeding 1h threshold
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)), // 20:00-20:30
+            make_meta("12345", "2026-04-05 22:00:00", Some(1800000)), // 22:00-22:30
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].files.len(), 1);
+        assert_eq!(sessions[1].files.len(), 1);
+    }
+
+    #[test]
+    fn test_group_different_rooms() {
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(3600000)),
+            make_meta("67890", "2026-04-05 20:00:00", Some(3600000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_group_no_duration_fallback() {
+        // Files without duration info — gap = start - start (not start - end)
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", None),
+            make_meta("12345", "2026-04-05 20:10:00", None),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        // 10min gap < 1h → same session
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_unordered_input() {
+        // Input files in reverse order
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:30:00", Some(1800000)),
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        // Should be sorted and grouped into one session
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_no_room_id() {
+        let mut file = make_meta("12345", "2026-04-05 20:00:00", None);
+        file.room_id = None;
+        let sessions = group_into_sessions(&[file], 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].room_id, "unknown");
+    }
+}
