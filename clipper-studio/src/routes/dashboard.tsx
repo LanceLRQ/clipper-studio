@@ -38,6 +38,7 @@ const staticNavItems: NavItem[] = [
   { to: "/dashboard", label: "首页", exact: true },
   { to: "/dashboard/videos", label: "视频列表" },
   { to: "/dashboard/tasks", label: "任务中心" },
+  { to: "/dashboard/asr", label: "语音识别" },
   {
     to: "/dashboard/plugins",
     label: "插件",
@@ -170,7 +171,7 @@ function ASRStatusIndicator() {
       size="sm"
       title={tip}
       className={`gap-1.5 ${colorClass}`}
-      onClick={() => navigate({ to: "/dashboard/settings", search: { section: "asr" } })}
+      onClick={() => navigate({ to: "/dashboard/asr" })}
     >
       <Mic className="h-4 w-4" />
       <span className="hidden sm:inline text-xs">{modeLabel}</span>
