@@ -695,6 +695,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "hex",
+ "libc",
  "mime",
  "notify",
  "notify-debouncer-full",

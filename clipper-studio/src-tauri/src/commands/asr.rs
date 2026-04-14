@@ -542,7 +542,7 @@ pub async fn start_asr_service(
 
     state
         .asr_service_manager
-        .start_external(Path::new(&base_path), config, app_handle)
+        .start_service(Path::new(&base_path), config, app_handle)
         .await
 }
 

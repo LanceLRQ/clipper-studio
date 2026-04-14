@@ -1,14 +1,18 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 
 use super::provider::ASRHealthInfo;
 
-/// Maximum log lines retained
+/// Maximum log lines retained in the ring buffer
+const MAX_LOG_LINES: usize = 2000;
+
 /// Health check interval during startup (seconds)
 const HEALTH_CHECK_INTERVAL_SECS: u64 = 3;
 
@@ -171,9 +175,10 @@ impl ASRServiceManager {
         }
     }
 
-    /// Start the ASR service by opening an external terminal window.
-    /// The service is NOT managed as a child process; health is monitored via HTTP.
-    pub async fn start_external(
+    /// Start the ASR service as a managed silent child process.
+    /// stdout/stderr are captured into the log ring buffer.
+    /// The process is killed when stop() is called or the app exits.
+    pub async fn start_service(
         self: &Arc<Self>,
         base_dir: &Path,
         config: ASRStartConfig,
@@ -209,10 +214,10 @@ impl ASRServiceManager {
         }
 
         let working_dir = base_dir.join("asr-service");
-        let args = build_start_script_args(&config);
+        let args = build_script_args(&config);
 
         tracing::info!(
-            "Starting ASR service via external terminal: {} {}",
+            "Starting ASR service: {} {}",
             script_path.display(),
             args.join(" ")
         );
@@ -225,77 +230,64 @@ impl ASRServiceManager {
             *hi = None;
         }
 
-        // Launch external terminal
+        // Spawn the start script as a managed child process.
+        // Merge stderr into stdout (2>&1) to avoid duplicate log lines.
+        let script_str = script_path.to_string_lossy().to_string();
+        let args_str = args.join(" ");
+
         #[cfg(target_os = "windows")]
-        {
-            std::process::Command::new("cmd")
-                .args(["/C", "start", "ASR Service"])
-                .arg(&script_path)
-                .args(&args)
+        let mut child = tokio::process::Command::new("cmd")
+            .args(["/C", &format!("{} {} 2>&1", script_str, args_str)])
+            .current_dir(&working_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("启动 ASR 服务失败：{}", e))?;
+
+        #[cfg(not(target_os = "windows"))]
+        let mut child = {
+            let mut cmd = tokio::process::Command::new("bash");
+            cmd.arg("-c")
+                .arg(format!("'{}' {} 2>&1", script_str, args_str))
                 .current_dir(&working_dir)
-                .spawn()
-                .map_err(|e| format!("启动终端失败：{}", e))?;
-        }
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .stdin(Stdio::null())
+                .kill_on_drop(true);
+            // Create a new process group so we can kill the entire tree
+            unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+            cmd.spawn()
+                .map_err(|e| format!("启动 ASR 服务失败：{}", e))?
+        };
 
-        #[cfg(target_os = "macos")]
-        {
-            let script_str = script_path.to_string_lossy().to_string();
-            let args_str = args.join(" ");
-            let osa_script = format!(
-                "tell application \"Terminal\"\nactivate\ndo script \"cd '{}' && '{}' {}\"\nend tell",
-                working_dir.to_string_lossy(),
-                script_str,
-                args_str,
-            );
-            std::process::Command::new("osascript")
-                .arg("-e")
-                .arg(&osa_script)
-                .spawn()
-                .map_err(|e| format!("启动终端失败：{}", e))?;
-        }
+        // Take stdout handle (stderr is merged into stdout via 2>&1)
+        let stdout = child.stdout.take();
 
-        #[cfg(target_os = "linux")]
-        {
-            let script_str = script_path.to_string_lossy().to_string();
-            let args_str = args.join(" ");
-            let cmd_str = format!(
-                "cd '{}' && '{}' {} ; exec bash",
-                working_dir.to_string_lossy(),
-                script_str,
-                args_str,
-            );
-            let terminals = ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"];
-            let mut launched = false;
-            for term in &terminals {
-                let result = match *term {
-                    "gnome-terminal" | "xfce4-terminal" => std::process::Command::new(term)
-                        .arg("--")
-                        .arg("bash")
-                        .arg("-c")
-                        .arg(&cmd_str)
-                        .spawn(),
-                    _ => std::process::Command::new(term)
-                        .arg("-e")
-                        .arg("bash")
-                        .arg("-c")
-                        .arg(&cmd_str)
-                        .spawn(),
-                };
-                if result.is_ok() {
-                    launched = true;
-                    break;
-                }
-            }
-            if !launched {
-                return Err("未找到可用的终端模拟器（已尝试 gnome-terminal/konsole/xfce4-terminal/xterm）".to_string());
-            }
+        // Store child process
+        if let Ok(mut guard) = self.child.lock() {
+            *guard = Some(child);
         }
 
         // Set status to Starting and notify frontend
         self.set_status(ASRServiceStatus::Starting);
         self.emit_status(&app_handle);
 
-        // Spawn background health check polling task (external mode, no process check)
+        // Spawn single log reader (merged stdout+stderr)
+        if let Some(stdout) = stdout {
+            let mgr = Arc::clone(self);
+            let app_h = app_handle.clone();
+            tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    mgr.push_log(&line, &app_h);
+                }
+            });
+        }
+
+        // Spawn background task: health check polling + process exit monitoring
         let health_url = format!("http://{}:{}/v1/health", config.host, config.port);
         let mgr = Arc::clone(self);
         let app_h = app_handle.clone();
@@ -314,6 +306,15 @@ impl ASRServiceManager {
                 if mgr.status() == ASRServiceStatus::Stopping
                     || mgr.status() == ASRServiceStatus::Stopped
                 {
+                    return;
+                }
+
+                // Check if the child process has exited prematurely
+                if !mgr.is_running() {
+                    let msg = "ASR 服务进程异常退出，请查看日志了解原因".to_string();
+                    tracing::warn!("{}", msg);
+                    mgr.set_status(ASRServiceStatus::Error { message: msg });
+                    mgr.emit_status(&app_h);
                     return;
                 }
 
@@ -349,6 +350,9 @@ impl ASRServiceManager {
                             }
                             mgr.set_status(ASRServiceStatus::Running);
                             mgr.emit_status(&app_h);
+
+                            // Continue monitoring process liveness after healthy
+                            mgr.monitor_process(app_h).await;
                             return;
                         }
                     }
@@ -377,7 +381,7 @@ impl ASRServiceManager {
             }
 
             // Timeout: service did not become healthy
-            let msg = "ASR 服务启动超时，请查看外部终端窗口了解原因".to_string();
+            let msg = "ASR 服务启动超时，请查看日志了解原因".to_string();
             tracing::warn!("{}", msg);
             mgr.set_status(ASRServiceStatus::Error { message: msg });
             mgr.emit_status(&app_h);
@@ -386,20 +390,71 @@ impl ASRServiceManager {
         Ok(())
     }
 
-    /// Stop the ASR service
-    /// For external terminal mode (no child process), only updates status.
-    /// The user should close the terminal window manually.
+    /// Monitor the child process after it becomes healthy.
+    /// If the process exits unexpectedly, update status to Error.
+    async fn monitor_process(self: &Arc<Self>, app_handle: AppHandle) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+            let current = self.status();
+            if current == ASRServiceStatus::Stopping || current == ASRServiceStatus::Stopped {
+                return;
+            }
+
+            if !self.is_running() {
+                let msg = "ASR 服务进程异常退出".to_string();
+                tracing::warn!("{}", msg);
+                if let Ok(mut hi) = self.health_info.lock() {
+                    *hi = None;
+                }
+                self.set_status(ASRServiceStatus::Error { message: msg });
+                self.emit_status(&app_handle);
+                return;
+            }
+        }
+    }
+
+    /// Push a log line into the ring buffer and emit event
+    fn push_log(&self, line: &str, app_handle: &AppHandle) {
+        if let Ok(mut logs) = self.logs.lock() {
+            if logs.len() >= MAX_LOG_LINES {
+                logs.pop_front();
+            }
+            logs.push_back(line.to_string());
+        }
+        let _ = app_handle.emit("asr-service-log", line);
+    }
+
+    /// Stop the ASR service by killing the managed child process (and its process group on Unix).
     pub async fn stop(&self) -> Result<(), String> {
         self.set_status(ASRServiceStatus::Stopping);
 
-        // Try to kill child process (works for internal process mode)
         let child = self.child.lock().ok().and_then(|mut g| g.take());
         if let Some(mut child) = child {
-            tracing::info!("Stopping ASR service (child process)...");
-            let _ = child.kill().await;
+            tracing::info!("Stopping ASR service (killing child process)...");
+
+            // On Unix, kill the entire process group to ensure Python subprocess is terminated
+            #[cfg(not(target_os = "windows"))]
+            {
+                if let Some(pid) = child.id() {
+                    unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
+                    // Give the process a moment to shut down gracefully
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    // Force kill if still running
+                    if child.try_wait().ok().flatten().is_none() {
+                        unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+                    }
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                let _ = child.kill().await;
+            }
+
             let _ = child.wait().await;
         } else {
-            tracing::info!("No child process (external terminal mode), updating status only");
+            tracing::info!("No child process found, updating status only");
         }
 
         // Clear health info
@@ -560,7 +615,6 @@ impl Drop for ASRServiceManager {
 
 // ==================== Helpers ====================
 
-/// Get the platform-appropriate python path within the service directory
 /// Get the start script path for the current platform
 fn get_start_script_path(base_dir: &Path) -> PathBuf {
     #[cfg(target_os = "windows")]
@@ -585,8 +639,8 @@ fn get_setup_script_path(base_dir: &Path) -> PathBuf {
     }
 }
 
-/// Build command-line arguments from ASRStartConfig for the start script
-fn build_start_script_args(config: &ASRStartConfig) -> Vec<String> {
+/// Build command-line arguments for the start script
+fn build_script_args(config: &ASRStartConfig) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--host".to_string(),
         config.host.clone(),

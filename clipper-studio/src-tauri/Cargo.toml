@@ -33,6 +33,10 @@ reqwest.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 
+# Process management (Unix process group kill)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Database - sea-orm for modeling/migration, rusqlite for raw SQL
 sea-orm = { version = "1", features = [
     "sqlx-sqlite",

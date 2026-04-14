@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,12 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getSettings, setSetting } from "@/services/settings";
 import {
   checkASRHealth,
@@ -97,6 +103,7 @@ function ASRSettingsContent() {
   const [serviceLogs, setServiceLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [serviceActionLoading, setServiceActionLoading] = useState(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getSettings([
@@ -133,6 +140,33 @@ function ASRSettingsContent() {
     let unlisten: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
       setServiceStatus(event.payload);
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // Auto-trigger health check when local service becomes running
+  useEffect(() => {
+    if (asrMode === "local" && serviceStatus?.status === "running") {
+      handleCheckHealth();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceStatus?.status]);
+
+  // Auto-scroll logs to bottom when new lines arrive
+  useEffect(() => {
+    if (showLogs && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [serviceLogs, showLogs]);
+
+  // Listen for real-time log events from the managed process
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<string>("asr-service-log", (event) => {
+      setServiceLogs((prev) => {
+        const next = [...prev, event.payload];
+        return next.length > 2000 ? next.slice(-2000) : next;
+      });
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
@@ -299,14 +333,22 @@ function ASRSettingsContent() {
               {asrChecking ? "检测中..." : "测试连接"}
             </Button>
           )}
-          {asrHealth && (
-            <span className={`text-sm ${asrHealth.status === "ready" ? "text-green-600" : "text-red-500"}`}>
-              {asrHealth.status === "ready"
-                ? `连接成功 (${asrHealth.device ?? "unknown"}${asrHealth.model_size ? ` / ${asrHealth.model_size}` : ""})`
-                : "连接失败"}
-            </span>
-          )}
         </div>
+
+        {/* Health info */}
+        {asrHealth && (
+          asrHealth.status === "ready" ? (
+            <div className="text-sm bg-green-500/10 border border-green-500/20 rounded-md px-4 py-3 space-y-1">
+              <div className="text-green-600 font-medium">连接成功</div>
+              <div className="text-muted-foreground">设备: <span className="font-medium text-foreground">{asrHealth.device ?? "unknown"}</span></div>
+              <div className="text-muted-foreground">模型: <span className="font-medium text-foreground">{asrHealth.model_size ?? "unknown"}</span></div>
+            </div>
+          ) : (
+            <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-md px-4 py-3">
+              连接失败
+            </div>
+          )
+        )}
       </section>
       </div>
 
@@ -333,14 +375,6 @@ function ASRSettingsContent() {
               </div>
             </div>
 
-            {/* Health info when running */}
-            {serviceStatus?.status === "running" && serviceStatus.health_info && (
-              <div className="text-sm text-muted-foreground bg-accent/30 rounded-md px-4 py-3 space-y-1">
-                <div>设备: <span className="font-medium text-foreground">{serviceStatus.health_info.device ?? "unknown"}</span></div>
-                <div>模型: <span className="font-medium text-foreground">{serviceStatus.health_info.model_size ?? "unknown"}</span></div>
-              </div>
-            )}
-
             {/* Error message */}
             {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
               <p className="text-sm text-red-500">
@@ -359,9 +393,6 @@ function ASRSettingsContent() {
                   >
                     {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
                   </Button>
-                  <span className="text-xs text-muted-foreground">
-                    服务在外部终端运行，请关闭终端窗口以完全停止
-                  </span>
                 </>
               ) : (
                 <Button
@@ -377,18 +408,9 @@ function ASRSettingsContent() {
               </Button>
 
               <Button variant="outline" onClick={handleViewLogs}>
-                {showLogs ? "隐藏日志" : "查看日志"}
+                查看日志
               </Button>
             </div>
-
-            {/* Logs panel */}
-            {showLogs && (
-              <div className="rounded-md border bg-muted/30 p-3 max-h-72 overflow-auto">
-                <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
-                  {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
-                </pre>
-              </div>
-            )}
           </section>
 
           {/* Local Service Config - scrollable */}
@@ -541,6 +563,21 @@ function ASRSettingsContent() {
           </section>
           </div>
       </div>
+
+      {/* Logs Dialog */}
+      <Dialog open={showLogs} onOpenChange={setShowLogs}>
+        <DialogContent className="max-w-[60vw] sm:max-w-[60vw] h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>ASR 服务日志</DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto rounded-md border bg-muted/30 p-3 min-h-0">
+            <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
+              {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
+            </pre>
+            <div ref={logsEndRef} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
