@@ -381,6 +381,14 @@ pub async fn cancel_clip(
     Ok(cancelled)
 }
 
+/// Check if there are any active clip tasks (pending or processing)
+#[tauri::command]
+pub async fn has_active_clip_tasks(
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    Ok(state.task_queue.has_active_tasks().await)
+}
+
 /// Retry a failed/cancelled clip task: reset status and re-enqueue with original parameters
 #[tauri::command]
 pub async fn retry_clip_task(

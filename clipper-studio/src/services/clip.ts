@@ -15,6 +15,10 @@ export async function cancelClip(taskId: number): Promise<boolean> {
   return invoke<boolean>("cancel_clip", { taskId });
 }
 
+export async function hasActiveClipTasks(): Promise<boolean> {
+  return invoke<boolean>("has_active_clip_tasks");
+}
+
 export async function retryClipTask(taskId: number): Promise<ClipTaskInfo> {
   return invoke<ClipTaskInfo>("retry_clip_task", { taskId });
 }

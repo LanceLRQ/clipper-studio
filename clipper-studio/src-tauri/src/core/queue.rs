@@ -135,6 +135,19 @@ impl TaskQueue {
         });
     }
 
+    /// Check if there are any active (pending/processing) tasks (async version)
+    pub async fn has_active_tasks(&self) -> bool {
+        !self.cancel_tokens.lock().await.is_empty()
+    }
+
+    /// Check if there are any active tasks (sync, non-blocking, for use in window event handlers)
+    pub fn has_active_tasks_sync(&self) -> bool {
+        self.cancel_tokens
+            .try_lock()
+            .map(|tokens| !tokens.is_empty())
+            .unwrap_or(false)
+    }
+
     /// Cancel a running task
     pub async fn cancel(&self, task_id: TaskId) -> bool {
         let tokens = self.cancel_tokens.lock().await;

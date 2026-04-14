@@ -500,3 +500,9 @@ pub fn open_file(path: String) -> Result<(), String> {
 
     Ok(())
 }
+
+/// Force close the application window (called after user confirms close dialog)
+#[tauri::command]
+pub fn confirm_close(window: tauri::Window) -> Result<(), String> {
+    window.destroy().map_err(|e| e.to_string())
+}

@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { EncodingPreset, TaskProgressEvent } from "@/types/clip";
-import { createClip, listPresets } from "@/services/clip";
+import { createClip, cancelClip, listPresets } from "@/services/clip";
 
 interface ClipPanelProps {
   videoId: number;
@@ -41,6 +41,7 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
   const [endInput, setEndInput] = useState("00:00");
   const [title, setTitle] = useState("");
   const [clipping, setClipping] = useState(false);
+  const [currentTaskId, setCurrentTaskId] = useState<number | null>(null);
   const [taskProgress, setTaskProgress] = useState<TaskProgressEvent | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
@@ -124,19 +125,32 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
 
     setClipping(true);
     setTaskProgress(null);
+    setCurrentTaskId(null);
 
     try {
-      await createClip({
+      const task = await createClip({
         video_id: videoId,
         start_ms: Math.round(startTime * 1000),
         end_ms: Math.round(endTime * 1000),
         title: title || undefined,
         preset_id: selectedPresetId,
       });
+      setCurrentTaskId(task.id);
     } catch (e) {
       setClipping(false);
       alert("创建切片失败: " + String(e));
     }
+  };
+
+  const handleCancel = async () => {
+    if (currentTaskId == null) return;
+    try {
+      await cancelClip(currentTaskId);
+    } catch (e) {
+      console.error("取消切片失败:", e);
+    }
+    setClipping(false);
+    setCurrentTaskId(null);
   };
 
   const clipDuration = Math.max(0, endTime - startTime);
@@ -238,9 +252,18 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
       {/* Progress */}
       {taskProgress && clipping && (
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-muted-foreground">
+          <div className="flex justify-between items-center text-xs text-muted-foreground">
             <span>{taskProgress.message}</span>
-            <span>{Math.round(taskProgress.progress * 100)}%</span>
+            <div className="flex items-center gap-1.5">
+              <span>{Math.round(taskProgress.progress * 100)}%</span>
+              <button
+                className="px-1 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+                onClick={handleCancel}
+                title="取消切片"
+              >
+                ✕
+              </button>
+            </div>
           </div>
           <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
             <div
@@ -262,13 +285,23 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
       )}
 
       {/* Clip button */}
-      <Button
-        className="w-full"
-        onClick={handleClip}
-        disabled={clipping || clipDuration <= 0}
-      >
-        {clipping ? "切片中..." : "开始切片"}
-      </Button>
+      {clipping ? (
+        <Button
+          className="w-full"
+          variant="destructive"
+          onClick={handleCancel}
+        >
+          取消切片
+        </Button>
+      ) : (
+        <Button
+          className="w-full"
+          onClick={handleClip}
+          disabled={clipDuration <= 0}
+        >
+          开始切片
+        </Button>
+      )}
     </div>
   );
 }

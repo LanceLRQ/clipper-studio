@@ -76,7 +76,7 @@ impl ASRProvider for LocalASRProvider {
     async fn query(&self, task_id: &str) -> Result<ASRTaskStatus, String> {
         let resp = self
             .client
-            .get(format!("{}/v1/asr/{}", self.base_url, task_id))
+            .get(format!("{}/v1/tasks/{}", self.base_url, task_id))
             .send()
             .await
             .map_err(|e| format!("ASR query failed: {}", e))?;
@@ -122,6 +122,23 @@ impl ASRProvider for LocalASRProvider {
             }
             _ => Err(format!("Unknown ASR status: {}", status)),
         }
+    }
+
+    async fn cancel(&self, task_id: &str) -> Result<(), String> {
+        let resp = self
+            .client
+            .delete(format!("{}/v1/tasks/{}", self.base_url, task_id))
+            .send()
+            .await
+            .map_err(|e| format!("ASR cancel failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("ASR cancel HTTP {}: {}", status, body));
+        }
+
+        Ok(())
     }
 
     async fn health(&self) -> Result<ASRHealthInfo, String> {

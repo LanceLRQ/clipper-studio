@@ -71,6 +71,9 @@ pub trait ASRProvider: Send + Sync {
     /// Query task status and results.
     async fn query(&self, task_id: &str) -> Result<ASRTaskStatus, String>;
 
+    /// Cancel a remote ASR task. Best-effort; errors are logged but not fatal.
+    async fn cancel(&self, task_id: &str) -> Result<(), String>;
+
     /// Health check
     async fn health(&self) -> Result<ASRHealthInfo, String>;
 

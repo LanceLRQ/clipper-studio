@@ -267,6 +267,12 @@ impl ASRTaskQueue {
     }
 
     /// Get a snapshot of the current queue state.
+    /// Check if there are any active ASR tasks (running or queued). Synchronous.
+    pub fn has_active_tasks(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.running.is_some() || !inner.pending.is_empty()
+    }
+
     pub fn get_queue_snapshot(&self) -> Vec<ASRQueueItem> {
         let inner = self.inner.lock().unwrap();
         let mut items = Vec::new();
@@ -509,6 +515,10 @@ impl ASRTaskQueue {
 
         loop {
             if Self::check_cancelled(inner, task_id) {
+                // Notify remote ASR service to cancel the task (best-effort)
+                if let Err(e) = provider.cancel(&remote_task_id).await {
+                    tracing::warn!("Failed to cancel remote ASR task {}: {}", remote_task_id, e);
+                }
                 Self::do_mark_cancelled(db, app_handle, task_id, video_id, file_name).await;
                 return Ok(());
             }
@@ -516,6 +526,9 @@ impl ASRTaskQueue {
             tokio::time::sleep(tokio::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
             if Self::check_cancelled(inner, task_id) {
+                if let Err(e) = provider.cancel(&remote_task_id).await {
+                    tracing::warn!("Failed to cancel remote ASR task {}: {}", remote_task_id, e);
+                }
                 Self::do_mark_cancelled(db, app_handle, task_id, video_id, file_name).await;
                 return Ok(());
             }

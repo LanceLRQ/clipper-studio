@@ -71,7 +71,7 @@ impl ASRProvider for RemoteASRProvider {
     async fn query(&self, task_id: &str) -> Result<ASRTaskStatus, String> {
         let mut req = self
             .client
-            .get(format!("{}/v1/asr/{}", self.base_url, task_id));
+            .get(format!("{}/v1/tasks/{}", self.base_url, task_id));
         if let Some(ref key) = self.api_key {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
@@ -136,6 +136,25 @@ impl ASRProvider for RemoteASRProvider {
             }
             _ => Err(format!("Unknown ASR status: {}", status)),
         }
+    }
+
+    async fn cancel(&self, task_id: &str) -> Result<(), String> {
+        let mut req = self
+            .client
+            .delete(format!("{}/v1/tasks/{}", self.base_url, task_id));
+        if let Some(ref key) = self.api_key {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+
+        let resp = req.send().await.map_err(|e| format!("ASR cancel failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(format!("ASR cancel HTTP {}: {}", status, body));
+        }
+
+        Ok(())
     }
 
     async fn health(&self) -> Result<ASRHealthInfo, String> {
