@@ -21,6 +21,7 @@ use tauri::Manager;
 use std::sync::Arc;
 
 use crate::asr::manager::ASRServiceManager;
+use crate::asr::queue::ASRTaskQueue;
 use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
@@ -36,7 +37,7 @@ pub struct AppState {
     pub db: Database,
     pub config: RwLock<AppConfig>,
     pub config_dir: std::path::PathBuf,
-    pub ffmpeg_path: RwLock<String>,
+    pub ffmpeg_path: Arc<RwLock<String>>,
     pub ffprobe_path: RwLock<String>,
     pub media_server_port: u16,
     pub task_queue: Arc<TaskQueue>,
@@ -45,6 +46,7 @@ pub struct AppState {
     pub plugin_manager: Arc<PluginManager>,
     pub plugin_registry: Arc<PluginRegistry>,
     pub asr_service_manager: Arc<ASRServiceManager>,
+    pub asr_task_queue: Arc<ASRTaskQueue>,
     pub dep_manager: Arc<DependencyManager>,
     pub bin_dir: std::path::PathBuf,
 }
@@ -201,6 +203,16 @@ pub fn run() {
             // Initialize ASR service manager
             let asr_service_manager = Arc::new(ASRServiceManager::new());
 
+            // Create shared ffmpeg_path for ASR task queue
+            let ffmpeg_path_shared = Arc::new(RwLock::new(ffmpeg_path.unwrap_or_default()));
+
+            // Initialize ASR task queue (must be after db init)
+            let asr_task_queue = Arc::new(ASRTaskQueue::new(
+                app.handle().clone(),
+                db.clone(),
+                ffmpeg_path_shared.clone(),
+            ));
+
             // Set up system tray
             shell::tray::setup_tray(app)?;
 
@@ -209,7 +221,7 @@ pub fn run() {
                 db: db.clone(),
                 config: RwLock::new(app_config),
                 config_dir: data_dir,
-                ffmpeg_path: RwLock::new(ffmpeg_path.unwrap_or_default()),
+                ffmpeg_path: ffmpeg_path_shared,
                 ffprobe_path: RwLock::new(ffprobe_path.unwrap_or_default()),
                 danmaku_factory_path: RwLock::new(danmaku_factory_path.unwrap_or_default()),
                 media_server_port,
@@ -218,9 +230,13 @@ pub fn run() {
                 plugin_manager: plugin_manager.clone(),
                 plugin_registry: plugin_registry.clone(),
                 asr_service_manager: asr_service_manager.clone(),
+                asr_task_queue: asr_task_queue.clone(),
                 dep_manager: dep_manager.clone(),
                 bin_dir: bin_dir.clone(),
             });
+
+            // Start ASR task queue worker (after AppState is managed)
+            asr_task_queue.start();
 
             // Start watching existing workspaces with auto_scan enabled
             let watcher_clone = watcher.clone();
@@ -330,6 +346,9 @@ pub fn run() {
             commands::asr::open_asr_setup_terminal,
             commands::asr::get_asr_service_status,
             commands::asr::get_asr_service_logs,
+            commands::asr::submit_asr_queued,
+            commands::asr::cancel_asr_task,
+            commands::asr::get_asr_queue_snapshot,
             commands::tag::create_tag,
             commands::tag::list_tags,
             commands::tag::update_tag,

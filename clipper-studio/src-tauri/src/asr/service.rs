@@ -44,7 +44,7 @@ pub struct ASRTaskInfo {
 ///
 /// Uses FFmpeg: `ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_s16le output.wav`
 /// Returns the path to the temporary WAV file.
-async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathBuf, String> {
+pub async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathBuf, String> {
     let temp_dir = std::env::temp_dir();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -345,7 +345,7 @@ pub async fn poll_asr(
 ///
 /// Converts file-relative time (seconds) to absolute time (Unix ms)
 /// using the video's `recorded_at` timestamp.
-async fn import_segments(
+pub async fn import_segments(
     db: &Database,
     video_id: i64,
     language: &str,
@@ -415,7 +415,7 @@ async fn import_segments(
 }
 
 /// Read a setting value from settings_kv table
-async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
+pub async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
     sea_orm::ConnectionTrait::query_one(
         db.conn(),
         sea_orm::Statement::from_string(

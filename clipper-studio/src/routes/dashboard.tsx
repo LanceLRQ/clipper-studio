@@ -7,6 +7,7 @@ import { getAppInfo } from "@/services/workspace";
 import { getSettings } from "@/services/settings";
 import { getASRServiceStatus, checkASRHealth, type ASRServiceStatusInfo } from "@/services/asr";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { useASRQueueStore, useASRActiveCount, useASRRunningTask } from "@/stores/asr-queue";
 import bannerImg from "@/assets/banner.png";
 import bannerDarkImg from "@/assets/banner-dark.png";
 import { listPlugins } from "@/services/plugin";
@@ -76,6 +77,10 @@ function ASRStatusIndicator() {
   const [localStatus, setLocalStatus] = useState<ASRServiceStatusInfo | null>(null);
   const [asrMode, setAsrMode] = useState<string>("local");
   const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
+
+  // ASR queue state
+  const activeCount = useASRActiveCount();
+  const runningTask = useASRRunningTask();
 
   useEffect(() => {
     getSettings(["asr_mode"]).then((s) => {
@@ -159,6 +164,14 @@ function ASRStatusIndicator() {
     }
   }
 
+  // Enhance tooltip with queue info
+  if (activeCount > 0) {
+    tip += ` | ${activeCount} 个识别任务`;
+    if (runningTask) {
+      tip += ` (${Math.round(runningTask.progress * 100)}%)`;
+    }
+  }
+
   // Mode label for display
   const modeLabel =
     asrMode === "disabled" ? "禁用"
@@ -175,6 +188,18 @@ function ASRStatusIndicator() {
     >
       <Mic className="h-4 w-4" />
       <span className="hidden sm:inline text-xs">{modeLabel}</span>
+      {activeCount > 0 && (
+        <>
+          <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary text-primary-foreground px-1 text-[10px] font-medium">
+            {activeCount}
+          </span>
+          {runningTask && (
+            <span className="hidden sm:inline text-[10px] tabular-nums">
+              {Math.round(runningTask.progress * 100)}%
+            </span>
+          )}
+        </>
+      )}
       <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotColor}`} />
     </Button>
   );
@@ -187,6 +212,7 @@ function DashboardLayout() {
   const wsActiveId = useWorkspaceStore((s) => s.activeId);
   const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
   const wsRecheckPath = useWorkspaceStore((s) => s.recheckPath);
+  const initializeASRQueue = useASRQueueStore((s) => s.initialize);
 
   const [version, setVersion] = useState("");
   const [enabledPlugins, setEnabledPlugins] = useState<PluginInfo[]>([]);
@@ -205,6 +231,11 @@ function DashboardLayout() {
       .then((info) => setVersion(info.version))
       .catch(console.error);
   }, []);
+
+  // Initialize ASR task queue store
+  useEffect(() => {
+    initializeASRQueue();
+  }, [initializeASRQueue]);
 
   // Cmd+K / Ctrl+K keyboard shortcut for search
   useEffect(() => {

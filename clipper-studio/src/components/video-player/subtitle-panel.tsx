@@ -3,12 +3,9 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { SubtitleSegment, ASRTaskInfo, ASRServiceStatusInfo } from "@/services/asr";
+import type { SubtitleSegment, ASRServiceStatusInfo } from "@/services/asr";
 import {
-  submitASR,
-  pollASR,
   listSubtitles,
-  listASRTasks,
   checkASRHealth,
   getASRServiceStatus,
   exportSubtitlesSrt,
@@ -16,6 +13,7 @@ import {
   exportSubtitlesVtt,
 } from "@/services/asr";
 import { getSettings } from "@/services/settings";
+import { useASRQueueStore, useASRTaskForVideo } from "@/stores/asr-queue";
 
 interface SubtitlePanelProps {
   videoId: number;
@@ -37,6 +35,17 @@ function formatTime(secs: number): string {
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+/** Human-readable status label */
+function statusLabel(status: string): string {
+  switch (status) {
+    case "queued": return "排队中...";
+    case "converting": return "音频转换中...";
+    case "submitting": return "提交识别任务...";
+    case "processing": return "ASR 识别中...";
+    default: return status;
+  }
+}
+
 export function SubtitlePanel({
   videoId,
   currentTime,
@@ -46,21 +55,28 @@ export function SubtitlePanel({
 }: SubtitlePanelProps) {
   const [segments, setSegments] = useState<SubtitleSegment[]>([]);
   const [baseTimeMs, setBaseTimeMs] = useState(0);
-  const [asrTask, setAsrTask] = useState<ASRTaskInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const activeRef = useRef<HTMLDivElement>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ASR service availability
   const [asrMode, setAsrMode] = useState<string>("local");
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
 
+  // ASR queue store
+  const queueTask = useASRTaskForVideo(videoId);
+  const submitTask = useASRQueueStore((s) => s.submitTask);
+  const cancelTask = useASRQueueStore((s) => s.cancelTask);
+
   // Whether ASR is available for use
   const asrAvailable =
     asrMode === "disabled" ? false
-    : asrMode === "remote" ? true  // remote mode always allows attempt
-    : serviceStatus?.status === "running";  // local mode requires running service
+    : asrMode === "remote" ? true
+    : serviceStatus?.status === "running";
+
+  // Determine if there is an active task from the store
+  const isTaskActive = queueTask != null &&
+    ["queued", "converting", "submitting", "processing"].includes(queueTask.status);
 
   const loadSubtitles = async () => {
     const resp = await listSubtitles(videoId);
@@ -86,43 +102,17 @@ export function SubtitlePanel({
     return () => { unlisten?.(); };
   }, []);
 
-  // Load subtitles and ASR task status
+  // Load subtitles on mount
   useEffect(() => {
     loadSubtitles().catch(console.error);
-    listASRTasks(videoId).then((tasks) => {
-      const active = tasks.find(
-        (t) => t.status === "processing" || t.status === "pending"
-      );
-      if (active) setAsrTask(active);
-    }).catch(console.error);
   }, [videoId]);
 
-  // Poll ASR task progress
+  // When task completes via store, reload subtitles
   useEffect(() => {
-    if (!asrTask || (asrTask.status !== "processing" && asrTask.status !== "pending")) {
-      return;
+    if (queueTask?.status === "completed") {
+      loadSubtitles().catch(console.error);
     }
-
-    pollRef.current = setInterval(async () => {
-      try {
-        const updated = await pollASR(asrTask.id);
-        setAsrTask(updated);
-        if (updated.status === "completed") {
-          // Reload subtitles
-          await loadSubtitles();
-          if (pollRef.current) clearInterval(pollRef.current);
-        } else if (updated.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-        }
-      } catch (e) {
-        console.error("ASR poll error:", e);
-      }
-    }, 3000);
-
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [asrTask?.id, asrTask?.status, videoId]);
+  }, [queueTask?.status, videoId]);
 
   // Auto-scroll to active subtitle
   useEffect(() => {
@@ -149,18 +139,7 @@ export function SubtitlePanel({
         return;
       }
 
-      const taskId = await submitASR(videoId, undefined, true);
-      setAsrTask({
-        id: taskId,
-        video_id: videoId,
-        status: "processing",
-        progress: 0,
-        error_message: null,
-        retry_count: 0,
-        segment_count: null,
-        created_at: new Date().toISOString(),
-        completed_at: null,
-      });
+      await submitTask(videoId);
     } catch (e) {
       alert("ASR 提交失败: " + String(e));
     } finally {
@@ -242,7 +221,7 @@ export function SubtitlePanel({
                   if (!(await ask("重新识别将覆盖当前字幕，确定继续？", { title: "重新 ASR 识别", kind: "warning" }))) return;
                   await handleSubmitASR();
                 }}
-                disabled={!asrAvailable || loading || (asrTask?.status === "processing" || asrTask?.status === "pending")}
+                disabled={!asrAvailable || loading || isTaskActive}
                 title={!asrAvailable ? "ASR 服务未就绪" : "重新识别（将覆盖当前字幕）"}
               >
                 重新生成
@@ -252,25 +231,47 @@ export function SubtitlePanel({
         </div>
       </div>
 
-      {/* ASR progress or submit button */}
-      {asrTask &&
-      (asrTask.status === "processing" || asrTask.status === "pending") ? (
+      {/* ASR progress (from global store) or submit button */}
+      {isTaskActive ? (
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>ASR 识别中...</span>
-            <span>{Math.round(asrTask.progress * 100)}%</span>
+          <div className="flex justify-between items-center text-xs text-muted-foreground">
+            <span>{statusLabel(queueTask!.status)}</span>
+            <div className="flex items-center gap-1.5">
+              {queueTask!.status === "processing" && (
+                <span>{Math.round(queueTask!.progress * 100)}%</span>
+              )}
+              <button
+                className="px-1 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+                onClick={() => cancelTask(queueTask!.task_id)}
+                title="取消任务"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary transition-all duration-300"
-              style={{ width: `${asrTask.progress * 100}%` }}
-            />
-          </div>
+          {queueTask!.status === "processing" && (
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary transition-all duration-300"
+                style={{ width: `${queueTask!.progress * 100}%` }}
+              />
+            </div>
+          )}
+          {(queueTask!.status === "converting" || queueTask!.status === "submitting") && (
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-primary/60 animate-pulse rounded-full" style={{ width: "100%" }} />
+            </div>
+          )}
+          {queueTask!.status === "queued" && (
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-muted-foreground/30 rounded-full" style={{ width: "100%" }} />
+            </div>
+          )}
         </div>
-      ) : asrTask?.status === "failed" ? (
+      ) : queueTask?.status === "failed" ? (
         <div className="space-y-1">
           <div className="text-xs text-red-500">
-            ASR 失败: {asrTask.error_message}
+            ASR 失败: {queueTask.error_message}
           </div>
           <Button size="sm" variant="outline" className="text-xs" onClick={handleSubmitASR}
             disabled={!asrAvailable}>

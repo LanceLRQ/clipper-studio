@@ -178,3 +178,40 @@ export async function getASRServiceLogs(
 ): Promise<string[]> {
   return invoke<string[]>("get_asr_service_logs", { limit });
 }
+
+// ==================== ASR Task Queue ====================
+
+export interface ASRQueueItem {
+  task_id: number;
+  video_id: number;
+  video_file_name: string;
+  status: string;
+  progress: number;
+  message?: string;
+  error_message?: string;
+}
+
+export interface ASRTaskProgressEvent {
+  task_id: number;
+  video_id: number;
+  status: string;
+  progress: number;
+  message?: string;
+  error_message?: string;
+  video_file_name: string;
+}
+
+export async function submitASRQueued(
+  videoId: number,
+  language?: string,
+): Promise<number> {
+  return invoke<number>("submit_asr_queued", { videoId, language });
+}
+
+export async function cancelASRTask(asrTaskId: number): Promise<boolean> {
+  return invoke<boolean>("cancel_asr_task", { asrTaskId });
+}
+
+export async function getASRQueueSnapshot(): Promise<ASRQueueItem[]> {
+  return invoke<ASRQueueItem[]>("get_asr_queue_snapshot");
+}

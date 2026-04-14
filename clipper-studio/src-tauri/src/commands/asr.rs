@@ -6,6 +6,7 @@ use tauri::{Emitter, State};
 use crate::asr::local::LocalASRProvider;
 use crate::asr::manager::{ASRPathValidation, ASRServiceManager, ASRServiceStatusInfo, ASRStartConfig};
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
+use crate::asr::queue::ASRQueueItem;
 use crate::asr::remote::RemoteASRProvider;
 use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult, SubtitleSegment};
 use crate::AppState;
@@ -593,4 +594,44 @@ pub fn get_asr_service_logs(
     limit: Option<usize>,
 ) -> Result<Vec<String>, String> {
     Ok(state.asr_service_manager.get_logs(limit.unwrap_or(200)))
+}
+
+// ==================== ASR Task Queue ====================
+
+/// Submit an ASR task to the queue (enqueue for serial execution)
+#[tauri::command]
+pub async fn submit_asr_queued(
+    state: State<'_, AppState>,
+    video_id: i64,
+    language: Option<String>,
+) -> Result<i64, String> {
+    // Resolve language: param > settings > default
+    let lang = match language {
+        Some(l) if !l.is_empty() => l,
+        _ => read_setting(&state, "asr_language")
+            .await
+            .unwrap_or_else(|| "Chinese".to_string()),
+    };
+
+    state
+        .asr_task_queue
+        .enqueue(video_id, lang)
+        .await
+}
+
+/// Cancel an ASR task (queued or running)
+#[tauri::command]
+pub fn cancel_asr_task(
+    state: State<'_, AppState>,
+    asr_task_id: i64,
+) -> Result<bool, String> {
+    state.asr_task_queue.cancel(asr_task_id)
+}
+
+/// Get current ASR queue snapshot (running + pending tasks)
+#[tauri::command]
+pub fn get_asr_queue_snapshot(
+    state: State<'_, AppState>,
+) -> Result<Vec<ASRQueueItem>, String> {
+    Ok(state.asr_task_queue.get_queue_snapshot())
 }

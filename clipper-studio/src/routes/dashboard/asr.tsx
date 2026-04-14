@@ -29,6 +29,8 @@ import {
   type ASRPathValidation,
   type ASRServiceStatusInfo,
 } from "@/services/asr";
+import { useASRQueueStore, useASRActiveTasks } from "@/stores/asr-queue";
+import type { ASRQueueItem } from "@/services/asr";
 
 type ASRMode = "local" | "remote" | "disabled";
 
@@ -251,8 +253,9 @@ function ASRSettingsContent() {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0">
-      {/* Left column: Basic ASR Settings */}
+      {/* Left column: Queue Display + Basic ASR Settings */}
       <div className="overflow-y-auto min-h-0 pr-1">
+      <ASRQueueDisplay />
       <section className="rounded-lg border p-5 space-y-4">
         <h3 className="font-medium text-lg">基本设置</h3>
 
@@ -578,6 +581,107 @@ function ASRSettingsContent() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ==================== ASR Queue Display ====================
+
+function queueStatusLabel(status: string): string {
+  switch (status) {
+    case "queued": return "排队中";
+    case "converting": return "音频转换中...";
+    case "submitting": return "提交任务...";
+    case "processing": return "识别中";
+    default: return status;
+  }
+}
+
+function ASRQueueDisplay() {
+  const activeTasks = useASRActiveTasks();
+  const cancelTask = useASRQueueStore((s) => s.cancelTask);
+
+  if (activeTasks.length === 0) return null;
+
+  // Running task first, then queued tasks
+  const running = activeTasks.filter(
+    (t) => t.status === "converting" || t.status === "submitting" || t.status === "processing"
+  );
+  const queued = activeTasks.filter((t) => t.status === "queued");
+  const sorted = [...running, ...queued];
+
+  return (
+    <section className="rounded-lg border p-5 space-y-3 mb-6">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium text-lg">识别队列</h3>
+        <span className="text-xs text-muted-foreground">{activeTasks.length} 个任务</span>
+      </div>
+      <div className="space-y-2">
+        {sorted.map((task) => (
+          <ASRQueueTaskRow
+            key={task.task_id}
+            task={task}
+            queuePosition={task.status === "queued" ? queued.indexOf(task) + 1 : undefined}
+            onCancel={() => cancelTask(task.task_id)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ASRQueueTaskRow({
+  task,
+  queuePosition,
+  onCancel,
+}: {
+  task: ASRQueueItem;
+  queuePosition?: number;
+  onCancel: () => void;
+}) {
+  const isRunning = task.status !== "queued";
+
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm shrink-0">
+            {isRunning ? "▶" : "⏳"}
+          </span>
+          <span className="text-sm truncate" title={task.video_file_name}>
+            {task.video_file_name}
+          </span>
+        </div>
+        <button
+          className="shrink-0 px-1.5 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+          onClick={onCancel}
+          title="取消任务"
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {queuePosition != null
+            ? `${queueStatusLabel(task.status)}（第 ${queuePosition} 位）`
+            : task.status === "processing"
+              ? `${queueStatusLabel(task.status)} ${Math.round(task.progress * 100)}%`
+              : queueStatusLabel(task.status)}
+        </span>
+      </div>
+      {task.status === "processing" && (
+        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary transition-all duration-300"
+            style={{ width: `${task.progress * 100}%` }}
+          />
+        </div>
+      )}
+      {(task.status === "converting" || task.status === "submitting") && (
+        <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
+          <div className="h-full bg-primary/60 animate-pulse rounded-full" style={{ width: "100%" }} />
+        </div>
+      )}
     </div>
   );
 }
