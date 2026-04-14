@@ -17,6 +17,7 @@ pub mod asr;
 use std::sync::RwLock;
 
 use tauri::Manager;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use std::sync::Arc;
 
@@ -366,6 +367,37 @@ pub fn run() {
             commands::deps::set_deps_proxy,
             commands::deps::get_deps_proxy,
         ])
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                let has_clip = state.task_queue.has_active_tasks_sync();
+                let has_asr = state.asr_task_queue.has_active_tasks();
+
+                if has_clip || has_asr {
+                    api.prevent_close();
+
+                    let mut parts = Vec::new();
+                    if has_clip { parts.push("切片任务"); }
+                    if has_asr { parts.push("ASR 识别任务"); }
+                    let message = format!(
+                        "当前有{}正在运行，关闭应用将中断这些任务。确定要关闭吗？",
+                        parts.join("和")
+                    );
+
+                    let win = window.clone();
+                    window.dialog()
+                        .message(message)
+                        .title("确认关闭")
+                        .kind(MessageDialogKind::Warning)
+                        .buttons(MessageDialogButtons::OkCancelCustom("确认关闭".to_string(), "取消".to_string()))
+                        .show(move |confirmed| {
+                            if confirmed {
+                                let _ = win.destroy();
+                            }
+                        });
+                }
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building ClipperStudio")
         .run(|app_handle, event| {
