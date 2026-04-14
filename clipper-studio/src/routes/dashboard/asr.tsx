@@ -65,8 +65,7 @@ export const Route = createFileRoute("/dashboard/asr")({
 
 function ASRPage() {
   return (
-    <div className="space-y-4 p-6">
-      <h2 className="text-xl font-semibold">语音识别</h2>
+    <div className="h-full p-6">
       <ASRSettingsContent />
     </div>
   );
@@ -217,8 +216,9 @@ function ASRSettingsContent() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Basic ASR Settings */}
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0">
+      {/* Left column: Basic ASR Settings */}
+      <div className="overflow-y-auto min-h-0 pr-1">
       <section className="rounded-lg border p-5 space-y-4">
         <h3 className="font-medium text-lg">基本设置</h3>
 
@@ -308,10 +308,91 @@ function ASRSettingsContent() {
           )}
         </div>
       </section>
+      </div>
 
-      {/* Local Service Management (only when mode=local) */}
-      {asrMode === "local" && (
-        <>
+      {/* Right column: Service Control (sticky) + Local Config (scrollable) */}
+      <div className="flex flex-col min-h-0 h-full gap-6">
+          {/* Local Service Control - sticky */}
+          <section className="rounded-lg border p-5 space-y-4 shrink-0">
+            <div className="flex items-center justify-between">
+              <h3 className="font-medium text-lg">本地服务控制</h3>
+              <div className="flex items-center gap-2">
+                <span className={`inline-block h-2.5 w-2.5 rounded-full ${
+                  serviceStatus?.status === "running" ? "bg-green-500"
+                    : serviceStatus?.status === "starting" ? "bg-yellow-500 animate-pulse"
+                    : serviceStatus?.status === "error" ? "bg-red-500"
+                    : "bg-gray-400"
+                }`} />
+                <span className="text-sm text-muted-foreground">
+                  {serviceStatus?.status === "running" ? "运行中"
+                    : serviceStatus?.status === "starting" ? "启动中..."
+                    : serviceStatus?.status === "stopping" ? "停止中..."
+                    : serviceStatus?.status === "error" ? "错误"
+                    : "已停止"}
+                </span>
+              </div>
+            </div>
+
+            {/* Health info when running */}
+            {serviceStatus?.status === "running" && serviceStatus.health_info && (
+              <div className="text-sm text-muted-foreground bg-accent/30 rounded-md px-4 py-3 space-y-1">
+                <div>设备: <span className="font-medium text-foreground">{serviceStatus.health_info.device ?? "unknown"}</span></div>
+                <div>模型: <span className="font-medium text-foreground">{serviceStatus.health_info.model_size ?? "unknown"}</span></div>
+              </div>
+            )}
+
+            {/* Error message */}
+            {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
+              <p className="text-sm text-red-500">
+                {(serviceStatus as { message?: string }).message}
+              </p>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center gap-3">
+              {serviceStatus?.status === "running" || serviceStatus?.status === "starting" ? (
+                <>
+                  <Button
+                    variant="destructive"
+                    onClick={handleStopService}
+                    disabled={serviceActionLoading || serviceStatus?.status === "stopping"}
+                  >
+                    {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    服务在外部终端运行，请关闭终端窗口以完全停止
+                  </span>
+                </>
+              ) : (
+                <Button
+                  onClick={handleStartService}
+                  disabled={serviceActionLoading || !pathValidation?.valid}
+                >
+                  {serviceActionLoading ? "操作中..." : "启动服务"}
+                </Button>
+              )}
+
+              <Button variant="outline" onClick={() => { handleRefreshValidation(); getASRServiceStatus().then(setServiceStatus).catch(console.error); }}>
+                刷新状态
+              </Button>
+
+              <Button variant="outline" onClick={handleViewLogs}>
+                {showLogs ? "隐藏日志" : "查看日志"}
+              </Button>
+            </div>
+
+            {/* Logs panel */}
+            {showLogs && (
+              <div className="rounded-md border bg-muted/30 p-3 max-h-72 overflow-auto">
+                <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
+                  {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
+                </pre>
+              </div>
+            )}
+          </section>
+
+          {/* Local Service Config - scrollable */}
+          <div className="overflow-y-auto min-h-0 flex-1 pr-1">
           <section className="rounded-lg border p-5 space-y-4">
             <h3 className="font-medium text-lg">本地服务配置</h3>
 
@@ -338,7 +419,7 @@ function ASRSettingsContent() {
               )}
               {pathValidation && !validating && (
                 <div className="space-y-1">
-                  <p className={`text-xs ${pathValidation.valid ? "text-green-600" : "text-red-500"}`}>
+                  <p className={`text-xs break-all ${pathValidation.valid ? "text-green-600" : "text-red-500"}`}>
                     {pathValidation.valid
                       ? `路径有效 (${pathValidation.python_path})`
                       : !pathValidation.has_python_env
@@ -418,7 +499,7 @@ function ASRSettingsContent() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="flex items-center gap-2">
                   <select value={asrLocalEnableAlign} onChange={(e) => setAsrLocalEnableAlign(e.target.value)}
                     className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm">
@@ -458,87 +539,8 @@ function ASRSettingsContent() {
               </Button>
             </div>
           </section>
-
-          {/* Service Control */}
-          <section className="rounded-lg border p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium text-lg">服务控制</h3>
-              <div className="flex items-center gap-2">
-                <span className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  serviceStatus?.status === "running" ? "bg-green-500"
-                    : serviceStatus?.status === "starting" ? "bg-yellow-500 animate-pulse"
-                    : serviceStatus?.status === "error" ? "bg-red-500"
-                    : "bg-gray-400"
-                }`} />
-                <span className="text-sm text-muted-foreground">
-                  {serviceStatus?.status === "running" ? "运行中"
-                    : serviceStatus?.status === "starting" ? "启动中..."
-                    : serviceStatus?.status === "stopping" ? "停止中..."
-                    : serviceStatus?.status === "error" ? "错误"
-                    : "已停止"}
-                </span>
-              </div>
-            </div>
-
-            {/* Health info when running */}
-            {serviceStatus?.status === "running" && serviceStatus.health_info && (
-              <div className="text-sm text-muted-foreground bg-accent/30 rounded-md px-4 py-3 space-y-1">
-                <div>设备: <span className="font-medium text-foreground">{serviceStatus.health_info.device ?? "unknown"}</span></div>
-                <div>模型: <span className="font-medium text-foreground">{serviceStatus.health_info.model_size ?? "unknown"}</span></div>
-              </div>
-            )}
-
-            {/* Error message */}
-            {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
-              <p className="text-sm text-red-500">
-                {(serviceStatus as { message?: string }).message}
-              </p>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex items-center gap-3">
-              {serviceStatus?.status === "running" || serviceStatus?.status === "starting" ? (
-                <>
-                  <Button
-                    variant="destructive"
-                    onClick={handleStopService}
-                    disabled={serviceActionLoading || serviceStatus?.status === "stopping"}
-                  >
-                    {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    服务在外部终端运行，请关闭终端窗口以完全停止
-                  </span>
-                </>
-              ) : (
-                <Button
-                  onClick={handleStartService}
-                  disabled={serviceActionLoading || !pathValidation?.valid}
-                >
-                  {serviceActionLoading ? "操作中..." : "启动服务"}
-                </Button>
-              )}
-
-              <Button variant="outline" onClick={() => { handleRefreshValidation(); getASRServiceStatus().then(setServiceStatus).catch(console.error); }}>
-                刷新状态
-              </Button>
-
-              <Button variant="outline" onClick={handleViewLogs}>
-                {showLogs ? "隐藏日志" : "查看日志"}
-              </Button>
-            </div>
-
-            {/* Logs panel */}
-            {showLogs && (
-              <div className="rounded-md border bg-muted/30 p-3 max-h-72 overflow-auto">
-                <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
-                  {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
-                </pre>
-              </div>
-            )}
-          </section>
-        </>
-      )}
+          </div>
+      </div>
     </div>
   );
 }
