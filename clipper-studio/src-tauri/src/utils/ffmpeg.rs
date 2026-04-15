@@ -385,7 +385,7 @@ pub async fn burn_subtitle_with_progress(
     cancel: tokio_util::sync::CancellationToken,
     on_progress: impl Fn(BurnProgress) + Send + 'static,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
     use tokio::process::Command as AsyncCommand;
 
     if ffmpeg_path.is_empty() {
@@ -408,7 +408,15 @@ pub async fn burn_subtitle_with_progress(
     args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
 
     let vf_filter = if cfg!(target_os = "windows") {
-        format!("subtitles='{}'", ass_path.to_string_lossy().replace('\\', "/"))
+        // Escape colon for subtitles filter's internal option parser.
+        // Single quotes protect against the FFmpeg filter-graph parser,
+        // but the subtitles filter also splits on ':' internally.
+        // '\:' tells the subtitles option parser to treat ':' as literal.
+        let path = ass_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .replace(':', "\\:");
+        format!("subtitles='{}'", path)
     } else {
         format!("ass={}", ass_escaped)
     };
@@ -421,13 +429,18 @@ pub async fn burn_subtitle_with_progress(
     // Quality setting: hardware encoders need special handling, software encoders use -crf
     if let Some(crf_val) = crf {
         if video_codec.contains("videotoolbox") {
-            // VideoToolbox does not support -crf or -q:v; use default quality
+            // VideoToolbox does not support -crf or -cq; use default quality
             tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
-        } else if video_codec.contains("nvenc")
-            || video_codec.contains("qsv")
-            || video_codec.contains("amf")
-        {
-            // nvenc/qsv/amf: use -q:v with similar CRF range
+        } else if video_codec.contains("nvenc") {
+            // NVENC: -cq is the CRF-equivalent constant quality mode;
+            // -b:v 0 forces CQ mode (otherwise encoder falls back to bitrate-limited VBR)
+            args.extend(["-cq".to_string(), crf_val.to_string()]);
+            args.extend(["-b:v".to_string(), "0".to_string()]);
+        } else if video_codec.contains("qsv") {
+            // QSV: -global_quality is the CRF-like quality control
+            args.extend(["-global_quality".to_string(), crf_val.to_string()]);
+        } else if video_codec.contains("amf") {
+            // AMF: -q:v works as quality level
             args.extend(["-q:v".to_string(), crf_val.to_string()]);
         } else {
             args.extend(["-crf".to_string(), crf_val.to_string()]);
@@ -455,6 +468,17 @@ pub async fn burn_subtitle_with_progress(
         .map_err(|e| format!("Failed to start FFmpeg burn: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+
+    // Drain stderr concurrently to prevent pipe buffer deadlock.
+    // FFmpeg writes extensive status to stderr; if the pipe buffer fills,
+    // FFmpeg blocks and stops producing progress output on stdout.
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf).await;
+        buf
+    });
+
     let mut reader = BufReader::new(stdout).lines();
     let mut current_speed: Option<f64> = None;
 
@@ -503,15 +527,17 @@ pub async fn burn_subtitle_with_progress(
         }
     }
 
-    let output_result = child
-        .wait_with_output()
+    let status = child
+        .wait()
         .await
         .map_err(|e| format!("FFmpeg burn process error: {}", e))?;
 
-    if !output_result.status.success() {
-        let stderr = String::from_utf8_lossy(&output_result.stderr);
-        tracing::error!("FFmpeg burn failed ({}), stderr:\n{}", output_result.status, stderr);
-        return Err(format!("FFmpeg burn exited with code: {}, stderr: {}", output_result.status, stderr));
+    let stderr_data = stderr_task.await.unwrap_or_default();
+
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_data);
+        tracing::error!("FFmpeg burn failed ({}), stderr:\n{}", status, stderr);
+        return Err(format!("FFmpeg burn exited with code: {}, stderr: {}", status, stderr));
     }
 
     if !output.exists() {
