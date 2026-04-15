@@ -406,7 +406,13 @@ pub async fn burn_subtitle_with_progress(
 
     let mut args: Vec<String> = Vec::new();
     args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
-    args.extend(["-vf".to_string(), format!("ass={}", ass_escaped)]);
+
+    let vf_filter = if cfg!(target_os = "windows") {
+        format!("subtitles='{}'", ass_path.to_string_lossy().replace('\\', "/"))
+    } else {
+        format!("ass={}", ass_escaped)
+    };
+    args.extend(["-vf".to_string(), vf_filter]);
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
@@ -518,10 +524,8 @@ pub async fn burn_subtitle_with_progress(
 
 /// Escape ASS path for FFmpeg filter (colons and backslashes need escaping)
 fn escape_ass_path(ass_path: &Path) -> String {
-    ass_path
-        .to_string_lossy()
-        .replace('\\', "/")
-        .replace(':', "\\:")
+    let path_str = ass_path.to_string_lossy().to_string();
+    path_str.replace('\\', "/").replace(':', "\\:")
 }
 
 /// Get FFmpeg version string
