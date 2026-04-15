@@ -464,8 +464,15 @@ impl ASRServiceManager {
     async fn run_native_health_loop(self: Arc<Self>, health_url: String, app_h: AppHandle) {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
+        for var in &["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"] {
+            if let Ok(val) = std::env::var(var) {
+                tracing::warn!("[ASR] Env proxy detected: {}={}", var, val);
+            }
+        }
+
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
+            .no_proxy()
             .build()
             .unwrap_or_default();
 
@@ -504,6 +511,7 @@ impl ASRServiceManager {
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
+            .no_proxy()
             .build()
             .unwrap_or_default();
 
@@ -585,20 +593,30 @@ impl ASRServiceManager {
                 false
             }
             Ok(resp) => {
-                tracing::debug!(
-                    "ASR health check attempt {}/{}: HTTP {}",
+                let status = resp.status();
+                let headers: Vec<String> = resp
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("?")))
+                    .collect();
+                let body = resp.text().await.unwrap_or_default();
+                tracing::info!(
+                    "ASR health check attempt {}/{}: HTTP {} headers={:?} body={}",
                     attempt + 1,
                     MAX_HEALTH_CHECK_ATTEMPTS,
-                    resp.status(),
+                    status,
+                    headers,
+                    body,
                 );
                 false
             }
             Err(e) => {
-                tracing::debug!(
-                    "ASR health check attempt {}/{}: {}",
+                tracing::warn!(
+                    "ASR health check attempt {}/{}: {} (url: {})",
                     attempt + 1,
                     MAX_HEALTH_CHECK_ATTEMPTS,
                     e,
+                    health_url,
                 );
                 false
             }

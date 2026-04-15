@@ -44,12 +44,15 @@ async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> 
         .await
         .unwrap_or("local".to_string());
 
+    tracing::info!("[ASR] get_provider: mode={}", mode);
+
     match mode.as_str() {
         "disabled" => Err("ASR 功能已禁用，请在设置中启用".to_string()),
         "remote" => {
             let url = read_setting(state, "asr_url")
                 .await
                 .ok_or("请先在设置中配置远程 ASR 地址")?;
+            tracing::info!("[ASR] Using remote provider: {}", url);
             let api_key = read_setting(state, "asr_api_key").await;
             Ok(Arc::new(RemoteASRProvider::new(&url, api_key)))
         }
@@ -59,6 +62,7 @@ async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> 
                 .await
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8765);
+            tracing::info!("[ASR] Using local provider: http://127.0.0.1:{}", port);
             Ok(Arc::new(LocalASRProvider::new(port)))
         }
     }
@@ -152,8 +156,14 @@ pub async fn search_subtitles_global(
 pub async fn check_asr_health(
     state: State<'_, AppState>,
 ) -> Result<ASRHealthInfo, String> {
+    tracing::info!("[ASR] check_asr_health called");
     let provider = get_provider(&state).await?;
-    provider.health().await
+    let result = provider.health().await;
+    match &result {
+        Ok(info) => tracing::info!("[ASR] check_asr_health OK: {:?}", info),
+        Err(e) => tracing::warn!("[ASR] check_asr_health FAILED: {}", e),
+    }
+    result
 }
 
 // ==================== Subtitle Editing ====================

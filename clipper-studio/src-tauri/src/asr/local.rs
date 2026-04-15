@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::error::Error;
 
 use super::provider::{ASRHealthInfo, ASRProvider, ASRWord, ASRTaskStatus, RawASRSegment};
 
@@ -13,6 +14,7 @@ impl LocalASRProvider {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
+                .no_proxy()
                 .build()
                 .unwrap_or_default(),
             base_url: format!("http://127.0.0.1:{}", port),
@@ -23,6 +25,7 @@ impl LocalASRProvider {
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
+                .no_proxy()
                 .build()
                 .unwrap_or_default(),
             base_url: base_url.trim_end_matches('/').to_string(),
@@ -142,23 +145,48 @@ impl ASRProvider for LocalASRProvider {
     }
 
     async fn health(&self) -> Result<ASRHealthInfo, String> {
-        // Use a short timeout for health checks (5s)
+        let url = format!("{}/v1/health", self.base_url);
+        tracing::info!("[ASR] Health check request: GET {}", url);
+
         let health_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
+            .no_proxy()
             .build()
             .unwrap_or_default();
 
-        let resp = health_client
-            .get(format!("{}/v1/health", self.base_url))
-            .send()
-            .await
-            .map_err(|e| format!("Health check failed: {}", e))?;
+        let resp = match health_client.get(&url).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(
+                    "[ASR] Health check connection failed for {}: {} (is_connect: {:?}, is_timeout: {:?}, source: {:?})",
+                    url,
+                    e,
+                    e.is_connect(),
+                    e.is_timeout(),
+                    e.source()
+                );
+                return Err(format!("Health check failed: {}", e));
+            }
+        };
 
-        if !resp.status().is_success() {
-            return Err("ASR service not healthy".to_string());
+        let status = resp.status();
+        tracing::info!("[ASR] Health check response: HTTP {}", status);
+
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                "[ASR] Health check non-success: HTTP {} body={}",
+                status,
+                body
+            );
+            return Err(format!("ASR service not healthy (HTTP {})", status));
         }
 
-        let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        let json: serde_json::Value = resp.json().await.map_err(|e| {
+            tracing::warn!("[ASR] Health check JSON parse error: {}", e);
+            e.to_string()
+        })?;
+        tracing::info!("[ASR] Health check response body: {}", json);
         Ok(ASRHealthInfo {
             status: json
                 .get("status")
