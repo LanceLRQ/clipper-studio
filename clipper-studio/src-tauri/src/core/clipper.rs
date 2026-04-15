@@ -386,9 +386,9 @@ fn merge_ass_files(
     output: &Path,
 ) -> Result<(), String> {
     let danmaku_content = std::fs::read_to_string(danmaku_ass)
-        .map_err(|e| format!("Failed to read danmaku ASS: {}", e))?;
+        .map_err(|e| format!("Failed to read danmaku ASS {}: {}", danmaku_ass.display(), e))?;
     let subtitle_content = std::fs::read_to_string(subtitle_ass)
-        .map_err(|e| format!("Failed to read subtitle ASS: {}", e))?;
+        .map_err(|e| format!("Failed to read subtitle ASS {}: {}", subtitle_ass.display(), e))?;
 
     let mut merged = danmaku_content.clone();
 

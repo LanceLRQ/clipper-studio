@@ -34,8 +34,8 @@ pub struct DanmakuItem {
 /// XML format: `<d p="time,mode,fontSize,color,timestamp,pool,uid,dbid">text</d>`
 /// Only processes regular danmaku (modes 1-5), ignores special danmaku (mode 7+).
 pub fn parse_bilibili_xml(path: &Path) -> Result<Vec<DanmakuItem>, String> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("Failed to read danmaku file: {}", e))?;
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read danmaku file: {}", e))?;
 
     parse_bilibili_xml_str(&content)
 }
@@ -56,8 +56,7 @@ pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
                 // Extract the "p" attribute
                 for attr in e.attributes().flatten() {
                     if attr.key.as_ref() == b"p" {
-                        current_params =
-                            String::from_utf8_lossy(&attr.value).to_string();
+                        current_params = String::from_utf8_lossy(&attr.value).to_string();
                         in_d_element = true;
                     }
                 }
@@ -76,7 +75,11 @@ pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                tracing::warn!("XML parse error at position {}: {}", reader.error_position(), e);
+                tracing::warn!(
+                    "XML parse error at position {}: {}",
+                    reader.error_position(),
+                    e
+                );
                 break;
             }
             _ => {}
@@ -179,11 +182,21 @@ pub struct DanmakuAssOptions {
     pub density: i32,
 }
 
-fn default_width() -> u32 { 1920 }
-fn default_height() -> u32 { 1080 }
-fn default_scroll_time() -> f32 { 12.0 }
-fn default_font_size() -> u32 { 38 }
-fn default_opacity() -> u32 { 180 }
+fn default_width() -> u32 {
+    1920
+}
+fn default_height() -> u32 {
+    1080
+}
+fn default_scroll_time() -> f32 {
+    12.0
+}
+fn default_font_size() -> u32 {
+    38
+}
+fn default_opacity() -> u32 {
+    180
+}
 
 impl Default for DanmakuAssOptions {
     fn default() -> Self {
@@ -207,7 +220,8 @@ enum DanmakuTool {
 /// Detect which danmaku tool is being used based on the binary path
 fn detect_tool(tool_path: &str) -> DanmakuTool {
     let path = std::path::Path::new(tool_path);
-    let name = path.file_stem()
+    let name = path
+        .file_stem()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if name.contains("dmconvert") {
@@ -224,15 +238,22 @@ fn build_danmaku_factory_args(
     options: &DanmakuAssOptions,
 ) -> Vec<String> {
     vec![
-        "-o".into(), "ass".into(),
+        "-o".into(),
+        "ass".into(),
         output_ass.to_string_lossy().to_string(),
-        "-i".into(), "xml".into(),
+        "-i".into(),
+        "xml".into(),
         input_xml.to_string_lossy().to_string(),
-        "-r".into(), format!("{}x{}", options.width, options.height),
-        "-s".into(), options.scroll_time.to_string(),
-        "-S".into(), options.font_size.to_string(),
-        "-O".into(), options.opacity.to_string(),
-        "-d".into(), options.density.to_string(),
+        "-r".into(),
+        format!("{}x{}", options.width, options.height),
+        "-s".into(),
+        options.scroll_time.to_string(),
+        "-S".into(),
+        options.font_size.to_string(),
+        "-O".into(),
+        options.opacity.to_string(),
+        "-d".into(),
+        options.density.to_string(),
         "--force".into(),
     ]
 }
@@ -247,11 +268,16 @@ fn build_dmconvert_args(
     options: &DanmakuAssOptions,
 ) -> Vec<String> {
     vec![
-        "-i".into(), input_xml.to_string_lossy().to_string(),
-        "-o".into(), output_ass.to_string_lossy().to_string(),
-        "-x".into(), options.width.to_string(),
-        "-y".into(), options.height.to_string(),
-        "-f".into(), options.font_size.to_string(),
+        "-i".into(),
+        input_xml.to_string_lossy().to_string(),
+        "-o".into(),
+        output_ass.to_string_lossy().to_string(),
+        "-x".into(),
+        options.width.to_string(),
+        "-y".into(),
+        options.height.to_string(),
+        "-f".into(),
+        options.font_size.to_string(),
     ]
 }
 
@@ -288,7 +314,24 @@ pub fn convert_to_ass(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("{} exited with code {:?}: {}", tool_name, output.status.code(), stderr));
+        return Err(format!(
+            "{} exited with code {:?}: {}",
+            tool_name,
+            output.status.code(),
+            stderr
+        ));
+    }
+
+    if !output_ass.exists() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "{} reported success but output file not found: {} (stderr: {}, stdout: {})",
+            tool_name,
+            output_ass.display(),
+            stderr.trim(),
+            stdout.trim(),
+        ));
     }
 
     Ok(())
@@ -341,8 +384,7 @@ pub fn write_bilibili_xml(items: &[DanmakuItem], output: &Path) -> Result<(), St
     let mut file = std::fs::File::create(output)
         .map_err(|e| format!("Failed to create danmaku XML: {}", e))?;
 
-    writeln!(file, "<?xml version=\"1.0\" encoding=\"utf-8\"?>")
-        .map_err(|e| e.to_string())?;
+    writeln!(file, "<?xml version=\"1.0\" encoding=\"utf-8\"?>").map_err(|e| e.to_string())?;
     writeln!(file, "<i>").map_err(|e| e.to_string())?;
 
     for item in items {
@@ -427,10 +469,34 @@ mod tests {
     #[test]
     fn test_filter_danmaku_by_range() {
         let items = vec![
-            DanmakuItem { time_ms: 500, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-            DanmakuItem { time_ms: 1500, text: "b".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-            DanmakuItem { time_ms: 2500, text: "c".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-            DanmakuItem { time_ms: 3500, text: "d".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+            DanmakuItem {
+                time_ms: 500,
+                text: "a".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 1500,
+                text: "b".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 2500,
+                text: "c".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 3500,
+                text: "d".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
         ];
         // scroll_duration=0 behaves like the old exact-range filter
         let filtered = filter_danmaku_by_range(&items, 1000, 3000, 0);
@@ -452,8 +518,20 @@ mod tests {
     #[test]
     fn test_write_bilibili_xml() {
         let items = vec![
-            DanmakuItem { time_ms: 1000, text: "hello".into(), mode: DanmakuMode::Scroll, color: 16777215, font_size: 25 },
-            DanmakuItem { time_ms: 2000, text: "<test>&".into(), mode: DanmakuMode::Top, color: 255, font_size: 30 },
+            DanmakuItem {
+                time_ms: 1000,
+                text: "hello".into(),
+                mode: DanmakuMode::Scroll,
+                color: 16777215,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 2000,
+                text: "<test>&".into(),
+                mode: DanmakuMode::Top,
+                color: 255,
+                font_size: 30,
+            },
         ];
         let dir = std::env::temp_dir();
         let path = dir.join("test_danmaku_write.xml");
@@ -469,9 +547,27 @@ mod tests {
     #[test]
     fn test_compute_density() {
         let items = vec![
-            DanmakuItem { time_ms: 100, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-            DanmakuItem { time_ms: 200, text: "b".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-            DanmakuItem { time_ms: 1500, text: "c".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
+            DanmakuItem {
+                time_ms: 100,
+                text: "a".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 200,
+                text: "b".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
+            DanmakuItem {
+                time_ms: 1500,
+                text: "c".into(),
+                mode: DanmakuMode::Scroll,
+                color: 0,
+                font_size: 25,
+            },
         ];
         let density = compute_density(&items, 3000, 1000);
         assert_eq!(density, vec![2, 1, 0]);
@@ -486,18 +582,26 @@ mod tests {
 
     #[test]
     fn test_compute_density_zero_duration() {
-        let items = vec![
-            DanmakuItem { time_ms: 100, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-        ];
+        let items = vec![DanmakuItem {
+            time_ms: 100,
+            text: "a".into(),
+            mode: DanmakuMode::Scroll,
+            color: 0,
+            font_size: 25,
+        }];
         let density = compute_density(&items, 0, 1000);
         assert!(density.is_empty());
     }
 
     #[test]
     fn test_compute_density_zero_window() {
-        let items = vec![
-            DanmakuItem { time_ms: 100, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-        ];
+        let items = vec![DanmakuItem {
+            time_ms: 100,
+            text: "a".into(),
+            mode: DanmakuMode::Scroll,
+            color: 0,
+            font_size: 25,
+        }];
         let density = compute_density(&items, 3000, 0);
         assert!(density.is_empty());
     }
@@ -521,9 +625,13 @@ mod tests {
     #[test]
     fn test_compute_density_out_of_range() {
         // Item beyond duration should not overflow the vector
-        let items = vec![
-            DanmakuItem { time_ms: 9999, text: "a".into(), mode: DanmakuMode::Scroll, color: 0, font_size: 25 },
-        ];
+        let items = vec![DanmakuItem {
+            time_ms: 9999,
+            text: "a".into(),
+            mode: DanmakuMode::Scroll,
+            color: 0,
+            font_size: 25,
+        }];
         let density = compute_density(&items, 5000, 1000);
         assert_eq!(density.len(), 5);
         // The item at 9999ms falls in window index 9, which is beyond the vector
