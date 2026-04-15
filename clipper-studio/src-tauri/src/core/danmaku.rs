@@ -254,7 +254,6 @@ fn build_danmaku_factory_args(
         options.opacity.to_string(),
         "-d".into(),
         options.density.to_string(),
-        "--force".into(),
     ]
 }
 
