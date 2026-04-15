@@ -33,10 +33,6 @@ reqwest.workspace = true
 async-trait.workspace = true
 tracing.workspace = true
 
-# Process management (Unix process group kill)
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
 # Database - sea-orm for modeling/migration, rusqlite for raw SQL
 sea-orm = { version = "1", features = [
     "sqlx-sqlite",
@@ -92,6 +88,10 @@ clipper-studio-plugin-core = { path = "../crates/clipper-studio-plugin-core" }
 # Builtin plugins
 clipper-studio-plugin-recorder = { path = "../crates/clipper-studio-plugin-recorder", optional = true }
 clipper-studio-plugin-storage = { path = "../crates/clipper-studio-plugin-storage", optional = true }
+
+# Process management (Unix process group kill)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [features]
 default = ["builtin-plugins"]
