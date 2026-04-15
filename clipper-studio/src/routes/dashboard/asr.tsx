@@ -275,6 +275,8 @@ function ASRSettingsContent() {
         }
       }
     }
+    // 切换模式后清空健康检测状态（原状态对新模式已失效）
+    setAsrHealth(null);
     setAsrMode(newMode);
   };
 
@@ -313,33 +315,37 @@ function ASRSettingsContent() {
           </div>
         </div>
 
-        <div className="space-y-1">
-          <Label className="text-sm">识别语言</Label>
-          <select
-            value={asrLanguage}
-            onChange={(e) => setAsrLanguage(e.target.value)}
-            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm w-48"
-          >
-            {ASR_LANGUAGES.map((lang) => (
-              <option key={lang} value={lang}>{lang}</option>
-            ))}
-          </select>
-        </div>
+        {asrMode !== "disabled" && (
+          <>
+            <div className="space-y-1">
+              <Label className="text-sm">识别语言</Label>
+              <select
+                value={asrLanguage}
+                onChange={(e) => setAsrLanguage(e.target.value)}
+                className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm w-48"
+              >
+                {ASR_LANGUAGES.map((lang) => (
+                  <option key={lang} value={lang}>{lang}</option>
+                ))}
+              </select>
+            </div>
 
-        <div className="space-y-1">
-          <Label className="text-sm">每条字幕最大字符数</Label>
-          <Input
-            value={asrMaxChars}
-            onChange={(e) => setAsrMaxChars(e.target.value)}
-            placeholder="15"
-            className="w-32 text-sm h-8"
-            type="number"
-            min={0}
-          />
-          <p className="text-xs text-muted-foreground">
-            ASR 识别后按标点和字数自动拆分字幕，设为 0 则不拆分
-          </p>
-        </div>
+            <div className="space-y-1">
+              <Label className="text-sm">每条字幕最大字符数</Label>
+              <Input
+                value={asrMaxChars}
+                onChange={(e) => setAsrMaxChars(e.target.value)}
+                placeholder="15"
+                className="w-32 text-sm h-8"
+                type="number"
+                min={0}
+              />
+              <p className="text-xs text-muted-foreground">
+                ASR 识别后按标点和字数自动拆分字幕，设为 0 则不拆分
+              </p>
+            </div>
+          </>
+        )}
 
         {asrMode === "remote" && (
           <div className="space-y-3 pl-1">

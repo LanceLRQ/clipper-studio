@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SubtitleSegment, ASRServiceStatusInfo } from "@/services/asr";
@@ -62,6 +63,7 @@ export function SubtitlePanel({
   // ASR service availability
   const [asrMode, setAsrMode] = useState<string>("local");
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
+  const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
 
   // ASR queue store
   const queueTask = useASRTaskForVideo(videoId);
@@ -71,7 +73,7 @@ export function SubtitlePanel({
   // Whether ASR is available for use
   const asrAvailable =
     asrMode === "disabled" ? false
-    : asrMode === "remote" ? true
+    : asrMode === "remote" ? remoteHealthy === true
     : serviceStatus?.status === "running";
 
   // Determine if there is an active task from the store
@@ -92,6 +94,23 @@ export function SubtitlePanel({
 
     getASRServiceStatus().then(setServiceStatus).catch(console.error);
   }, []);
+
+  // Periodically check remote ASR health when in remote mode
+  useEffect(() => {
+    if (asrMode !== "remote") {
+      setRemoteHealthy(null);
+      return;
+    }
+    let cancelled = false;
+    const check = () => {
+      checkASRHealth()
+        .then((h) => { if (!cancelled) setRemoteHealthy(h.status === "ready"); })
+        .catch(() => { if (!cancelled) setRemoteHealthy(false); });
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [asrMode]);
 
   // Listen for real-time service status changes
   useEffect(() => {
@@ -170,6 +189,24 @@ export function SubtitlePanel({
       <div className="flex items-center justify-between">
         <h3 className="font-medium">字幕</h3>
         <div className="flex items-center gap-2">
+          {segments.length === 0 && !isTaskActive && queueTask?.status !== "failed" && (
+            <Button
+              size="sm"
+              className="h-7 px-2.5 gap-1.5"
+              onClick={handleSubmitASR}
+              disabled={!asrAvailable || loading}
+              title={
+                asrMode === "disabled" ? "ASR 功能已禁用"
+                  : asrMode === "remote" && remoteHealthy !== true
+                    ? (remoteHealthy === false ? "远程 ASR 服务无法连接" : "远程 ASR 服务检测中...")
+                  : !asrAvailable ? "ASR 服务未就绪"
+                  : "开始 ASR 语音识别"
+              }
+            >
+              <Mic className="h-3.5 w-3.5" />
+              <span className="text-xs">{loading ? "提交中..." : "开始识别"}</span>
+            </Button>
+          )}
           {segments.length > 0 && (
             <>
               <span className="text-xs text-muted-foreground">
@@ -279,23 +316,20 @@ export function SubtitlePanel({
           </Button>
         </div>
       ) : segments.length === 0 ? (
-        <div className="space-y-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full text-xs"
-            onClick={handleSubmitASR}
-            disabled={!asrAvailable || loading}
-          >
-            {loading ? "提交中..." : "开始 ASR 语音识别"}
-          </Button>
+        <div className="py-3 text-center space-y-1">
+          <p className="text-xs text-muted-foreground">暂无字幕</p>
           {asrMode === "local" && !asrAvailable && (
-            <p className="text-[11px] text-muted-foreground text-center">
+            <p className="text-[11px] text-muted-foreground">
               本地 ASR 服务未运行，请在「设置 → 语音识别」中启动
             </p>
           )}
+          {asrMode === "remote" && remoteHealthy === false && (
+            <p className="text-[11px] text-red-500">
+              远程 ASR 服务无法连接，请检查「设置 → 语音识别」
+            </p>
+          )}
           {asrMode === "disabled" && (
-            <p className="text-[11px] text-muted-foreground text-center">
+            <p className="text-[11px] text-muted-foreground">
               ASR 功能已禁用
             </p>
           )}
