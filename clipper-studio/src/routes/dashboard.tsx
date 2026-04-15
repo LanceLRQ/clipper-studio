@@ -82,22 +82,33 @@ function ASRStatusIndicator() {
   const activeCount = useASRActiveCount();
   const runningTask = useASRRunningTask();
 
-  useEffect(() => {
+  const loadAsrMode = useCallback(() => {
     getSettings(["asr_mode"]).then((s) => {
       const mode = s.asr_mode || "local";
       setAsrMode(mode);
 
-      // For remote mode, check health on load
+      // For remote mode, check health immediately on mode change
       if (mode === "remote") {
+        setRemoteHealthy(null);
         checkASRHealth()
           .then((h) => setRemoteHealthy(h.status === "ready"))
           .catch(() => setRemoteHealthy(false));
+      } else {
+        setRemoteHealthy(null);
       }
     }).catch(console.error);
+  }, []);
 
+  useEffect(() => {
+    loadAsrMode();
     // Load local service status
     getASRServiceStatus().then(setLocalStatus).catch(console.error);
-  }, []);
+
+    // Refresh when ASR settings are saved
+    const handler = () => loadAsrMode();
+    window.addEventListener("asr-settings-changed", handler);
+    return () => window.removeEventListener("asr-settings-changed", handler);
+  }, [loadAsrMode]);
 
   // Listen for real-time local service status events
   useEffect(() => {

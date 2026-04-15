@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useRef } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,7 +29,7 @@ import {
   type ASRPathValidation,
   type ASRServiceStatusInfo,
 } from "@/services/asr";
-import { useASRQueueStore, useASRActiveTasks } from "@/stores/asr-queue";
+import { useASRQueueStore, useASRActiveTasks, useASRActiveCount } from "@/stores/asr-queue";
 import type { ASRQueueItem } from "@/services/asr";
 
 type ASRMode = "local" | "remote" | "disabled";
@@ -80,6 +80,7 @@ function ASRPage() {
 }
 
 function ASRSettingsContent() {
+  const activeTaskCount = useASRActiveCount();
   const [asrMode, setAsrMode] = useState<ASRMode>("local");
   const [asrPort, setAsrPort] = useState("8765");
   const [asrUrl, setAsrUrl] = useState("");
@@ -216,6 +217,7 @@ function ASRSettingsContent() {
       await setSetting("asr_local_enable_punc", asrLocalEnablePunc);
       await setSetting("asr_local_model_source", asrLocalModelSource);
       await setSetting("asr_local_max_segment", asrLocalMaxSegment);
+      window.dispatchEvent(new CustomEvent("asr-settings-changed"));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (e) { alert("保存失败: " + String(e)); }
@@ -237,10 +239,43 @@ function ASRSettingsContent() {
   };
 
   const handleStopService = async () => {
+    if (activeTaskCount > 0) {
+      alert(`当前有 ${activeTaskCount} 个 ASR 任务正在进行，请等待任务完成或取消后再停止本地服务。`);
+      return;
+    }
     setServiceActionLoading(true);
     try { await stopASRService(); }
     catch (e) { alert("停止失败: " + String(e)); }
     finally { setServiceActionLoading(false); }
+  };
+
+  const handleModeChange = async (newMode: ASRMode) => {
+    if (newMode === asrMode) return;
+    // 有识别任务在进行时禁止切换模式
+    if (activeTaskCount > 0) {
+      alert(`当前有 ${activeTaskCount} 个 ASR 任务正在进行，请等待任务完成或取消后再切换识别模式。`);
+      return;
+    }
+    // 离开 local 模式时，若本地服务在运行则先询问停止
+    if (asrMode === "local" && newMode !== "local") {
+      const isActive =
+        serviceStatus?.status === "running" ||
+        serviceStatus?.status === "starting";
+      if (isActive) {
+        const confirmed = await ask(
+          "本地 ASR 服务正在运行，切换到其他模式需要先停止本地服务。是否停止并切换？",
+          { title: "停止本地 ASR 服务", kind: "warning" },
+        );
+        if (!confirmed) return;
+        try {
+          await stopASRService();
+        } catch (e) {
+          alert("停止本地服务失败: " + String(e));
+          return;
+        }
+      }
+    }
+    setAsrMode(newMode);
   };
 
   const handleViewLogs = async () => {
@@ -270,7 +305,7 @@ function ASRSettingsContent() {
               <button
                 key={opt.value}
                 className={`px-4 py-1.5 text-sm ${asrMode === opt.value ? "bg-accent font-medium" : ""}`}
-                onClick={() => setAsrMode(opt.value)}
+                onClick={() => handleModeChange(opt.value)}
               >
                 {opt.label}
               </button>
@@ -356,7 +391,16 @@ function ASRSettingsContent() {
       </div>
 
       {/* Right column: Service Control (sticky) + Local Config (scrollable) */}
-      <div className="flex flex-col min-h-0 h-full gap-6">
+      <div className="relative flex flex-col min-h-0 h-full gap-6">
+          {/* Mask when current mode is not local */}
+          {asrMode !== "local" && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 dark:bg-black/60 backdrop-blur-[1px]">
+              <div className="rounded-md border bg-background/90 px-4 py-3 shadow-sm text-sm text-muted-foreground max-w-xs text-center">
+                当前识别模式为「{asrMode === "remote" ? "远程服务" : "禁用"}」，
+                切换回「本地引擎」后即可管理本地服务。
+              </div>
+            </div>
+          )}
           {/* Local Service Control - sticky */}
           <section className="rounded-lg border p-5 space-y-4 shrink-0">
             <div className="flex items-center justify-between">
@@ -392,7 +436,12 @@ function ASRSettingsContent() {
                   <Button
                     variant="destructive"
                     onClick={handleStopService}
-                    disabled={serviceActionLoading || serviceStatus?.status === "stopping"}
+                    disabled={
+                      serviceActionLoading ||
+                      serviceStatus?.status === "stopping" ||
+                      activeTaskCount > 0
+                    }
+                    title={activeTaskCount > 0 ? `有 ${activeTaskCount} 个识别任务进行中，无法停止服务` : undefined}
                   >
                     {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
                   </Button>
