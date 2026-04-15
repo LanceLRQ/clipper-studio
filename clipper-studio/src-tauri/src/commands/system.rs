@@ -72,6 +72,12 @@ pub fn get_app_info(
     })
 }
 
+/// 返回当前是否处于调试模式（通过 --debug 命令行参数启用）
+#[tauri::command]
+pub fn is_debug_mode(state: State<'_, AppState>) -> bool {
+    state.debug_mode
+}
+
 /// Check FFmpeg/FFprobe availability and return status
 #[tauri::command]
 pub fn check_ffmpeg(state: State<'_, AppState>) -> Result<serde_json::Value, String> {

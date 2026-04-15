@@ -50,10 +50,15 @@ pub struct AppState {
     pub asr_task_queue: Arc<ASRTaskQueue>,
     pub dep_manager: Arc<DependencyManager>,
     pub bin_dir: std::path::PathBuf,
+    pub debug_mode: bool,
 }
 
 /// Build and configure the Tauri application
 pub fn run() {
+    // 解析命令行参数：是否启用调试模式（显示 webview devtools 与路由调试面板）
+    // 仅在 debug 构建下生效，生产版本强制禁用以防滥用
+    let debug_mode = cfg!(debug_assertions) && std::env::args().any(|a| a == "--debug");
+
     // Pre-init: load config to get log level before full setup
     // We do a minimal init here; full config is loaded in setup()
     let pre_log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
@@ -81,7 +86,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|app| {
+        .setup(move |app| {
             // Resolve data directory
             let data_dir = app
                 .path()
@@ -234,7 +239,18 @@ pub fn run() {
                 asr_task_queue: asr_task_queue.clone(),
                 dep_manager: dep_manager.clone(),
                 bin_dir: bin_dir.clone(),
+                debug_mode,
             });
+
+            // 根据 --debug 参数控制 webview devtools 的开关
+            if let Some(main_window) = app.get_webview_window("main") {
+                if debug_mode {
+                    tracing::info!("Debug mode enabled: opening webview devtools");
+                    main_window.open_devtools();
+                } else {
+                    main_window.close_devtools();
+                }
+            }
 
             // Start ASR task queue worker (after AppState is managed)
             asr_task_queue.start();
@@ -270,6 +286,7 @@ pub fn run() {
             commands::system::get_app_info,
             commands::system::get_dashboard_stats,
             commands::system::check_ffmpeg,
+            commands::system::is_debug_mode,
             commands::system::track_event,
             commands::system::get_setting,
             commands::system::set_setting,
