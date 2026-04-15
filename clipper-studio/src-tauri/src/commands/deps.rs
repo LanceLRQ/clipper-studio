@@ -1,6 +1,6 @@
 use tauri::{AppHandle, State};
 
-use crate::deps::registry::DependencyStatus;
+use crate::deps::registry::{DependencyStatus, DepStatus};
 use crate::deps::config_overrides_from_app_config;
 use crate::AppState;
 
@@ -20,7 +20,12 @@ pub async fn check_dep(
 ) -> Result<DependencyStatus, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let overrides = config_overrides_from_app_config(&config);
-    state.dep_manager.check_dep(&dep_id, &overrides, &state.bin_dir)
+    let status = state.dep_manager.check_dep(&dep_id, &overrides, &state.bin_dir)?;
+    drop(config);
+    if status.status == DepStatus::Installed || status.system_available {
+        refresh_tool_paths(&dep_id, &state);
+    }
+    Ok(status)
 }
 
 /// Install a dependency (download + extract + verify)
@@ -176,6 +181,8 @@ pub async fn set_dep_custom_path(
     config
         .save(&state.config_dir)
         .map_err(|e| format!("Failed to save config: {}", e))?;
+
+    re_detect_tool_paths(&dep_id, &state);
 
     Ok(())
 }

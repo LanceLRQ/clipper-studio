@@ -39,6 +39,8 @@ interface ClipTimelineProps {
   videoId?: number;
   /** Called when clips are created via "新增" or "自动分段" */
   onClipCreated?: () => void;
+  /** Disable clip creation/editing (e.g. ffprobe missing) */
+  disabled?: boolean;
 }
 
 interface DragState {
@@ -63,6 +65,7 @@ export function ClipTimeline({
   burnAvailability,
   videoId,
   onClipCreated,
+  disabled = false,
 }: ClipTimelineProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
@@ -70,6 +73,12 @@ export function ClipTimeline({
   const [containerWidth, setContainerWidth] = useState(800);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+  const onClipsChangeRef = useRef(onClipsChange);
+  onClipsChangeRef.current = onClipsChange;
+  const onCurrentTimeChangeRef = useRef(onCurrentTimeChange);
+  onCurrentTimeChangeRef.current = onCurrentTimeChange;
 
   // Track container width via ResizeObserver
   useEffect(() => {
@@ -138,16 +147,21 @@ export function ClipTimeline({
   // ===== Actions =====
 
   const handleAddClip = useCallback(() => {
+    if (disabled) return;
     if (clips.length >= maxClips) {
       showToast(`最多只能创建 ${maxClips} 个选区`);
       return;
     }
+    if (duration <= 0) return;
     const start = Math.round(currentTime);
     const dur = getDefaultClipDuration();
+    const end = Math.min(start + dur, duration);
+    const effectiveStart = end <= start ? Math.max(0, end - dur) : start;
+    if (end <= effectiveStart) return;
     const newClip: ClipRegion = {
       id: `clip-${Date.now()}`,
-      start,
-      end: Math.min(start + dur, duration),
+      start: effectiveStart,
+      end,
       color: CLIP_COLORS[clips.length % CLIP_COLORS.length],
       name: `片段${clips.length + 1}`,
     };
@@ -261,16 +275,23 @@ export function ClipTimeline({
 
   const handleTrackDoubleClick = useCallback(
     (e: React.MouseEvent) => {
+      e.preventDefault();
       e.stopPropagation();
+      if (disabled) return;
+      if (dragState || isDraggingPlayhead) return;
       if (clips.length >= maxClips) return;
+      if (duration <= 0) return;
       const rect = trackRef.current?.getBoundingClientRect();
       if (!rect) return;
       const clickTime = Math.round(pixelToTime(e.clientX - rect.left));
       const dur = getDefaultClipDuration();
+      const end = Math.min(clickTime + dur, duration);
+      const start = end <= clickTime ? Math.max(0, end - dur) : clickTime;
+      if (end <= start) return;
       const newClip: ClipRegion = {
         id: `clip-${Date.now()}`,
-        start: clickTime,
-        end: Math.min(clickTime + dur, duration),
+        start,
+        end,
         color: CLIP_COLORS[clips.length % CLIP_COLORS.length],
         name: `片段${clips.length + 1}`,
       };
@@ -278,7 +299,7 @@ export function ClipTimeline({
       onClipSelect?.(newClip.id);
       onClipCreated?.();
     },
-    [clips, duration, maxClips, getDefaultClipDuration, pixelToTime, onClipsChange, onClipSelect, onClipCreated]
+    [clips, duration, maxClips, dragState, isDraggingPlayhead, getDefaultClipDuration, pixelToTime, onClipsChange, onClipSelect, onClipCreated]
   );
 
   const handlePlayheadMouseDown = useCallback((e: React.MouseEvent) => {
@@ -312,7 +333,7 @@ export function ClipTimeline({
       if (!rect) return;
 
       if (isDraggingPlayhead) {
-        onCurrentTimeChange?.(Math.round(pixelToTime(e.clientX - rect.left)));
+        onCurrentTimeChangeRef.current?.(Math.round(pixelToTime(e.clientX - rect.left)));
       }
 
       if (dragState) {
@@ -337,7 +358,7 @@ export function ClipTimeline({
           newClip.end = Math.round(Math.min(duration, Math.max(clip.start + 1, clip.end + deltaTime)));
         }
 
-        onClipsChange?.(clips.map((c) => (c.id === dragState.clipId ? newClip : c)));
+        onClipsChangeRef.current?.(clipsRef.current.map((c) => (c.id === dragState.clipId ? newClip : c)));
       }
     };
 
@@ -352,7 +373,7 @@ export function ClipTimeline({
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isDraggingPlayhead, dragState, clips, duration, timelineWidth, pixelToTime, onCurrentTimeChange, onClipsChange]);
+  }, [isDraggingPlayhead, dragState, duration, timelineWidth, pixelToTime]);
 
   const handleZoomIn = () => setZoom((z) => Math.min(z * 1.5, 10));
   const handleZoomOut = () => setZoom((z) => Math.max(z / 1.5, 1));
@@ -409,7 +430,7 @@ export function ClipTimeline({
             variant="outline"
             className="h-7 px-2 text-xs"
             onClick={handleSetClipStart}
-            disabled={!selectedClipId}
+            disabled={!selectedClipId || disabled}
             title="将播放头位置设为起点"
           >
             起点
@@ -419,7 +440,7 @@ export function ClipTimeline({
             variant="outline"
             className="h-7 px-2 text-xs"
             onClick={handleSetClipEnd}
-            disabled={!selectedClipId}
+            disabled={!selectedClipId || disabled}
             title="将播放头位置设为终点"
           >
             终点
@@ -428,7 +449,7 @@ export function ClipTimeline({
             size="sm"
             className="h-7 px-2 text-xs"
             onClick={handleAddClip}
-            disabled={clips.length >= maxClips}
+            disabled={clips.length >= maxClips || disabled}
             title="添加新选区"
           >
             + 新增
@@ -442,7 +463,8 @@ export function ClipTimeline({
               !selectedClipId ||
               !selectedClip ||
               selectedClip.end <= selectedClip.start ||
-              clips.length >= maxClips
+              clips.length >= maxClips ||
+              disabled
             }
             title="复制当前选区"
           >
@@ -464,7 +486,7 @@ export function ClipTimeline({
             variant="outline"
             className="h-7 px-2 text-xs"
             onClick={handleAutoSegment}
-            disabled={autoSegLoading || !videoId}
+            disabled={autoSegLoading || !videoId || disabled}
             title="根据音量自动检测分段（需要先提取音量包络）"
           >
             {autoSegLoading ? "分析中..." : "自动分段"}
@@ -788,6 +810,7 @@ function ClipRegionBlock({
         backgroundColor: clip.color + "cc",
       }}
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onMouseDown={(e) => onDragStart(e, clip.id, "move")}
     >
       {/* Left drag handle */}

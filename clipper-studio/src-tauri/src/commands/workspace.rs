@@ -343,6 +343,8 @@ pub async fn scan_workspace(
                 }
             }
         }
+    } else {
+        tracing::warn!("ffprobe not available, skipping duration detection ({} files)", files_with_duration.len());
     }
 
     // Step 4: Group into sessions (gap = next.start - prev.end > 1 hour)
@@ -414,12 +416,14 @@ pub async fn scan_workspace(
             .and_then(|r| r.try_get("", "id").ok());
 
             if let Some(video_id) = existing {
-                // Video exists: just re-attach to new session
+                let dur_sql = file.duration_ms.map(|d| d.to_string()).unwrap_or("NULL".to_string());
                 let _ = sea_orm::ConnectionTrait::execute_unprepared(
                     state.db.conn(),
                     &format!(
-                        "UPDATE videos SET session_id = {}, streamer_id = {} WHERE id = {}",
-                        sess_id_sql, sid_sql, video_id
+                        "UPDATE videos SET session_id = {}, streamer_id = {}, \
+                         duration_ms = CASE WHEN duration_ms IS NULL OR duration_ms = 0 THEN {} ELSE duration_ms END \
+                         WHERE id = {}",
+                        sess_id_sql, sid_sql, dur_sql, video_id
                     ),
                 )
                 .await;

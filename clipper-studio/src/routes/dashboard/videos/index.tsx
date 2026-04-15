@@ -13,7 +13,7 @@ import {
   deleteVideo,
 } from "@/services/video";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { scanWorkspace } from "@/services/workspace";
+import { scanWorkspace, getAppInfo } from "@/services/workspace";
 import { mergeVideos } from "@/services/media";
 import { VideoRow } from "@/components/video/video-row";
 import { PaginationBar } from "@/components/video/pagination-bar";
@@ -69,6 +69,7 @@ function VideosPage() {
   const wsVersion = useWorkspaceStore((s) => s.version);
   const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
   const wsRecheckPath = useWorkspaceStore((s) => s.recheckPath);
+  const [ffprobeAvailable, setFfprobeAvailable] = useState(true);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -109,8 +110,8 @@ function VideosPage() {
 
   useEffect(() => {
     loadData();
-    // Recheck workspace path accessibility on page load / workspace switch
     wsRecheckPath();
+    getAppInfo().then((info) => setFfprobeAvailable(info.ffprobe_available)).catch(console.error);
   }, [loadData, wsRecheckPath]);
 
   // Load tags for visible videos in flat view
@@ -300,8 +301,8 @@ function VideosPage() {
           <Button
             variant="outline"
             onClick={handleScan}
-            disabled={scanning || !wsPathAccessible}
-            title={!wsPathAccessible ? "工作区目录不可访问" : undefined}
+            disabled={scanning || !wsPathAccessible || !ffprobeAvailable}
+            title={!ffprobeAvailable ? "请先在「设置 → 依赖管理」中安装 FFmpeg" : !wsPathAccessible ? "工作区目录不可访问" : undefined}
           >
             <FolderSyncIcon className="h-4 w-4 mr-1" />
             {scanning ? "扫描中..." : "扫描目录"}

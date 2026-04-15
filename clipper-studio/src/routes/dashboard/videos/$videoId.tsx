@@ -29,6 +29,7 @@ import { getVideoTags, setVideoTags } from "@/services/tag";
 import { TagBadge } from "@/components/tag/tag-badge";
 import { TagSelector } from "@/components/tag/tag-selector";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { getAppInfo } from "@/services/workspace";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "--:--";
@@ -91,6 +92,9 @@ function VideoDetailPage() {
 
   // Tags state
   const [videoTags, setVideoTagsState] = useState<TagInfo[]>([]);
+
+  // FFprobe availability
+  const [ffprobeAvailable, setFfprobeAvailable] = useState(true);
 
   // Right panel tab (0=info, 1=clips, 2=subtitles)
   const [activeTab, setActiveTab] = useState(0);
@@ -180,6 +184,11 @@ function VideoDetailPage() {
     checkVideoBurnAvailability(parseInt(videoId, 10))
       .then(setBurnAvailability)
       .catch(() => setBurnAvailability(undefined));
+
+    // Check ffprobe availability
+    getAppInfo()
+      .then((info) => setFfprobeAvailable(info.ffprobe_available))
+      .catch(console.error);
   }, [videoId]);
 
   const handleSeek = (timeSecs: number) => {
@@ -334,6 +343,15 @@ function VideoDetailPage() {
         </div>
       )}
 
+      {/* FFprobe missing warning */}
+      {!ffprobeAvailable && (
+        <div className="shrink-0 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 mb-2 flex items-center gap-2">
+          <span className="text-sm text-yellow-800 dark:text-yellow-200">
+            ⚠ FFprobe 未安装或不可用，切片、转码功能不可用。请在「设置 → 依赖管理」中安装 FFmpeg。
+          </span>
+        </div>
+      )}
+
       {/* Main layout: Left (scrollable) + Right (full height tabs) */}
       <div ref={containerRef} className="flex-1 flex min-h-0">
         {/* Left column: Monitor (top, flex) + Timeline (bottom, fixed) — fills remaining space */}
@@ -415,6 +433,7 @@ function VideoDetailPage() {
               burnAvailability={burnAvailability}
               videoId={video?.id}
               onClipCreated={() => setActiveTab(1)}
+              disabled={!ffprobeAvailable}
             />
           </div>
         </div>
@@ -549,7 +568,7 @@ function VideoDetailPage() {
                       clips={clips}
                       presetId={selectedPresetId}
                       clipOptions={clipOptions}
-                      disabled={!wsPathAccessible}
+                      disabled={!wsPathAccessible || !ffprobeAvailable}
                     />
                   </div>
                 </div>
@@ -708,7 +727,7 @@ function VideoDetailPage() {
                         alert("转码失败: " + String(e));
                       }
                     }}
-                    disabled={!selectedPresetId}
+                    disabled={!selectedPresetId || !ffprobeAvailable}
                   >
                     开始转码
                   </Button>
