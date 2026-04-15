@@ -4,4 +4,5 @@ pub mod remote;
 pub mod service;
 pub mod splitter;
 pub mod manager;
+pub mod docker;
 pub mod queue;

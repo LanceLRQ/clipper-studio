@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { open, ask } from "@tauri-apps/plugin-dialog";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,14 +26,50 @@ import {
   openASRSetupTerminal,
   getASRServiceStatus,
   getASRServiceLogs,
+  checkDockerCapability,
+  checkDockerImagePulled,
+  openDockerPullTerminal,
+  forceRemoveASRContainer,
+  getDefaultASRDockerDataDir,
+  ERR_CONTAINER_CONFLICT,
   type ASRHealthInfo,
   type ASRPathValidation,
   type ASRServiceStatusInfo,
+  type DockerCapability,
 } from "@/services/asr";
 import { useASRQueueStore, useASRActiveTasks, useASRActiveCount } from "@/stores/asr-queue";
 import type { ASRQueueItem } from "@/services/asr";
 
 type ASRMode = "local" | "remote" | "disabled";
+type ASRLaunchMode = "native" | "docker";
+
+const DOCKER_IMAGE_PREFIX = "lancelrq/qwen3-asr-service:";
+
+interface DockerImageOption {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+/** Filter docker image options by host platform/arch */
+function getDockerImageOptions(cap: DockerCapability | null): DockerImageOption[] {
+  if (!cap) return [];
+  const { host_platform, host_arch } = cap;
+  if (host_arch === "arm64") {
+    return [
+      { value: DOCKER_IMAGE_PREFIX + "latest-arm64", label: "ARM64 (OpenVINO FP32，推荐)" },
+      { value: DOCKER_IMAGE_PREFIX + "latest-cpu", label: "CPU (通过 linux/amd64 模拟)" },
+    ];
+  }
+  if (host_platform === "windows" || host_platform === "linux") {
+    return [
+      { value: DOCKER_IMAGE_PREFIX + "latest", label: "CUDA (需 NVIDIA GPU 和 nvidia-docker)" },
+      { value: DOCKER_IMAGE_PREFIX + "latest-cpu", label: "CPU (OpenVINO INT8)" },
+    ];
+  }
+  // macOS Intel
+  return [{ value: DOCKER_IMAGE_PREFIX + "latest-cpu", label: "CPU (OpenVINO INT8)" }];
+}
 
 const ASR_LANGUAGES = [
   "Chinese",
@@ -93,6 +130,7 @@ function ASRSettingsContent() {
   const [saved, setSaved] = useState(false);
 
   // Local service management
+  const [launchMode, setLaunchMode] = useState<ASRLaunchMode>("native");
   const [asrLocalPath, setAsrLocalPath] = useState("");
   const [asrLocalDevice, setAsrLocalDevice] = useState("auto");
   const [asrLocalModelSize, setAsrLocalModelSize] = useState("auto");
@@ -102,6 +140,15 @@ function ASRSettingsContent() {
   const [asrLocalMaxSegment, setAsrLocalMaxSegment] = useState("5");
   const [pathValidation, setPathValidation] = useState<ASRPathValidation | null>(null);
   const [validating, setValidating] = useState(false);
+
+  // Docker mode
+  const [dockerCap, setDockerCap] = useState<DockerCapability | null>(null);
+  const [dockerImage, setDockerImage] = useState("");
+  const [dockerDataDir, setDockerDataDir] = useState("");
+  const [imagePulled, setImagePulled] = useState<boolean | null>(null);
+  const [checkingImage, setCheckingImage] = useState(false);
+  const dockerImageOptions = getDockerImageOptions(dockerCap);
+  const dockerReady = dockerCap?.installed === true && dockerCap?.daemon_running === true;
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
   const [serviceLogs, setServiceLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
@@ -114,8 +161,9 @@ function ASRSettingsContent() {
       "asr_local_path", "asr_local_device", "asr_local_model_size",
       "asr_local_enable_align", "asr_local_enable_punc", "asr_local_model_source",
       "asr_local_max_segment",
+      "asr_launch_mode", "asr_docker_image", "asr_docker_data_dir",
     ])
-      .then((s) => {
+      .then(async (s) => {
         if (s.asr_mode) setAsrMode(s.asr_mode as ASRMode);
         if (s.asr_port) setAsrPort(s.asr_port);
         if (s.asr_url) setAsrUrl(s.asr_url);
@@ -129,6 +177,18 @@ function ASRSettingsContent() {
         if (s.asr_local_enable_punc) setAsrLocalEnablePunc(s.asr_local_enable_punc);
         if (s.asr_local_model_source) setAsrLocalModelSource(s.asr_local_model_source);
         if (s.asr_local_max_segment) setAsrLocalMaxSegment(s.asr_local_max_segment);
+        if (s.asr_launch_mode === "docker" || s.asr_launch_mode === "native") {
+          setLaunchMode(s.asr_launch_mode);
+        }
+        if (s.asr_docker_image) setDockerImage(s.asr_docker_image);
+        if (s.asr_docker_data_dir) {
+          setDockerDataDir(s.asr_docker_data_dir);
+        } else {
+          try {
+            const def = await getDefaultASRDockerDataDir();
+            setDockerDataDir(def);
+          } catch { /* ignore */ }
+        }
         if (s.asr_local_path) {
           validateASRPath(s.asr_local_path).then(setPathValidation).catch(console.error);
         }
@@ -136,7 +196,23 @@ function ASRSettingsContent() {
       .catch(console.error);
 
     getASRServiceStatus().then(setServiceStatus).catch(console.error);
+    checkDockerCapability().then(setDockerCap).catch(console.error);
   }, []);
+
+  // Detect whether the chosen docker image has been pulled
+  useEffect(() => {
+    if (launchMode !== "docker" || !dockerImage) {
+      setImagePulled(null);
+      return;
+    }
+    let cancelled = false;
+    setCheckingImage(true);
+    checkDockerImagePulled(dockerImage)
+      .then((ok) => { if (!cancelled) setImagePulled(ok); })
+      .catch(() => { if (!cancelled) setImagePulled(false); })
+      .finally(() => { if (!cancelled) setCheckingImage(false); });
+    return () => { cancelled = true; };
+  }, [launchMode, dockerImage]);
 
   // Listen for real-time service status events
   useEffect(() => {
@@ -217,6 +293,9 @@ function ASRSettingsContent() {
       await setSetting("asr_local_enable_punc", asrLocalEnablePunc);
       await setSetting("asr_local_model_source", asrLocalModelSource);
       await setSetting("asr_local_max_segment", asrLocalMaxSegment);
+      await setSetting("asr_launch_mode", launchMode);
+      await setSetting("asr_docker_image", dockerImage);
+      await setSetting("asr_docker_data_dir", dockerDataDir);
       window.dispatchEvent(new CustomEvent("asr-settings-changed"));
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -233,9 +312,79 @@ function ASRSettingsContent() {
 
   const handleStartService = async () => {
     setServiceActionLoading(true);
-    try { await handleSave(); await startASRService(); }
-    catch (e) { alert("启动失败: " + String(e)); }
-    finally { setServiceActionLoading(false); }
+    try {
+      await handleSave();
+      try {
+        await startASRService();
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes(ERR_CONTAINER_CONFLICT)) {
+          const confirmed = await ask(
+            "检测到同名 Docker 容器 qwen3-asr-service 已存在，是否强制清理并重建？",
+            { title: "Docker 容器冲突", kind: "warning" },
+          );
+          if (!confirmed) return;
+          await forceRemoveASRContainer();
+          await startASRService();
+        } else {
+          alert("启动失败: " + msg);
+        }
+      }
+    } catch (e) {
+      alert("启动失败: " + String(e));
+    } finally {
+      setServiceActionLoading(false);
+    }
+  };
+
+  const handleRefreshDocker = async () => {
+    try {
+      const cap = await checkDockerCapability();
+      setDockerCap(cap);
+      if (dockerImage) {
+        setCheckingImage(true);
+        try {
+          setImagePulled(await checkDockerImagePulled(dockerImage));
+        } finally {
+          setCheckingImage(false);
+        }
+      }
+    } catch (e) {
+      console.error("Refresh docker failed:", e);
+    }
+  };
+
+  const handlePickDockerDataDir = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (selected) setDockerDataDir(selected as string);
+  };
+
+  const handleLaunchModeChange = async (newMode: ASRLaunchMode) => {
+    if (newMode === launchMode) return;
+    if (activeTaskCount > 0) {
+      alert(`当前有 ${activeTaskCount} 个 ASR 任务正在进行，请等待任务完成或取消后再切换启动方式。`);
+      return;
+    }
+    if (newMode === "docker" && !dockerReady) {
+      alert(dockerCap?.hint ?? "Docker 不可用");
+      return;
+    }
+    const isActive =
+      serviceStatus?.status === "running" || serviceStatus?.status === "starting";
+    if (isActive) {
+      const confirmed = await ask(
+        "本地服务正在运行，切换启动方式需要先停止服务。是否停止并切换？",
+        { title: "停止本地服务", kind: "warning" },
+      );
+      if (!confirmed) return;
+      try {
+        await stopASRService();
+      } catch (e) {
+        alert("停止本地服务失败: " + String(e));
+        return;
+      }
+    }
+    setLaunchMode(newMode);
   };
 
   const handleStopService = async () => {
@@ -455,7 +604,25 @@ function ASRSettingsContent() {
               ) : (
                 <Button
                   onClick={handleStartService}
-                  disabled={serviceActionLoading || !pathValidation?.valid}
+                  disabled={
+                    serviceActionLoading ||
+                    (launchMode === "native"
+                      ? !pathValidation?.valid
+                      : !dockerReady || !dockerImage || imagePulled !== true)
+                  }
+                  title={
+                    launchMode === "docker"
+                      ? !dockerReady
+                        ? dockerCap?.hint ?? "Docker 不可用"
+                        : !dockerImage
+                        ? "请先选择 Docker 镜像"
+                        : imagePulled !== true
+                        ? "镜像尚未拉取到本地"
+                        : undefined
+                      : !pathValidation?.valid
+                      ? "服务目录无效"
+                      : undefined
+                  }
                 >
                   {serviceActionLoading ? "操作中..." : "启动服务"}
                 </Button>
@@ -474,9 +641,64 @@ function ASRSettingsContent() {
           {/* Local Service Config - scrollable */}
           <div className="overflow-y-auto min-h-0 flex-1 pr-1">
           <section className="rounded-lg border p-5 space-y-4">
-            <h3 className="font-medium text-lg">本地服务配置</h3>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="font-medium text-lg">本地服务配置</h3>
+                <span className="inline-flex items-center rounded-md border border-input bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground">
+                  qwen3-asr-service
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  title="GitHub 源码"
+                  onClick={() => shellOpen("https://github.com/LanceLRQ/qwen3-asr-service").catch(console.error)}
+                >
+                  <GithubIcon className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  title="Docker Hub 镜像"
+                  onClick={() => shellOpen("https://hub.docker.com/r/lancelrq/qwen3-asr-service").catch(console.error)}
+                >
+                  <DockerIcon className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
 
-            {/* Service Path */}
+            {/* Launch mode radio */}
+            <div className="space-y-1">
+              <Label className="text-sm">启动方式</Label>
+              <div className="flex rounded-md border w-fit">
+                <button
+                  className={`px-4 py-1.5 text-sm ${launchMode === "native" ? "bg-accent font-medium" : ""}`}
+                  onClick={() => handleLaunchModeChange("native")}
+                >
+                  本地源码模式
+                </button>
+                <button
+                  className={`px-4 py-1.5 text-sm ${launchMode === "docker" ? "bg-accent font-medium" : ""} ${!dockerReady ? "opacity-50 cursor-not-allowed" : ""}`}
+                  onClick={() => handleLaunchModeChange("docker")}
+                  disabled={!dockerReady}
+                  title={!dockerReady ? dockerCap?.hint ?? "Docker 不可用" : undefined}
+                >
+                  Docker 方式
+                </button>
+              </div>
+              {!dockerReady && dockerCap?.hint && (
+                <p className="text-xs text-amber-600">{dockerCap.hint}</p>
+              )}
+              {dockerReady && dockerCap && (
+                <p className="text-xs text-muted-foreground">
+                  已检测到 Docker：{dockerCap.version ?? "unknown"} ({dockerCap.host_platform}/{dockerCap.host_arch})
+                </p>
+              )}
+            </div>
+
+            {/* Native: Service Path */}
+            {launchMode === "native" && (
             <div className="space-y-1">
               <Label className="text-sm">服务目录路径</Label>
               <div className="flex gap-2">
@@ -527,6 +749,86 @@ function ASRSettingsContent() {
                 </div>
               )}
             </div>
+            )}
+
+            {/* Docker: image + data dir */}
+            {launchMode === "docker" && (
+              <>
+                <div className="space-y-1">
+                  <Label className="text-sm">Docker 镜像</Label>
+                  <div className="flex gap-2">
+                    <select
+                      value={dockerImage}
+                      onChange={(e) => setDockerImage(e.target.value)}
+                      className="h-8 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm"
+                    >
+                      <option value="">请选择镜像...</option>
+                      {dockerImageOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    <Button variant="outline" size="sm" className="h-8" onClick={handleRefreshDocker}>
+                      刷新
+                    </Button>
+                  </div>
+                  {dockerImage && (
+                    checkingImage ? (
+                      <p className="text-xs text-muted-foreground">检测中...</p>
+                    ) : imagePulled === false ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-amber-600">未检测到镜像 {dockerImage}</p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="h-8"
+                            onClick={() => openDockerPullTerminal(dockerImage).catch((e) => alert("打开终端失败: " + String(e)))}>
+                            打开终端拉取
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-8" onClick={handleRefreshDocker}>
+                            我已拉取，检测
+                          </Button>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          首次 pull 可能较慢（GPU 镜像约 8-10GB，CPU/ARM64 约 3-4GB）
+                        </p>
+                      </div>
+                    ) : imagePulled === true ? (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-xs text-green-600">✓ 镜像已就绪</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7"
+                          onClick={() => openDockerPullTerminal(dockerImage).catch((e) => alert("打开终端失败: " + String(e)))}
+                          title="在终端中重新拉取以获取最新版本"
+                        >
+                          重新拉取
+                        </Button>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <Label className="text-sm">数据目录</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      value={dockerDataDir}
+                      onChange={(e) => setDockerDataDir(e.target.value)}
+                      placeholder="数据目录（默认为 App 数据目录）"
+                      className="text-sm h-8 font-mono flex-1"
+                    />
+                    <Button variant="outline" size="sm" className="h-8" onClick={handlePickDockerDataDir}>
+                      浏览...
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground break-all">
+                    将挂载 <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{dockerDataDir || "(未设置)"}/models</code> → <code className="bg-muted px-1 py-0.5 rounded text-[10px]">/app/models</code>（你可以选择本地源码的 asr-service 目录，以便共享使用模型文件夹）
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    首次启动容器会自动下载模型到该目录，可能需要 5-15 分钟
+                  </p>
+                </div>
+              </>
+            )}
 
             {/* Port */}
             <div className="space-y-1">
@@ -738,5 +1040,23 @@ function ASRQueueTaskRow({
         </div>
       )}
     </div>
+  );
+}
+
+// ==================== Brand Icons ====================
+
+function GithubIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.69-3.87-1.54-3.87-1.54-.52-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.18 1.18a11.05 11.05 0 0 1 5.79 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.42-2.7 5.39-5.27 5.68.41.36.78 1.06.78 2.14 0 1.55-.01 2.8-.01 3.18 0 .31.21.68.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.65 18.35.5 12 .5z" />
+    </svg>
+  );
+}
+
+function DockerIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M13.983 11.078h2.119a.186.186 0 0 0 .186-.185V9.006a.186.186 0 0 0-.186-.186h-2.119a.185.185 0 0 0-.185.185v1.888c0 .102.083.185.185.185zm-2.954-5.43h2.119a.186.186 0 0 0 .185-.186V3.574a.186.186 0 0 0-.185-.185h-2.119a.185.185 0 0 0-.185.185v1.888c0 .102.082.185.185.185zm0 2.716h2.119a.186.186 0 0 0 .185-.186V6.29a.185.185 0 0 0-.185-.185h-2.119a.185.185 0 0 0-.185.185v1.887c0 .102.082.186.185.186zm-2.93 0h2.12a.185.185 0 0 0 .184-.186V6.29a.185.185 0 0 0-.185-.185H8.1a.185.185 0 0 0-.185.185v1.887c0 .102.083.186.185.186zm-2.964 0h2.12a.185.185 0 0 0 .184-.186V6.29a.185.185 0 0 0-.184-.185H5.136a.185.185 0 0 0-.186.185v1.887c0 .102.084.186.186.186zm5.893 2.715h2.12a.186.186 0 0 0 .184-.185V9.006a.186.186 0 0 0-.184-.186h-2.12a.185.185 0 0 0-.184.185v1.888c0 .102.082.185.185.185zm-2.93 0h2.12a.185.185 0 0 0 .184-.185V9.006a.185.185 0 0 0-.184-.186H8.1a.185.185 0 0 0-.185.185v1.888c0 .102.083.185.185.185zm-2.964 0h2.12a.185.185 0 0 0 .184-.185V9.006a.185.185 0 0 0-.184-.186H5.136a.185.185 0 0 0-.186.185v1.888c0 .102.084.185.186.185zm-2.92 0h2.12a.185.185 0 0 0 .184-.185V9.006a.185.185 0 0 0-.184-.186H2.215a.185.185 0 0 0-.185.185v1.888c0 .102.082.185.185.185zM23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 0 0-.75.748 11.376 11.376 0 0 0 .692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137a16.06 16.06 0 0 0 2.91-.263 12.07 12.07 0 0 0 3.793-1.383 10.39 10.39 0 0 0 2.585-2.114c1.243-1.41 1.984-2.98 2.535-4.376l.226-.001c1.37 0 2.213-.547 2.678-1.005.308-.293.55-.65.71-1.046l.099-.292z" />
+    </svg>
   );
 }

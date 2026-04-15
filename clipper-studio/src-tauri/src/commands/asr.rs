@@ -3,8 +3,11 @@ use std::sync::Arc;
 
 use tauri::{Emitter, State};
 
+use crate::asr::docker::{self, DockerCapability};
 use crate::asr::local::LocalASRProvider;
-use crate::asr::manager::{ASRPathValidation, ASRServiceManager, ASRServiceStatusInfo, ASRStartConfig};
+use crate::asr::manager::{
+    ASRLaunchMode, ASRPathValidation, ASRServiceManager, ASRServiceStatusInfo, ASRStartConfig,
+};
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
 use crate::asr::queue::ASRQueueItem;
 use crate::asr::remote::RemoteASRProvider;
@@ -496,26 +499,63 @@ pub async fn validate_asr_path(path: String) -> Result<ASRPathValidation, String
     Ok(ASRServiceManager::validate_path(Path::new(&path)))
 }
 
-/// Start the managed local ASR service using configured parameters (external terminal)
+/// Start the managed local ASR service using configured parameters.
+///
+/// Dispatches based on `asr_launch_mode` setting:
+/// - `"native"` (default): runs the local setup.sh/start.sh script
+/// - `"docker"`: runs the official docker container
 #[tauri::command]
 pub async fn start_asr_service(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    let base_path = read_setting(&state, "asr_local_path")
+    let launch_mode_str = read_setting(&state, "asr_launch_mode")
         .await
-        .ok_or("请先在设置中配置 ASR 服务路径")?;
-
-    if base_path.is_empty() {
-        return Err("请先在设置中配置 ASR 服务路径".to_string());
-    }
+        .unwrap_or_else(|| "native".to_string());
 
     let port: u16 = read_setting(&state, "asr_port")
         .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(8765);
 
+    // Resolve launch_mode
+    let launch_mode = if launch_mode_str == "docker" {
+        let image = read_setting(&state, "asr_docker_image")
+            .await
+            .unwrap_or_default();
+        if image.is_empty() {
+            return Err("请先在设置中选择 Docker 镜像".to_string());
+        }
+        let data_dir_str = read_setting(&state, "asr_docker_data_dir").await;
+        let data_dir = match data_dir_str {
+            Some(s) if !s.is_empty() => std::path::PathBuf::from(s),
+            _ => state.config_dir.clone(),
+        };
+
+        // Decide --gpus / --platform
+        let cap = docker::detect_docker().await;
+        let (use_gpu, force_platform) = decide_docker_runtime_flags(&image, &cap);
+
+        ASRLaunchMode::Docker {
+            image,
+            data_dir,
+            use_gpu,
+            force_platform,
+        }
+    } else {
+        let base_path = read_setting(&state, "asr_local_path")
+            .await
+            .ok_or("请先在设置中配置 ASR 服务路径")?;
+        if base_path.is_empty() {
+            return Err("请先在设置中配置 ASR 服务路径".to_string());
+        }
+        ASRLaunchMode::Native {
+            base_dir: std::path::PathBuf::from(base_path),
+        }
+    };
+
     let config = ASRStartConfig {
+        launch_mode,
         port,
         device: read_setting(&state, "asr_local_device")
             .await
@@ -543,8 +583,34 @@ pub async fn start_asr_service(
 
     state
         .asr_service_manager
-        .start_service(Path::new(&base_path), config, app_handle)
+        .start_service(config, app_handle)
         .await
+}
+
+/// Decide (use_gpu, force_platform) from the image tag and host capability.
+///
+/// Rules:
+/// - Image tag contains "-cpu" and host is arm64 → force platform linux/amd64
+/// - Image tag contains "-arm64" → no flags
+/// - Otherwise (bare `latest` / no suffix, i.e. CUDA build) → `--gpus all`
+fn decide_docker_runtime_flags(
+    image: &str,
+    cap: &DockerCapability,
+) -> (bool, Option<String>) {
+    let tag = image.rsplit(':').next().unwrap_or("");
+    if tag.contains("-cpu") {
+        let force = if cap.host_arch == "arm64" {
+            Some("linux/amd64".to_string())
+        } else {
+            None
+        };
+        (false, force)
+    } else if tag.contains("-arm64") {
+        (false, None)
+    } else {
+        // Bare `latest` / `1.1.0` → CUDA build
+        (true, None)
+    }
 }
 
 /// Stop the managed local ASR service
@@ -563,6 +629,39 @@ pub async fn stop_asr_service(
         state.asr_service_manager.status_info(),
     );
     Ok(())
+}
+
+// ==================== Docker mode commands ====================
+
+/// Probe whether Docker CLI and daemon are available on this host
+#[tauri::command]
+pub async fn check_docker_capability() -> Result<DockerCapability, String> {
+    Ok(docker::detect_docker().await)
+}
+
+/// Check whether a given docker image has been pulled locally
+#[tauri::command]
+pub async fn check_docker_image_pulled(image: String) -> Result<bool, String> {
+    Ok(docker::check_image_pulled(&image).await)
+}
+
+/// Open the system terminal and run `docker pull <image>`
+#[tauri::command]
+pub async fn open_docker_pull_terminal(image: String) -> Result<(), String> {
+    docker::open_pull_terminal(&image)
+}
+
+/// Force-remove a leftover ASR docker container (used by the conflict dialog)
+#[tauri::command]
+pub async fn force_remove_asr_container() -> Result<(), String> {
+    ASRServiceManager::force_remove_docker_container().await
+}
+
+/// Returns the default data directory for docker mode (app data dir).
+/// The mount target is `{dir}/models` → `/app/models`.
+#[tauri::command]
+pub fn get_default_asr_docker_data_dir(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.config_dir.to_string_lossy().to_string())
 }
 
 /// Open an external terminal to run the ASR setup script

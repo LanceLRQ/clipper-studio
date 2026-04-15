@@ -148,7 +148,45 @@ export interface ASRPathValidation {
 export interface ASRServiceStatusInfo {
   status: "stopped" | "starting" | "running" | "stopping" | "error";
   health_info: ASRHealthInfo | null;
+  /** "native" | "docker" — which backend is (was) used for the current run */
+  launch_kind: "native" | "docker" | null;
   message?: string;
+}
+
+// ==================== Docker mode ====================
+
+export interface DockerCapability {
+  installed: boolean;
+  daemon_running: boolean;
+  /** "amd64" | "arm64" | "unknown" */
+  host_arch: string;
+  /** "macos" | "windows" | "linux" */
+  host_platform: string;
+  version: string | null;
+  hint: string | null;
+}
+
+/** Error code returned by start_asr_service when a conflicting container exists */
+export const ERR_CONTAINER_CONFLICT = "DOCKER_CONTAINER_CONFLICT";
+
+export async function checkDockerCapability(): Promise<DockerCapability> {
+  return invoke<DockerCapability>("check_docker_capability");
+}
+
+export async function checkDockerImagePulled(image: string): Promise<boolean> {
+  return invoke<boolean>("check_docker_image_pulled", { image });
+}
+
+export async function openDockerPullTerminal(image: string): Promise<void> {
+  return invoke("open_docker_pull_terminal", { image });
+}
+
+export async function forceRemoveASRContainer(): Promise<void> {
+  return invoke("force_remove_asr_container");
+}
+
+export async function getDefaultASRDockerDataDir(): Promise<string> {
+  return invoke<string>("get_default_asr_docker_data_dir");
 }
 
 export async function validateASRPath(
