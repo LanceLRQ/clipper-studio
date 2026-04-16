@@ -312,7 +312,7 @@ pub async fn create_clip(
                         let xml_path = PathBuf::from(format!("{}.xml", output_stem.display()));
                         let source_xml = std::path::PathBuf::from(&video_path_clone).with_extension("xml");
                         if source_xml.exists() {
-                            match crate::core::danmaku::parse_bilibili_xml(&source_xml) {
+                            match crate::core::danmaku::parse_bilibili_xml(&source_xml).await {
                                 Ok(items) => {
                                     let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
                                     let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms, scroll_ms);
@@ -1091,7 +1091,8 @@ pub async fn create_batch_clips(
     let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
     let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &ffprobe_path).await?;
     // Ensure the subfolder exists
-    std::fs::create_dir_all(&batch_output_dir)
+    tokio::fs::create_dir_all(&batch_output_dir)
+        .await
         .map_err(|e| format!("无法创建批次输出目录: {}", e))?;
 
     let mut results = Vec::new();
@@ -1170,7 +1171,7 @@ async fn prepare_burn_options(
     if include_danmaku && !danmaku_factory_path.is_empty() {
         let xml_path = std::path::PathBuf::from(video_path).with_extension("xml");
         if xml_path.exists() {
-            match crate::core::danmaku::parse_bilibili_xml(&xml_path) {
+            match crate::core::danmaku::parse_bilibili_xml(&xml_path).await {
                 Ok(items) => {
                     // Filter to clip range and shift timestamps
                     let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
@@ -1186,7 +1187,7 @@ async fn prepare_burn_options(
                                 &tmp_xml,
                                 &tmp_ass,
                                 &options,
-                            ) {
+                            ).await {
                                 Ok(()) => {
                                     danmaku_ass_path = Some(tmp_ass);
                                     tracing::info!("Generated danmaku ASS for task {}", task_id);

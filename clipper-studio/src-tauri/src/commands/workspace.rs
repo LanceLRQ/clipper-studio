@@ -83,7 +83,7 @@ pub async fn create_workspace(
     let path = std::path::Path::new(&req.path);
     if !path.exists() {
         // Try to create the directory for new workspaces
-        std::fs::create_dir_all(path).map_err(|e| format!("无法创建目录: {}", e))?;
+        tokio::fs::create_dir_all(path).await.map_err(|e| format!("无法创建目录: {}", e))?;
     }
     if !path.is_dir() {
         return Err("指定路径不是一个目录".to_string());
@@ -547,7 +547,8 @@ pub async fn update_workspace(
             // Validate directory exists or can be created
             let path = std::path::Path::new(dir);
             if !path.exists() {
-                std::fs::create_dir_all(path)
+                tokio::fs::create_dir_all(path)
+                    .await
                     .map_err(|e| format!("无法创建输出目录: {}", e))?;
             }
             if !path.is_dir() {

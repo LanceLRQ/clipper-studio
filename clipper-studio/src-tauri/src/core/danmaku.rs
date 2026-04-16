@@ -33,9 +33,10 @@ pub struct DanmakuItem {
 ///
 /// XML format: `<d p="time,mode,fontSize,color,timestamp,pool,uid,dbid">text</d>`
 /// Only processes regular danmaku (modes 1-5), ignores special danmaku (mode 7+).
-pub fn parse_bilibili_xml(path: &Path) -> Result<Vec<DanmakuItem>, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read danmaku file: {}", e))?;
+pub async fn parse_bilibili_xml(path: &Path) -> Result<Vec<DanmakuItem>, String> {
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| format!("Failed to read danmaku file: {}", e))?;
 
     parse_bilibili_xml_str(&content)
 }
@@ -284,7 +285,7 @@ fn build_dmconvert_args(
 }
 
 /// Convert danmaku XML to ASS using DanmakuFactory or DanmakuConvert CLI
-pub fn convert_to_ass(
+pub async fn convert_to_ass(
     tool_path: &str,
     input_xml: &Path,
     output_ass: &Path,
@@ -307,11 +308,12 @@ pub fn convert_to_ass(
 
     tracing::debug!("Running {} with args: {:?}", tool_name, args);
 
-    let output = std::process::Command::new(tool_path)
+    let output = tokio::process::Command::new(tool_path)
         .args(&args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
+        .await
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 format!(

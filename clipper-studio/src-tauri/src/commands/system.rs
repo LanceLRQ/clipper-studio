@@ -19,7 +19,7 @@ pub struct AppInfo {
 
 /// Get application info including version, data directory, and FFmpeg availability
 #[tauri::command]
-pub fn get_app_info(
+pub async fn get_app_info(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<AppInfo, String> {
@@ -41,24 +41,21 @@ pub fn get_app_info(
     let config_path = state.config_dir.join("config.toml").to_string_lossy().to_string();
 
     // Check if any workspaces exist (for welcome wizard logic)
-    let has_workspaces = tauri::async_runtime::block_on(async {
-        let result = sea_orm::ConnectionTrait::query_one(
-            state.db.conn(),
-            sea_orm::Statement::from_string(
-                sea_orm::DatabaseBackend::Sqlite,
-                "SELECT COUNT(*) as cnt FROM workspaces".to_string(),
-            ),
-        )
-        .await;
-        match result {
-            Ok(Some(row)) => {
-
-                let cnt: i32 = row.try_get("", "cnt").unwrap_or(0);
-                cnt > 0
-            }
-            _ => false,
+    let has_workspaces = match sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) as cnt FROM workspaces".to_string(),
+        ),
+    )
+    .await
+    {
+        Ok(Some(row)) => {
+            let cnt: i32 = row.try_get("", "cnt").unwrap_or(0);
+            cnt > 0
         }
-    });
+        _ => false,
+    };
 
     Ok(AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),

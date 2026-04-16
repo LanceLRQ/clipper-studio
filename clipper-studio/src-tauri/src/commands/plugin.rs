@@ -89,7 +89,7 @@ pub async fn scan_plugins(
     state: State<'_, AppState>,
 ) -> Result<Vec<PluginInfo>, String> {
     let plugin_dir = resolve_plugin_dir(&state).await;
-    let _ = std::fs::create_dir_all(&plugin_dir);
+    let _ = tokio::fs::create_dir_all(&plugin_dir).await;
     state.plugin_manager.scan(&plugin_dir).await;
     let enabled_ids = query_enabled_plugin_ids(&state).await;
     Ok(state.plugin_manager.list(&enabled_ids).await)
@@ -399,7 +399,7 @@ pub async fn auto_load_plugins(
 ) -> Result<Vec<String>, String> {
     // First scan external plugins so they are discovered
     let plugin_dir = resolve_plugin_dir(&state).await;
-    let _ = std::fs::create_dir_all(&plugin_dir);
+    let _ = tokio::fs::create_dir_all(&plugin_dir).await;
     state.plugin_manager.scan(&plugin_dir).await;
 
     // Query enabled plugin IDs

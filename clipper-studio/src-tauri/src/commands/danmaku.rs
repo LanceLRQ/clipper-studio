@@ -34,7 +34,7 @@ pub async fn load_danmaku(
         return Err("未找到关联的弹幕 XML 文件".to_string());
     }
 
-    danmaku::parse_bilibili_xml(&xml_path)
+    danmaku::parse_bilibili_xml(&xml_path).await
 }
 
 /// Get danmaku density data (for heatmap overlay)
@@ -118,7 +118,7 @@ pub async fn convert_danmaku_to_ass(
         &xml_path,
         &ass_path,
         &opts,
-    )?;
+    ).await?;
 
     let output = ass_path.to_string_lossy().to_string();
     tracing::info!("Danmaku ASS generated: {}", output);

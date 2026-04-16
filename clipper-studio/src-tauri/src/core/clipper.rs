@@ -338,7 +338,7 @@ pub async fn execute_clip_with_burn(
             burn.danmaku_ass_path.as_ref().unwrap(),
             burn.subtitle_ass_path.as_ref().unwrap(),
             &merged_path,
-        )?;
+        ).await?;
         Some(merged_path)
     } else {
         None
@@ -396,14 +396,16 @@ pub async fn execute_clip_with_burn(
 /// The danmaku ASS (from DanmakuFactory) is used as base since it has
 /// proper styles for scrolling text. Subtitle events are appended with
 /// the "Default" style from a separate style definition.
-fn merge_ass_files(
+async fn merge_ass_files(
     danmaku_ass: &Path,
     subtitle_ass: &Path,
     output: &Path,
 ) -> Result<(), String> {
-    let danmaku_content = std::fs::read_to_string(danmaku_ass)
+    let danmaku_content = tokio::fs::read_to_string(danmaku_ass)
+        .await
         .map_err(|e| format!("Failed to read danmaku ASS {}: {}", danmaku_ass.display(), e))?;
-    let subtitle_content = std::fs::read_to_string(subtitle_ass)
+    let subtitle_content = tokio::fs::read_to_string(subtitle_ass)
+        .await
         .map_err(|e| format!("Failed to read subtitle ASS {}: {}", subtitle_ass.display(), e))?;
 
     let mut merged = danmaku_content.clone();
@@ -428,7 +430,8 @@ fn merge_ass_files(
         }
     }
 
-    std::fs::write(output, &merged)
+    tokio::fs::write(output, &merged)
+        .await
         .map_err(|e| format!("Failed to write merged ASS: {}", e))?;
 
     tracing::info!("Merged ASS files into {}", output.display());
