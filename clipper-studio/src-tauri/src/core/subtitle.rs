@@ -7,6 +7,17 @@ use std::path::Path;
 use crate::asr::service::SubtitleSegment;
 use crate::db::Database;
 
+/// Returns the default CJK font name for the current platform.
+pub fn default_cjk_font() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "Microsoft YaHei"
+    } else if cfg!(target_os = "macos") {
+        "PingFang SC"
+    } else {
+        "Noto Sans CJK SC"
+    }
+}
+
 /// Format milliseconds to ASS time format: H:MM:SS.CC
 pub fn format_ass_time(ms: i64) -> String {
     let total_secs = ms / 1000;
@@ -22,10 +33,11 @@ pub fn format_ass_time(ms: i64) -> String {
 /// `base_ms` is the recorded_at Unix-approx milliseconds used to convert
 /// absolute timestamps to video-relative timestamps.
 pub fn generate_ass(segments: &[SubtitleSegment], base_ms: i64) -> String {
-    let mut out = String::from(
+    let font = default_cjk_font();
+    let mut out = format!(
         "[Script Info]\nTitle: ClipperStudio Export\nScriptType: v4.00+\nPlayResX: 1920\nPlayResY: 1080\n\n\
          [V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
-         Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n\n\
+         Style: Default,{font},48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n\n\
          [Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n",
     );
     for seg in segments {

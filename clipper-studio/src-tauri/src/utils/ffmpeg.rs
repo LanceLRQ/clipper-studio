@@ -486,6 +486,7 @@ pub async fn burn_subtitle_with_progress(
         tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {

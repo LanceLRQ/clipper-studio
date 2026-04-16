@@ -429,25 +429,11 @@ pub async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
     .and_then(|r| r.try_get::<String>("", "value").ok())
 }
 
-/// Parse "yyyy-MM-dd HH:mm:ss" to Unix milliseconds
+/// Parse "yyyy-MM-dd HH:mm:ss" to Unix milliseconds (UTC)
 pub fn parse_recorded_at_to_unix_ms(ts: &str) -> Option<i64> {
-    // Format: "2026-04-05 20:30:00"
-    let parts: Vec<&str> = ts.split(&['-', ' ', ':'][..]).collect();
-    if parts.len() < 6 {
-        return None;
-    }
-    let y: i32 = parts[0].parse().ok()?;
-    let mo: u32 = parts[1].parse().ok()?;
-    let d: u32 = parts[2].parse().ok()?;
-    let h: u32 = parts[3].parse().ok()?;
-    let mi: u32 = parts[4].parse().ok()?;
-    let sec: u32 = parts[5].parse().ok()?;
-
-    // Simple calculation (not calendar-accurate, but good enough for our use case)
-    // We use the same approach as storage.rs parse_timestamp_secs but in milliseconds
-    let days = (y as i64) * 365 + (mo as i64) * 30 + (d as i64);
-    let secs = days * 86400 + (h as i64) * 3600 + (mi as i64) * 60 + (sec as i64);
-    Some(secs * 1000)
+    use chrono::NaiveDateTime;
+    let ndt = NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S").ok()?;
+    Some(ndt.and_utc().timestamp_millis())
 }
 
 /// List subtitle segments for a video
@@ -642,19 +628,25 @@ mod tests {
 
     #[test]
     fn test_parse_recorded_at_standard() {
+        use chrono::NaiveDateTime;
         let result = parse_recorded_at_to_unix_ms("2026-04-05 20:30:00");
         assert!(result.is_some());
-        // (2026*365 + 4*30 + 5) * 86400 + 20*3600 + 30*60 + 0
-        let expected =
-            ((2026i64 * 365 + 4 * 30 + 5) * 86400 + 20 * 3600 + 30 * 60 + 0) * 1000;
+        let expected = NaiveDateTime::parse_from_str("2026-04-05 20:30:00", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .and_utc()
+            .timestamp_millis();
         assert_eq!(result.unwrap(), expected);
     }
 
     #[test]
     fn test_parse_recorded_at_midnight() {
+        use chrono::NaiveDateTime;
         let result = parse_recorded_at_to_unix_ms("2026-01-01 00:00:00");
         assert!(result.is_some());
-        let expected = ((2026i64 * 365 + 1 * 30 + 1) * 86400) * 1000;
+        let expected = NaiveDateTime::parse_from_str("2026-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
+            .unwrap()
+            .and_utc()
+            .timestamp_millis();
         assert_eq!(result.unwrap(), expected);
     }
 

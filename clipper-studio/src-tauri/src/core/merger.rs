@@ -225,10 +225,23 @@ async fn run_ffmpeg_with_progress(
     let mut reader = BufReader::new(stdout).lines();
     let mut current_speed: Option<f64> = None;
 
+    // Concurrently consume stderr to prevent pipe buffer deadlock
+    let stderr = child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(mut stderr) = stderr {
+            let mut buf = Vec::new();
+            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf).await;
+            buf
+        } else {
+            Vec::new()
+        }
+    });
+
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
@@ -270,11 +283,14 @@ async fn run_ffmpeg_with_progress(
         }
     }
 
+    let stderr_output = stderr_task.await.unwrap_or_default();
+
     let status = child.wait().await
         .map_err(|e| format!("FFmpeg process error: {}", e))?;
 
     if !status.success() {
-        return Err(format!("FFmpeg exited with code: {}", status));
+        let stderr_str = String::from_utf8_lossy(&stderr_output);
+        return Err(format!("FFmpeg exited with code: {} (stderr: {})", status, stderr_str.chars().take(500).collect::<String>()));
     }
 
     Ok(())

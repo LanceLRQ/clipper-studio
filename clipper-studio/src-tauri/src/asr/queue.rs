@@ -1,5 +1,5 @@
 use std::collections::{HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -12,6 +12,15 @@ use super::provider::{ASRProvider, ASRTaskStatus};
 use super::remote::RemoteASRProvider;
 use super::service;
 use super::splitter;
+
+/// RAII guard that ensures a temporary file is deleted when dropped.
+struct TempFileGuard(PathBuf);
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
 
 /// Maximum automatic retry count
 const MAX_AUTO_RETRIES: u32 = 2;
@@ -461,9 +470,11 @@ impl ASRTaskQueue {
                 msg
             })?;
 
+        // RAII guard ensures WAV cleanup on any exit path (panic, early return, etc.)
+        let _wav_guard = TempFileGuard(wav_path.clone());
+
         // Check cancellation
         if Self::check_cancelled(inner, task_id) {
-            let _ = tokio::fs::remove_file(&wav_path).await;
             Self::do_mark_cancelled(db, app_handle, task_id, video_id, file_name).await;
             return Ok(());
         }
@@ -475,7 +486,6 @@ impl ASRTaskQueue {
         let provider = match Self::build_provider(db).await {
             Ok(p) => p,
             Err(e) => {
-                let _ = tokio::fs::remove_file(&wav_path).await;
                 Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&e), file_name);
                 Self::spawn_mark_failed(db.clone(), task_id, &e);
                 return Err(e);
@@ -483,12 +493,8 @@ impl ASRTaskQueue {
         };
 
         let remote_task_id = match provider.submit(&wav_path, Some(&entry.language)).await {
-            Ok(id) => {
-                let _ = tokio::fs::remove_file(&wav_path).await;
-                id
-            }
+            Ok(id) => id,
             Err(e) => {
-                let _ = tokio::fs::remove_file(&wav_path).await;
                 let msg = format!("ASR 提交失败: {}", e);
                 Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
                 Self::spawn_mark_failed(db.clone(), task_id, &msg);

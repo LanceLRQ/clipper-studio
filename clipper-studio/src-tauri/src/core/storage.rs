@@ -309,20 +309,11 @@ fn build_session(room_id: &str, files: &[&RecordingFileMeta]) -> RecordingSessio
     }
 }
 
-/// Parse "yyyy-MM-dd HH:mm:ss" to approximate seconds (for gap comparison)
+/// Parse "yyyy-MM-dd HH:mm:ss" to Unix seconds (UTC)
 fn parse_timestamp_secs(s: &str) -> Option<i64> {
-    let parts: Vec<&str> = s.split(&['-', ' ', ':'][..]).collect();
-    if parts.len() < 6 {
-        return None;
-    }
-    let y: i64 = parts[0].parse().ok()?;
-    let mo: i64 = parts[1].parse().ok()?;
-    let d: i64 = parts[2].parse().ok()?;
-    let h: i64 = parts[3].parse().ok()?;
-    let mi: i64 = parts[4].parse().ok()?;
-    let sec: i64 = parts[5].parse().ok()?;
-    // Rough estimate (good enough for gap calculation, not calendar-accurate)
-    Some(((y * 365 + mo * 30 + d) * 86400) + h * 3600 + mi * 60 + sec)
+    use chrono::NaiveDateTime;
+    let ndt = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").ok()?;
+    Some(ndt.and_utc().timestamp())
 }
 
 /// Detect adapter type for a directory
@@ -398,8 +389,13 @@ mod tests {
     fn test_parse_timestamp_secs_valid() {
         let secs = parse_timestamp_secs("2026-04-05 20:30:00");
         assert!(secs.is_some());
-        // (2026*365 + 4*30 + 5) * 86400 + 20*3600 + 30*60 + 0
-        let expected = (2026i64 * 365 + 4 * 30 + 5) * 86400 + 20 * 3600 + 30 * 60;
+        let expected = chrono::NaiveDateTime::parse_from_str(
+            "2026-04-05 20:30:00",
+            "%Y-%m-%d %H:%M:%S",
+        )
+        .unwrap()
+        .and_utc()
+        .timestamp();
         assert_eq!(secs.unwrap(), expected);
     }
 

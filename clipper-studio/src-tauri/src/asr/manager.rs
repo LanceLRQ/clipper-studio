@@ -20,6 +20,9 @@ const HEALTH_CHECK_INTERVAL_SECS: u64 = 3;
 /// Maximum health check attempts (3s * 40 = 2 minutes)
 const MAX_HEALTH_CHECK_ATTEMPTS: u32 = 40;
 
+/// Maximum slow-mode health check attempts (15s * 120 = 30 minutes)
+const MAX_SLOW_MODE_ATTEMPTS: u32 = 120;
+
 // ==================== Types ====================
 
 /// ASR service lifecycle status
@@ -489,6 +492,7 @@ impl ASRServiceManager {
 
         let mut attempt: u32 = 0;
         let mut slow_mode = false;
+        let mut slow_mode_attempts: u32 = 0;
 
         loop {
             if matches!(
@@ -521,6 +525,18 @@ impl ASRServiceManager {
                 let _ = app_h.emit("asr-service-slow-start", &msg);
             }
 
+            // Abort after maximum slow-mode wait (30 minutes)
+            if slow_mode {
+                slow_mode_attempts += 1;
+                if slow_mode_attempts >= MAX_SLOW_MODE_ATTEMPTS {
+                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。".to_string();
+                    tracing::error!("{}", msg);
+                    self.set_status(ASRServiceStatus::Error { message: msg });
+                    self.emit_status(&app_h);
+                    return;
+                }
+            }
+
             let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };
             tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
         }
@@ -538,6 +554,7 @@ impl ASRServiceManager {
 
         let mut attempt: u32 = 0;
         let mut slow_mode = false;
+        let mut slow_mode_attempts: u32 = 0;
 
         loop {
             if matches!(
@@ -575,6 +592,18 @@ impl ASRServiceManager {
                 tracing::warn!("{}", msg);
                 self.push_log(&msg, &app_h);
                 let _ = app_h.emit("asr-service-slow-start", &msg);
+            }
+
+            // Abort after maximum slow-mode wait (30 minutes)
+            if slow_mode {
+                slow_mode_attempts += 1;
+                if slow_mode_attempts >= MAX_SLOW_MODE_ATTEMPTS {
+                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。".to_string();
+                    tracing::error!("{}", msg);
+                    self.set_status(ASRServiceStatus::Error { message: msg });
+                    self.emit_status(&app_h);
+                    return;
+                }
             }
 
             let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };

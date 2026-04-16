@@ -634,6 +634,18 @@ pub async fn stop_asr_service(
     if let Err(e) = state.asr_service_manager.stop().await {
         tracing::warn!("ASR stop error (external mode): {}", e);
     }
+
+    // Mark any pending/processing ASR tasks as failed since the service is now stopped
+    if let Err(e) = sea_orm::ConnectionTrait::execute_unprepared(
+        state.db.conn(),
+        "UPDATE asr_tasks SET status = 'failed', error_message = 'ASR 服务已停止' \
+         WHERE status IN ('processing', 'pending')",
+    )
+    .await
+    {
+        tracing::warn!("Failed to mark pending ASR tasks as failed: {}", e);
+    }
+
     let _ = app_handle.emit(
         "asr-service-status",
         state.asr_service_manager.status_info(),

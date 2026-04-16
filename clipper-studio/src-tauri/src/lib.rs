@@ -175,6 +175,33 @@ pub fn run() {
 
             tracing::info!("Database initialized successfully");
 
+            // Recover tasks that were left in 'processing' state due to abnormal exit
+            tauri::async_runtime::block_on(async {
+                let tables = ["clip_tasks", "asr_tasks", "media_tasks"];
+                for table in &tables {
+                    let sql = format!(
+                        "UPDATE {} SET status = 'failed', error_message = '应用异常退出，任务已重置' \
+                         WHERE status = 'processing'",
+                        table
+                    );
+                    match sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql).await {
+                        Ok(result) => {
+                            let count = result.rows_affected();
+                            if count > 0 {
+                                tracing::warn!(
+                                    "Recovered {} stuck '{}' tasks in table '{}'",
+                                    count, "processing", table
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            // Table might not exist yet in early versions, ignore
+                            tracing::debug!("Skip recovery for '{}': {}", table, e);
+                        }
+                    }
+                }
+            });
+
             // Start local media server
             let media_server = tauri::async_runtime::block_on(async {
                 MediaServer::start().await
@@ -426,6 +453,12 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 tracing::info!("ClipperStudio exiting, cleaning up...");
                 let state = app_handle.state::<AppState>();
+
+                // Cancel all active clip/merge/media tasks to terminate FFmpeg processes
+                let task_queue = state.task_queue.clone();
+                tauri::async_runtime::block_on(async {
+                    task_queue.cancel_all().await;
+                });
 
                 // Stop managed ASR service if running
                 let asr_mgr = state.asr_service_manager.clone();

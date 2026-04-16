@@ -90,7 +90,13 @@ impl TaskQueue {
         // Spawn task executor
         tokio::spawn(async move {
             // Wait for semaphore permit (concurrency limit)
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = match semaphore.acquire().await {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::warn!("Task {} abandoned: task queue is closing", task_id);
+                    return;
+                }
+            };
 
             // Emit processing status
             let _ = app_handle.emit(
@@ -157,6 +163,19 @@ impl TaskQueue {
             true
         } else {
             false
+        }
+    }
+
+    /// Cancel all running tasks (used during application shutdown)
+    pub async fn cancel_all(&self) {
+        let tokens = self.cancel_tokens.lock().await;
+        let count = tokens.len();
+        for (task_id, token) in tokens.iter() {
+            token.cancel();
+            tracing::info!("Task {} cancelled (shutdown)", task_id);
+        }
+        if count > 0 {
+            tracing::info!("Cancelled {} active tasks during shutdown", count);
         }
     }
 }

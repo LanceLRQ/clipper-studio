@@ -108,6 +108,18 @@ pub async fn execute_clip(
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
 
+    // Concurrently consume stderr to prevent pipe buffer deadlock
+    let stderr = child.stderr.take();
+    let stderr_task = tokio::spawn(async move {
+        if let Some(mut stderr) = stderr {
+            let mut buf = Vec::new();
+            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf).await;
+            buf
+        } else {
+            Vec::new()
+        }
+    });
+
     let mut current_speed: Option<f64> = None;
 
     // Parse FFmpeg progress output
@@ -115,6 +127,7 @@ pub async fn execute_clip(
         tokio::select! {
             _ = cancel.cancelled() => {
                 let _ = child.kill().await;
+                let _ = child.wait().await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
@@ -152,13 +165,16 @@ pub async fn execute_clip(
         }
     }
 
+    let stderr_output = stderr_task.await.unwrap_or_default();
+
     let status = child
         .wait()
         .await
         .map_err(|e| format!("FFmpeg process error: {}", e))?;
 
     if !status.success() {
-        return Err(format!("FFmpeg exited with code: {}", status));
+        let stderr_str = String::from_utf8_lossy(&stderr_output);
+        return Err(format!("FFmpeg exited with code: {} (stderr: {})", status, stderr_str.chars().take(500).collect::<String>()));
     }
 
     // Verify output exists
@@ -396,8 +412,9 @@ fn merge_ass_files(
     if !merged.contains("Style: Subtitle,") {
         // Insert subtitle style before [Events] section
         if let Some(pos) = merged.find("[Events]") {
-            let subtitle_style = "Style: Subtitle,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n";
-            merged.insert_str(pos, subtitle_style);
+            let font = crate::core::subtitle::default_cjk_font();
+            let subtitle_style = format!("Style: Subtitle,{font},48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1\n");
+            merged.insert_str(pos, &subtitle_style);
         }
     }
 

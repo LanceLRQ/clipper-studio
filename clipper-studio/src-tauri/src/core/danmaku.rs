@@ -254,6 +254,9 @@ fn build_danmaku_factory_args(
         options.opacity.to_string(),
         "-d".into(),
         options.density.to_string(),
+        // Use platform-appropriate CJK font to avoid missing glyphs
+        "-F".into(),
+        crate::core::subtitle::default_cjk_font().to_string(),
     ]
 }
 
@@ -309,7 +312,18 @@ pub fn convert_to_ass(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .output()
-        .map_err(|e| format!("Failed to run {}: {}", tool_name, e))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "{} 未找到。请确认已安装相关依赖：\n\
+                     - DanmakuFactory: 在设置中安装或手动下载\n\
+                     - DanmakuConvert: 需要 Python 3.6+ 并执行 pip install dmconvert",
+                    tool_name
+                )
+            } else {
+                format!("Failed to run {}: {}", tool_name, e)
+            }
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

@@ -60,6 +60,9 @@ urlencoding = "2"
 # Configuration
 toml = "0.8"
 
+# Date/time handling
+chrono = "0.4"
+
 # Regex (for filename pattern parsing)
 regex = "1"
 
