@@ -102,6 +102,9 @@ pub const ERR_CONTAINER_CONFLICT: &str = "DOCKER_CONTAINER_CONFLICT";
 pub struct ASRServiceManager {
     /// Native-mode child process (None in docker mode)
     child: Mutex<Option<Child>>,
+    /// PID of the native child process, kept separately so we can still kill
+    /// the process tree even after the Child handle is consumed by try_wait().
+    child_pid: Mutex<Option<u32>>,
     status: Mutex<ASRServiceStatus>,
     logs: Mutex<VecDeque<String>>,
     health_info: Mutex<Option<ASRHealthInfo>>,
@@ -113,6 +116,7 @@ impl ASRServiceManager {
     pub fn new() -> Self {
         Self {
             child: Mutex::new(None),
+            child_pid: Mutex::new(None),
             status: Mutex::new(ASRServiceStatus::Stopped),
             logs: Mutex::new(VecDeque::new()),
             health_info: Mutex::new(None),
@@ -301,6 +305,13 @@ impl ASRServiceManager {
 
         // Take stdout handle (stderr is merged into stdout via 2>&1)
         let stdout = child.stdout.take();
+
+        // Store PID separately so we can kill the process tree even after
+        // the Child handle is consumed by try_wait() in native_child_running().
+        let pid = child.id();
+        if let Ok(mut guard) = self.child_pid.lock() {
+            *guard = pid;
+        }
 
         // Store child process
         if let Ok(mut guard) = self.child.lock() {
@@ -759,10 +770,14 @@ impl ASRServiceManager {
                 let _ = docker::remove_container(docker::CONTAINER_NAME).await;
             }
             _ => {
-                // Native (or unknown) — kill child process
+                // Native (or unknown) — kill child process tree
                 let child = self.child.lock().ok().and_then(|mut g| g.take());
+
+                // Read the saved PID (may exist even if Child handle was already consumed)
+                let saved_pid = self.child_pid.lock().ok().and_then(|mut g| g.take());
+
                 if let Some(mut child) = child {
-                    tracing::info!("Stopping ASR service (native, killing child)...");
+                    tracing::info!("Stopping ASR service (native, killing child tree)...");
 
                     #[cfg(not(target_os = "windows"))]
                     {
@@ -777,10 +792,27 @@ impl ASRServiceManager {
 
                     #[cfg(target_os = "windows")]
                     {
-                        let _ = child.kill().await;
+                        if let Some(pid) = child.id() {
+                            kill_process_tree(pid).await;
+                        }
                     }
 
                     let _ = child.wait().await;
+                } else if let Some(pid) = saved_pid {
+                    // Child handle was consumed (e.g. by native_child_running detecting
+                    // cmd.exe exit), but the real ASR process may still be alive.
+                    tracing::info!(
+                        "No child handle but saved PID {} exists, killing process tree...",
+                        pid
+                    );
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        kill_process_tree(pid).await;
+                    }
                 } else {
                     tracing::info!("No child process found, updating status only");
                 }
@@ -792,6 +824,9 @@ impl ASRServiceManager {
         }
         if let Ok(mut m) = self.current_mode.lock() {
             *m = None;
+        }
+        if let Ok(mut p) = self.child_pid.lock() {
+            *p = None;
         }
 
         self.set_status(ASRServiceStatus::Stopped);
@@ -918,13 +953,17 @@ impl ASRServiceManager {
         }
     }
 
-    /// Check if the native child process is still running
+    /// Check if the native child process is still running.
+    /// On exit, the Child handle is consumed but the saved PID is preserved
+    /// so stop() can still kill the process tree.
     fn native_child_running(&self) -> bool {
         if let Ok(mut guard) = self.child.lock() {
             if let Some(ref mut child) = *guard {
                 match child.try_wait() {
                     Ok(None) => return true,
                     Ok(Some(_)) => {
+                        // Child (cmd.exe) exited, but grandchild (python.exe) may
+                        // still be alive. Consume the handle but keep child_pid.
                         *guard = None;
                         return false;
                     }
@@ -965,6 +1004,21 @@ impl ASRServiceManager {
 
 impl Drop for ASRServiceManager {
     fn drop(&mut self) {
+        // On Windows, kill the entire process tree (not just cmd.exe).
+        // On Unix, start_kill() is sufficient because kill_on_drop was set and
+        // process groups are used.
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(guard) = self.child_pid.lock() {
+                if let Some(pid) = *guard {
+                    // Synchronous taskkill — Drop cannot be async
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/T", "/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
         if let Ok(mut guard) = self.child.lock() {
             if let Some(ref mut child) = *guard {
                 let _ = child.start_kill();
@@ -1030,4 +1084,36 @@ fn build_script_args(config: &ASRStartConfig) -> Vec<String> {
     }
 
     args
+}
+
+/// Kill an entire process tree on Windows using `taskkill /T /F /PID`.
+/// `/T` recursively terminates all descendant processes.
+/// `/F` forces termination.
+#[cfg(target_os = "windows")]
+async fn kill_process_tree(pid: u32) {
+    tracing::info!("Killing process tree with taskkill /T /F /PID {}", pid);
+    let result = tokio::process::Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .await;
+
+    match result {
+        Ok(out) if out.status.success() => {
+            tracing::info!("taskkill succeeded for PID {}", pid);
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            // "not found" is fine — process already exited
+            if stderr.contains("not found") || stderr.contains("not running") {
+                tracing::info!("Process {} already exited", pid);
+            } else {
+                tracing::warn!("taskkill for PID {} returned error: {}", pid, stderr.trim());
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to run taskkill for PID {}: {}", pid, e);
+        }
+    }
 }
