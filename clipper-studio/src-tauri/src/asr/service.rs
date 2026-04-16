@@ -44,7 +44,11 @@ pub struct ASRTaskInfo {
 ///
 /// Uses FFmpeg: `ffmpeg -i input -ar 16000 -ac 1 -c:a pcm_s16le output.wav`
 /// Returns the path to the temporary WAV file.
-pub async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathBuf, String> {
+pub async fn convert_to_asr_wav(
+    ffmpeg_path: &str,
+    input: &Path,
+    cancel_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<PathBuf, String> {
     let temp_dir = std::env::temp_dir();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -58,7 +62,7 @@ pub async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathB
         wav_path.display()
     );
 
-    let output = tokio::process::Command::new(ffmpeg_path)
+    let mut child = tokio::process::Command::new(ffmpeg_path)
         .args([
             "-i",
             &input.to_string_lossy(),
@@ -73,16 +77,40 @@ pub async fn convert_to_asr_wav(ffmpeg_path: &str, input: &Path) -> Result<PathB
         ])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output()
-        .await
+        .spawn()
         .map_err(|e| format!("音频转换失败: {}", e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("音频转换失败: {}", stderr));
-    }
+    // Poll child process with cancellation check
+    loop {
+        // Check cancellation
+        if let Some(ref flag) = cancel_flag {
+            if flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                let _ = tokio::fs::remove_file(&wav_path).await;
+                return Err("Task cancelled".to_string());
+            }
+        }
 
-    Ok(wav_path)
+        // Check if process has finished (non-blocking)
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    let _ = tokio::fs::remove_file(&wav_path).await;
+                    return Err(format!("音频转换失败: FFmpeg exited with {}", status));
+                }
+                return Ok(wav_path);
+            }
+            Ok(None) => {
+                // Still running, wait a bit before next check
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&wav_path).await;
+                return Err(format!("音频转换失败: {}", e));
+            }
+        }
+    }
 }
 
 /// Submit an ASR task for a video
@@ -133,7 +161,7 @@ pub async fn submit_asr(
     let lang = language.unwrap_or("Chinese");
 
     // Convert to 16kHz mono WAV for ASR
-    let wav_path = convert_to_asr_wav(ffmpeg_path, Path::new(&file_path)).await?;
+    let wav_path = convert_to_asr_wav(ffmpeg_path, Path::new(&file_path), None).await?;
 
     // Submit to ASR provider (use WAV file)
     let remote_task_id = match provider

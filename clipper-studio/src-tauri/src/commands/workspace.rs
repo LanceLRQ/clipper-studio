@@ -338,7 +338,12 @@ pub async fn scan_workspace(
     if !ffprobe_path.is_empty() {
         for file in &mut files_with_duration {
             if file.duration_ms.is_none() {
-                if let Ok(probe) = ffmpeg::probe(&ffprobe_path, &file.file_path) {
+                let probe_path = ffprobe_path.clone();
+                let file_path = file.file_path.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    ffmpeg::probe(&probe_path, &file_path)
+                }).await;
+                if let Ok(Ok(probe)) = result {
                     file.duration_ms = probe.duration_ms;
                 }
             }

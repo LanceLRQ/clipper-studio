@@ -428,7 +428,7 @@ impl ASRTaskQueue {
 
             // Execute the task
             let result = Self::execute_task(
-                &db, &app_handle, &ffmpeg_path, &inner, &entry,
+                &db, &app_handle, &ffmpeg_path, &inner, inner.clone(), &entry,
             ).await;
 
             if let Err(e) = result {
@@ -450,6 +450,7 @@ impl ASRTaskQueue {
         app_handle: &AppHandle,
         ffmpeg_path: &Arc<std::sync::RwLock<String>>,
         inner: &std::sync::Mutex<QueueInner>,
+        inner_arc: Arc<std::sync::Mutex<QueueInner>>,
         entry: &ASRQueueEntry,
     ) -> Result<(), String> {
         let task_id = entry.asr_task_id;
@@ -461,14 +462,37 @@ impl ASRTaskQueue {
         Self::emit_progress(app_handle, task_id, video_id, "converting", 0.0, Some("音频转换中..."), None, file_name);
 
         let ffmpeg = ffmpeg_path.read().unwrap().clone();
-        let wav_path = service::convert_to_asr_wav(&ffmpeg, Path::new(&entry.video_file_path))
-            .await
-            .map_err(|e| {
-                let msg = format!("音频转换失败: {}", e);
-                Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
-                Self::spawn_mark_failed(db.clone(), task_id, &msg);
-                msg
-            })?;
+        // Build an atomic cancel flag so WAV conversion can be interrupted
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag_clone = cancel_flag.clone();
+        let inner_for_watcher = inner_arc.clone();
+        let watcher = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let cancelled = inner_for_watcher
+                    .lock()
+                    .map(|q| q.cancelled_ids.contains(&task_id))
+                    .unwrap_or(false);
+                if cancelled {
+                    flag_clone.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return;
+                }
+            }
+        });
+        let wav_path = service::convert_to_asr_wav(
+            &ffmpeg,
+            Path::new(&entry.video_file_path),
+            Some(cancel_flag),
+        )
+        .await
+        .map_err(|e| {
+            watcher.abort();
+            let msg = format!("音频转换失败: {}", e);
+            Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+            Self::spawn_mark_failed(db.clone(), task_id, &msg);
+            msg
+        })?;
+        watcher.abort(); // WAV conversion done, stop the cancel watcher
 
         // RAII guard ensures WAV cleanup on any exit path (panic, early return, etc.)
         let _wav_guard = TempFileGuard(wav_path.clone());

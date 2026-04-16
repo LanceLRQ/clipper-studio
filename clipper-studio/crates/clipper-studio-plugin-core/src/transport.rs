@@ -34,6 +34,7 @@ impl HttpTransport {
     pub fn new(base_url: &str, health_endpoint: Option<&str>) -> Self {
         Self {
             client: reqwest::Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
                 .timeout(std::time::Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),
