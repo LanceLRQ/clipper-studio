@@ -199,22 +199,6 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             },
         ],
     },
-    DependencyDef {
-        id: "qwen3-asr",
-        name: "qwen3-asr-service",
-        description: "本地 AI 语音识别引擎（体积较大，约 2-4 GB）",
-        required: false,
-        dep_type: DepType::Runtime,
-        binaries: &[],
-        version_check: None,
-        manual_download_url: None,
-        python_sources: &[],
-        sources: &[
-            // Windows: portable package maintained by LanceLRQ
-            // URL TBD - will be configured later
-            // macOS: manual installation only (no auto-install)
-        ],
-    },
 ];
 
 /// Look up a dependency definition by ID
@@ -439,7 +423,6 @@ mod tests {
     fn test_get_def_existing() {
         assert!(get_def("ffmpeg").is_some());
         assert!(get_def("danmaku-factory").is_some());
-        assert!(get_def("qwen3-asr").is_some());
     }
 
     #[test]

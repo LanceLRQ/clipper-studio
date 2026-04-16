@@ -62,61 +62,6 @@ pub fn detect_version(dep_dir: &Path, check: &VersionCheck) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
-/// Validate a qwen3-asr-service installation directory
-pub fn validate_asr_runtime(base_dir: &Path) -> Result<String, String> {
-    let python_path = get_asr_python_path(base_dir);
-    let main_path = base_dir
-        .join("asr-service")
-        .join("app")
-        .join("main.py");
-
-    #[cfg(target_os = "windows")]
-    {
-        let lib_dir = base_dir.join("asr-service").join("lib");
-        if !python_path.exists()
-            || !lib_dir.is_dir()
-            || std::fs::read_dir(&lib_dir)
-                .map(|mut d| d.next().is_none())
-                .unwrap_or(true)
-        {
-            return Err("未找到便携 Python 环境（bin/python/python.exe 或 lib/）".to_string());
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        if !python_path.exists() {
-            return Err("未找到 Python 虚拟环境（venv）".to_string());
-        }
-    }
-
-    if !main_path.exists() {
-        return Err("未找到 app/main.py 入口文件".to_string());
-    }
-
-    Ok("valid".to_string())
-}
-
-/// Get the python path for ASR service
-fn get_asr_python_path(base_dir: &Path) -> std::path::PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        base_dir
-            .join("asr-service")
-            .join("bin")
-            .join("python")
-            .join("python.exe")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        base_dir
-            .join("asr-service")
-            .join("venv")
-            .join("bin")
-            .join("python3")
-    }
-}
-
 /// Full health check for a dependency
 pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String>, String> {
     // Check if this platform uses Python package install
@@ -133,14 +78,7 @@ pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String
                 .and_then(|vc| detect_version(dep_dir, vc));
             Ok(version)
         }
-        DepType::Runtime => {
-            if def.id == "qwen3-asr" {
-                validate_asr_runtime(dep_dir)?;
-                Ok(None)
-            } else {
-                Ok(None)
-            }
-        }
+        DepType::Runtime => Ok(None),
     }
 }
 

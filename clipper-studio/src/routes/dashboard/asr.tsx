@@ -153,6 +153,7 @@ function ASRSettingsContent() {
   const [serviceLogs, setServiceLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [serviceActionLoading, setServiceActionLoading] = useState(false);
+  const [slowStartMessage, setSlowStartMessage] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -219,6 +220,19 @@ function ASRSettingsContent() {
     let unlisten: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
       setServiceStatus(event.payload);
+      // Clear slow-start hint when service leaves Starting state
+      if (event.payload.status !== "starting") {
+        setSlowStartMessage(null);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // Listen for slow-start notification (model download taking long)
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    listen<string>("asr-service-slow-start", (event) => {
+      setSlowStartMessage(event.payload);
     }).then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
@@ -581,6 +595,13 @@ function ASRSettingsContent() {
             {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
               <p className="text-sm text-red-500">
                 {(serviceStatus as { message?: string }).message}
+              </p>
+            )}
+
+            {/* Slow-start warning (model download) */}
+            {slowStartMessage && (
+              <p className="text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md px-4 py-3">
+                {slowStartMessage}
               </p>
             )}
 

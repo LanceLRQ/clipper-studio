@@ -592,15 +592,6 @@ function DependencyManagerTab() {
               </div>
             )}
 
-            {/* macOS ASR notice */}
-            {dep.id === "qwen3-asr" &&
-              !dep.auto_install_available &&
-              dep.status !== "installed" && (
-                <p className="text-xs text-amber-600">
-                  macOS 暂不支持自动安装，请参考文档手动安装后使用"自定义路径"指定。
-                </p>
-              )}
-
             {/* Custom path editor */}
             {customPathEditing === dep.id && (
               <div className="flex gap-2 items-center">

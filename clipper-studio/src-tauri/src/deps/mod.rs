@@ -522,7 +522,7 @@ impl DependencyManager {
         custom_path: &Option<String>,
         bin_dir: &Path,
     ) -> SystemDetection {
-        // For runtime deps (qwen3-asr), system detection works differently
+        // For runtime deps, system detection works differently
         if def.dep_type == registry::DepType::Runtime {
             return SystemDetection::default();
         }

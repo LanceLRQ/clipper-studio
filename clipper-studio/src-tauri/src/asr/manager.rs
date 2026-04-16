@@ -487,7 +487,10 @@ impl ASRServiceManager {
             .build()
             .unwrap_or_default();
 
-        for attempt in 0..MAX_HEALTH_CHECK_ATTEMPTS {
+        let mut attempt: u32 = 0;
+        let mut slow_mode = false;
+
+        loop {
             if matches!(
                 self.status(),
                 ASRServiceStatus::Stopping | ASRServiceStatus::Stopped
@@ -507,13 +510,20 @@ impl ASRServiceManager {
                 return;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(HEALTH_CHECK_INTERVAL_SECS)).await;
-        }
+            attempt += 1;
 
-        let msg = "ASR 服务启动超时，请查看日志了解原因".to_string();
-        tracing::warn!("{}", msg);
-        self.set_status(ASRServiceStatus::Error { message: msg });
-        self.emit_status(&app_h);
+            // Transition to slow polling after initial fast attempts
+            if !slow_mode && attempt >= MAX_HEALTH_CHECK_ATTEMPTS {
+                slow_mode = true;
+                let msg = "ASR 服务启动时间较长，可能正在下载模型，请查看日志了解进度。您可以继续等待或手动停止服务。".to_string();
+                tracing::warn!("{}", msg);
+                self.push_log(&msg, &app_h);
+                let _ = app_h.emit("asr-service-slow-start", &msg);
+            }
+
+            let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };
+            tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
+        }
     }
 
     /// Docker-mode health polling loop
@@ -526,7 +536,10 @@ impl ASRServiceManager {
             .build()
             .unwrap_or_default();
 
-        for attempt in 0..MAX_HEALTH_CHECK_ATTEMPTS {
+        let mut attempt: u32 = 0;
+        let mut slow_mode = false;
+
+        loop {
             if matches!(
                 self.status(),
                 ASRServiceStatus::Stopping | ASRServiceStatus::Stopped
@@ -553,13 +566,20 @@ impl ASRServiceManager {
                 return;
             }
 
-            tokio::time::sleep(std::time::Duration::from_secs(HEALTH_CHECK_INTERVAL_SECS)).await;
-        }
+            attempt += 1;
 
-        let msg = "ASR 服务启动超时，请查看日志了解原因".to_string();
-        tracing::warn!("{}", msg);
-        self.set_status(ASRServiceStatus::Error { message: msg });
-        self.emit_status(&app_h);
+            // Transition to slow polling after initial fast attempts
+            if !slow_mode && attempt >= MAX_HEALTH_CHECK_ATTEMPTS {
+                slow_mode = true;
+                let msg = "ASR 服务启动时间较长，可能正在下载模型，请查看日志了解进度。您可以继续等待或手动停止服务。".to_string();
+                tracing::warn!("{}", msg);
+                self.push_log(&msg, &app_h);
+                let _ = app_h.emit("asr-service-slow-start", &msg);
+            }
+
+            let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };
+            tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
+        }
     }
 
     /// Perform a single /v1/health probe and update state on success.
