@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { revealFile } from "@/services/system";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -596,7 +596,7 @@ function VideoDetailPage() {
                     <span
                       className="text-right truncate cursor-pointer hover:text-primary hover:underline"
                       title={`在文件管理器中显示：${video.file_path}`}
-                      onClick={() => invoke("reveal_file", { path: video.file_path }).catch(console.error)}
+                      onClick={() => revealFile(video.file_path).catch(console.error)}
                     >
                       {video.file_name}
                     </span>

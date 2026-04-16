@@ -131,11 +131,18 @@ function VideosPage() {
 
   // Auto-refresh when watcher detects new files
   useEffect(() => {
-    const unlisten = listen("workspace-file-change", () => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+
+    listen("workspace-file-change", () => {
       loadData();
+    }).then((fn) => {
+      if (cancelled) { fn(); } else { unlistenFn = fn; }
     });
+
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      unlistenFn?.();
     };
   }, [loadData]);
 

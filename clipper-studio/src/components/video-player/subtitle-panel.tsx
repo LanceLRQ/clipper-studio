@@ -114,11 +114,12 @@ export function SubtitlePanel({
 
   // Listen for real-time service status changes
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlistenFn: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
       setServiceStatus(event.payload);
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
+    return () => { cancelled = true; unlistenFn?.(); };
   }, []);
 
   // Load subtitles on mount

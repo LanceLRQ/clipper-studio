@@ -55,7 +55,10 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
 
   // Listen for task progress events
   useEffect(() => {
-    const unlisten = listen<TaskProgressEvent>("task-progress", (event) => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+
+    listen<TaskProgressEvent>("task-progress", (event) => {
       setTaskProgress(event.payload);
       if (
         event.payload.status === "completed" ||
@@ -64,9 +67,13 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
       ) {
         setClipping(false);
       }
+    }).then((fn) => {
+      if (cancelled) { fn(); } else { unlistenFn = fn; }
     });
+
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      unlistenFn?.();
     };
   }, []);
 

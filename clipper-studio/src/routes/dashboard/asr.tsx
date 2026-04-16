@@ -217,24 +217,26 @@ function ASRSettingsContent() {
 
   // Listen for real-time service status events
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlistenFn: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
       setServiceStatus(event.payload);
       // Clear slow-start hint when service leaves Starting state
       if (event.payload.status !== "starting") {
         setSlowStartMessage(null);
       }
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
+    return () => { cancelled = true; unlistenFn?.(); };
   }, []);
 
   // Listen for slow-start notification (model download taking long)
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlistenFn: UnlistenFn | undefined;
     listen<string>("asr-service-slow-start", (event) => {
       setSlowStartMessage(event.payload);
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
+    return () => { cancelled = true; unlistenFn?.(); };
   }, []);
 
   // Auto-trigger health check when local service becomes running
@@ -254,14 +256,15 @@ function ASRSettingsContent() {
 
   // Listen for real-time log events from the managed process
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlistenFn: UnlistenFn | undefined;
     listen<string>("asr-service-log", (event) => {
       setServiceLogs((prev) => {
         const next = [...prev, event.payload];
         return next.length > 2000 ? next.slice(-2000) : next;
       });
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
+    return () => { cancelled = true; unlistenFn?.(); };
   }, []);
 
   const handlePathChange = useCallback(async (newPath: string) => {

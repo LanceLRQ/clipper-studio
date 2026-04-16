@@ -62,6 +62,36 @@ pub fn detect_version(dep_dir: &Path, check: &VersionCheck) -> Option<String> {
         .map(|m| m.as_str().to_string())
 }
 
+/// Compare two semver-like version strings (e.g. "4.4.0" vs "7.1").
+/// Returns true if `detected` >= `minimum`.
+/// Handles versions with extra suffixes like "7.1-essentials_build".
+fn version_satisfies_minimum(detected: &str, minimum: &str) -> bool {
+    let parse_parts = |s: &str| -> Vec<u32> {
+        // Take only the numeric prefix (e.g. "7.1-essentials" → "7.1")
+        s.split(|c: char| !c.is_ascii_digit() && c != '.')
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .filter_map(|p| p.parse::<u32>().ok())
+            .collect()
+    };
+
+    let det = parse_parts(detected);
+    let min = parse_parts(minimum);
+
+    for i in 0..min.len().max(det.len()) {
+        let d = det.get(i).copied().unwrap_or(0);
+        let m = min.get(i).copied().unwrap_or(0);
+        if d > m {
+            return true;
+        }
+        if d < m {
+            return false;
+        }
+    }
+    true // equal
+}
+
 /// Full health check for a dependency
 pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String>, String> {
     // Check if this platform uses Python package install
@@ -76,6 +106,17 @@ pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String
                 .version_check
                 .as_ref()
                 .and_then(|vc| detect_version(dep_dir, vc));
+
+            // Check minimum version requirement
+            if let (Some(detected), Some(min_ver)) = (&version, def.min_version) {
+                if !version_satisfies_minimum(detected, min_ver) {
+                    return Err(format!(
+                        "{} 版本过低（当前: {}，最低要求: {}）",
+                        def.name, detected, min_ver
+                    ));
+                }
+            }
+
             Ok(version)
         }
         DepType::Runtime => Ok(None),

@@ -335,6 +335,7 @@ function DependencyManagerTab() {
 
   // Listen for install progress events
   useEffect(() => {
+    let cancelled = false;
     let unlistenProgress: UnlistenFn | undefined;
     let unlistenComplete: UnlistenFn | undefined;
     let unlistenError: UnlistenFn | undefined;
@@ -342,7 +343,7 @@ function DependencyManagerTab() {
     listen<InstallProgress>("dep:install-progress", (event) => {
       setProgress(event.payload);
     }).then((fn) => {
-      unlistenProgress = fn;
+      if (cancelled) { fn(); } else { unlistenProgress = fn; }
     });
 
     listen<{ dep_id: string; version: string | null }>(
@@ -353,7 +354,7 @@ function DependencyManagerTab() {
         loadDeps();
       }
     ).then((fn) => {
-      unlistenComplete = fn;
+      if (cancelled) { fn(); } else { unlistenComplete = fn; }
     });
 
     listen<{ dep_id: string; error: string }>(
@@ -364,10 +365,11 @@ function DependencyManagerTab() {
         loadDeps();
       }
     ).then((fn) => {
-      unlistenError = fn;
+      if (cancelled) { fn(); } else { unlistenError = fn; }
     });
 
     return () => {
+      cancelled = true;
       unlistenProgress?.();
       unlistenComplete?.();
       unlistenError?.();

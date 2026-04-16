@@ -14,7 +14,7 @@ import {
   FolderOpenIcon,
 } from "lucide-react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
+import { loadPlugin } from "@/services/plugin";
 import { useNavigate } from "@tanstack/react-router";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { Button } from "@/components/ui/button";
@@ -123,7 +123,7 @@ export function StorageManager() {
     try {
       // Ensure plugin is loaded
       try {
-        await invoke("load_plugin", { pluginId: PLUGIN_ID });
+        await loadPlugin(PLUGIN_ID);
       } catch {
         // Already loaded, ignore
       }

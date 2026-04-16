@@ -313,9 +313,9 @@ pub async fn create_clip(
                         let source_xml = std::path::PathBuf::from(&video_path_clone).with_extension("xml");
                         if source_xml.exists() {
                             match crate::core::danmaku::parse_bilibili_xml(&source_xml).await {
-                                Ok(items) => {
+                                Ok(result) => {
                                     let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
-                                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms, scroll_ms);
+                                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&result.items, start_ms, end_ms, scroll_ms);
                                     if !filtered.is_empty() {
                                         match crate::core::danmaku::write_bilibili_xml(&filtered, &xml_path) {
                                             Ok(()) => tracing::info!("Exported danmaku XML: {}", xml_path.display()),
@@ -1172,10 +1172,10 @@ async fn prepare_burn_options(
         let xml_path = std::path::PathBuf::from(video_path).with_extension("xml");
         if xml_path.exists() {
             match crate::core::danmaku::parse_bilibili_xml(&xml_path).await {
-                Ok(items) => {
+                Ok(result) => {
                     // Filter to clip range and shift timestamps
                     let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
-                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&items, start_ms, end_ms, scroll_ms);
+                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&result.items, start_ms, end_ms, scroll_ms);
                     if !filtered.is_empty() {
                         // Write filtered XML for DanmakuFactory
                         let tmp_xml = tmp_dir.join(format!("clipper_{}_danmaku.xml", task_id));

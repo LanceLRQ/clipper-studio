@@ -3,7 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::core::danmaku::{
-    self, compute_density, normalize_density, DanmakuAssOptions, DanmakuItem,
+    self, compute_density, normalize_density, DanmakuAssOptions, DanmakuParseResult,
 };
 use crate::AppState;
 
@@ -12,7 +12,7 @@ use crate::AppState;
 pub async fn load_danmaku(
     state: State<'_, AppState>,
     video_id: i64,
-) -> Result<Vec<DanmakuItem>, String> {
+) -> Result<DanmakuParseResult, String> {
     // Get video file path to find associated XML
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
@@ -44,7 +44,7 @@ pub async fn get_danmaku_density(
     video_id: i64,
     window_ms: Option<i64>,
 ) -> Result<Vec<f32>, String> {
-    let items = load_danmaku(state.clone(), video_id).await?;
+    let parse_result = load_danmaku(state.clone(), video_id).await?;
 
     // Get video duration
     let row = sea_orm::ConnectionTrait::query_one(
@@ -61,7 +61,7 @@ pub async fn get_danmaku_density(
     let duration_ms: i64 = row.try_get("", "duration_ms").unwrap_or(0);
     let win = window_ms.unwrap_or(5000);
 
-    let density = compute_density(&items, duration_ms, win);
+    let density = compute_density(&parse_result.items, duration_ms, win);
     Ok(normalize_density(&density))
 }
 

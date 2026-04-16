@@ -112,11 +112,12 @@ function ASRStatusIndicator() {
 
   // Listen for real-time local service status events
   useEffect(() => {
-    let unlisten: UnlistenFn | undefined;
+    let cancelled = false;
+    let unlistenFn: UnlistenFn | undefined;
     listen<ASRServiceStatusInfo>("asr-service-status", (event) => {
       setLocalStatus(event.payload);
-    }).then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
+    return () => { cancelled = true; unlistenFn?.(); };
   }, []);
 
   // Periodically check remote health (every 30s)

@@ -14,6 +14,17 @@ pub enum DanmakuMode {
     Top,
 }
 
+/// Result of parsing a danmaku XML file, including truncation info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DanmakuParseResult {
+    /// Parsed danmaku items
+    pub items: Vec<DanmakuItem>,
+    /// Whether the XML was truncated (incomplete parse due to format errors)
+    pub is_truncated: bool,
+    /// Parse error message if truncation occurred
+    pub parse_error: Option<String>,
+}
+
 /// A single danmaku item parsed from Bilibili XML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DanmakuItem {
@@ -33,16 +44,16 @@ pub struct DanmakuItem {
 ///
 /// XML format: `<d p="time,mode,fontSize,color,timestamp,pool,uid,dbid">text</d>`
 /// Only processes regular danmaku (modes 1-5), ignores special danmaku (mode 7+).
-pub async fn parse_bilibili_xml(path: &Path) -> Result<Vec<DanmakuItem>, String> {
+pub async fn parse_bilibili_xml(path: &Path) -> Result<DanmakuParseResult, String> {
     let content = tokio::fs::read_to_string(path)
         .await
         .map_err(|e| format!("Failed to read danmaku file: {}", e))?;
 
-    parse_bilibili_xml_str(&content)
+    Ok(parse_bilibili_xml_str(&content))
 }
 
 /// Parse XML content string into danmaku items
-pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
+pub fn parse_bilibili_xml_str(xml: &str) -> DanmakuParseResult {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -50,6 +61,8 @@ pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
     let mut items = Vec::new();
     let mut in_d_element = false;
     let mut current_params = String::new();
+    let mut is_truncated = false;
+    let mut parse_error = None;
 
     loop {
         match reader.read_event() {
@@ -76,11 +89,14 @@ pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                tracing::warn!(
+                let msg = format!(
                     "XML parse error at position {}: {}",
                     reader.error_position(),
                     e
                 );
+                tracing::warn!("{}", msg);
+                is_truncated = true;
+                parse_error = Some(msg);
                 break;
             }
             _ => {}
@@ -90,8 +106,20 @@ pub fn parse_bilibili_xml_str(xml: &str) -> Result<Vec<DanmakuItem>, String> {
     // Sort by time
     items.sort_by_key(|d| d.time_ms);
 
-    tracing::info!("Parsed {} danmaku items from XML", items.len());
-    Ok(items)
+    if is_truncated {
+        tracing::warn!(
+            "Parsed {} danmaku items (truncated, XML incomplete)",
+            items.len()
+        );
+    } else {
+        tracing::info!("Parsed {} danmaku items from XML", items.len());
+    }
+
+    DanmakuParseResult {
+        items,
+        is_truncated,
+        parse_error,
+    }
 }
 
 /// Parse a single `<d p="...">text</d>` element
@@ -474,11 +502,12 @@ mod tests {
 <d p="1.0,4,25,255,1234567890,0,12345,0">底部弹幕</d>
 <d p="2.0,5,25,16711680,1234567890,0,12345,0">顶部弹幕</d>
 </i>"#;
-        let items = parse_bilibili_xml_str(xml).unwrap();
-        assert_eq!(items.len(), 3);
-        assert_eq!(items[0].text, "第一条");
-        assert_eq!(items[1].mode, DanmakuMode::Bottom);
-        assert_eq!(items[2].mode, DanmakuMode::Top);
+        let result = parse_bilibili_xml_str(xml);
+        assert!(!result.is_truncated);
+        assert_eq!(result.items.len(), 3);
+        assert_eq!(result.items[0].text, "第一条");
+        assert_eq!(result.items[1].mode, DanmakuMode::Bottom);
+        assert_eq!(result.items[2].mode, DanmakuMode::Top);
     }
 
     #[test]

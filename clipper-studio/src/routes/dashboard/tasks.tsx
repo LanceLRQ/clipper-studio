@@ -42,7 +42,7 @@ import { clearFinishedMediaTasks } from "@/services/media";
 import { getDiskUsage, type DiskUsageInfo } from "@/services/workspace";
 import { DateRangePicker } from "@/components/video/date-range-picker";
 import { formatFileSize } from "@/lib/video-utils";
-import { invoke } from "@tauri-apps/api/core";
+import { openFile, revealFile } from "@/services/system";
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -181,7 +181,10 @@ function TasksPage() {
 
   // Listen for real-time task progress
   useEffect(() => {
-    const unlisten = listen<TaskProgressEvent>("task-progress", (event) => {
+    let cancelled = false;
+    let unlistenFn: (() => void) | undefined;
+
+    listen<TaskProgressEvent>("task-progress", (event) => {
       const p = event.payload;
       setLiveProgress((prev) => ({ ...prev, [p.task_id]: p }));
 
@@ -189,9 +192,13 @@ function TasksPage() {
       if (["completed", "failed", "cancelled"].includes(p.status)) {
         setTimeout(loadTasks, 500);
       }
+    }).then((fn) => {
+      if (cancelled) { fn(); } else { unlistenFn = fn; }
     });
+
     return () => {
-      unlisten.then((fn) => fn());
+      cancelled = true;
+      unlistenFn?.();
     };
   }, []);
 
@@ -289,7 +296,7 @@ function TasksPage() {
 
   const handleOpenFile = async (path: string) => {
     try {
-      await invoke("open_file", { path });
+      await openFile(path);
     } catch (e) {
       alert(String(e));
     }
@@ -297,7 +304,7 @@ function TasksPage() {
 
   const handleRevealFile = async (path: string) => {
     try {
-      await invoke("reveal_file", { path });
+      await revealFile(path);
     } catch (e) {
       alert(String(e));
     }

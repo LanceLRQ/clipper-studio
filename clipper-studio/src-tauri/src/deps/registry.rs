@@ -99,6 +99,8 @@ pub struct DependencyDef {
     /// Binary names to verify after installation
     pub binaries: &'static [&'static str],
     pub version_check: Option<VersionCheck>,
+    /// Minimum required version (e.g. "4.4.0"), None means any version is accepted
+    pub min_version: Option<&'static str>,
     pub sources: &'static [DownloadSource],
     /// Python package sources (alternative install method, typically for macOS)
     pub python_sources: &'static [PythonPackageSource],
@@ -121,6 +123,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             args: &["-version"],
             regex: r"ffmpeg version (\S+)",
         }),
+        min_version: Some("4.4.0"),
         manual_download_url: Some("https://ffmpeg.org/download.html"),
         python_sources: &[],
         sources: &[
@@ -177,6 +180,7 @@ pub static DEPENDENCY_DEFS: &[DependencyDef] = &[
             args: &["--version"],
             regex: r"(\d+\.\d+\S*)",
         }),
+        min_version: None,
         manual_download_url: Some("https://hihkm.lanzoui.com/b01hgf1xe"),
         python_sources: &[
             PythonPackageSource {
