@@ -11,7 +11,10 @@ async fn test_media_server_file_url_format() {
     let server = MediaServer::start().await.expect("server should start");
     let url = server.file_url("/path/to/video.mp4");
 
-    assert!(url.starts_with("http://127.0.0.1:"), "url should start with correct host");
+    assert!(
+        url.starts_with("http://127.0.0.1:"),
+        "url should start with correct host"
+    );
     assert!(
         url.contains("/serve?path="),
         "url should contain /serve?path="
@@ -27,10 +30,7 @@ async fn test_media_server_file_url_encodes_special_chars() {
     let server = MediaServer::start().await.expect("server should start");
     let url = server.file_url("/path/with spaces/视频.flv");
 
-    assert!(
-        !url.contains(' '),
-        "url should not contain raw spaces"
-    );
+    assert!(!url.contains(' '), "url should not contain raw spaces");
     assert!(
         url.contains(&*urlencoding::encode("/path/with spaces/视频.flv")),
         "url should encode special characters"
@@ -55,7 +55,11 @@ async fn test_media_server_serve_not_found() {
     let url = server.file_url("/nonexistent/file.mp4");
 
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.expect("request should complete");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete");
 
     assert_eq!(
         resp.status(),
@@ -72,10 +76,15 @@ async fn test_media_server_serves_real_file() {
     let tmp = tempfile::NamedTempFile::with_suffix(".mp4").unwrap();
     std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), b"fake mp4 data").unwrap();
     let path = tmp.path().to_string_lossy().to_string();
+    server.allow_prefix(tmp.path().parent().unwrap());
 
     let url = server.file_url(&path);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.expect("request should complete");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete");
 
     assert_eq!(
         resp.status(),
@@ -103,10 +112,15 @@ async fn test_media_server_content_type_webm() {
     let tmp = tempfile::NamedTempFile::with_suffix(".webm").unwrap();
     std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), b"webm data").unwrap();
     let path = tmp.path().to_string_lossy().to_string();
+    server.allow_prefix(tmp.path().parent().unwrap());
 
     let url = server.file_url(&path);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.expect("request should complete");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete");
 
     let content_type = resp
         .headers()
@@ -128,10 +142,15 @@ async fn test_media_server_content_type_ts() {
     let tmp = tempfile::NamedTempFile::with_suffix(".ts").unwrap();
     std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), b"ts data").unwrap();
     let path = tmp.path().to_string_lossy().to_string();
+    server.allow_prefix(tmp.path().parent().unwrap());
 
     let url = server.file_url(&path);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.expect("request should complete");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete");
 
     let content_type = resp
         .headers()
@@ -153,10 +172,15 @@ async fn test_media_server_content_type_unknown() {
     let tmp = tempfile::NamedTempFile::with_suffix(".xyz").unwrap();
     std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), b"unknown data").unwrap();
     let path = tmp.path().to_string_lossy().to_string();
+    server.allow_prefix(tmp.path().parent().unwrap());
 
     let url = server.file_url(&path);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.expect("request should complete");
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete");
 
     let content_type = resp
         .headers()
@@ -179,10 +203,18 @@ async fn test_media_server_serves_file_content() {
     let tmp = tempfile::NamedTempFile::with_suffix(".mp4").unwrap();
     std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), data).unwrap();
     let path = tmp.path().to_string_lossy().to_string();
+    server.allow_prefix(tmp.path().parent().unwrap());
 
     let url = server.file_url(&path);
     let client = reqwest::Client::new();
-    let body = client.get(&url).send().await.expect("request should complete").bytes().await.expect("should read body");
+    let body = client
+        .get(&url)
+        .send()
+        .await
+        .expect("request should complete")
+        .bytes()
+        .await
+        .expect("should read body");
 
     assert_eq!(&body[..], data, "response body should match file content");
 }
