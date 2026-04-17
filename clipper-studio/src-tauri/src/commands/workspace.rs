@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 
 use crate::AppState;
+use crate::core::queue::{TaskProgressEvent, TaskStatus};
 use crate::core::storage;
 use crate::utils::ffmpeg;
 
@@ -278,12 +279,16 @@ pub async fn set_active_workspace(
 
 /// Scan a workspace directory and import all found videos into the database.
 /// Auto-detects adapter (BililiveRecorder, generic).
+///
+/// 异步模式：立即返回 task_id，进度通过 `task-progress` 事件推送，可通过 `cancel_scan` 取消。
+/// 扫描 + FFprobe 探针阶段不触碰数据库；全部完成后才进入数据库写入阶段，
+/// 因此在探针阶段取消完全不会留下脏数据。
 #[tauri::command]
 pub async fn scan_workspace(
     state: State<'_, AppState>,
     workspace_id: i64,
-) -> Result<ScanResult, String> {
-    // Get workspace path
+) -> Result<i64, String> {
+    // 预检查：工作区存在 + 目录存在
     let ws_row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -296,20 +301,255 @@ pub async fn scan_workspace(
     .ok_or("工作区不存在".to_string())?;
 
     let ws_path: String = ws_row.try_get("", "path").unwrap_or_default();
-    let dir = Path::new(&ws_path);
-
-    if !dir.exists() {
+    let dir_buf = PathBuf::from(&ws_path);
+    if !dir_buf.exists() {
         return Err(format!(
             "工作区目录不存在: {}。请在工作区设置中修改路径，或删除此工作区。",
             ws_path
         ));
     }
 
-    tracing::info!("Scanning workspace: {} (id={})", ws_path, workspace_id);
+    // 生成 task_id（内存唯一即可，不入库）
+    let task_id: i64 = chrono::Utc::now().timestamp_micros();
 
-    // Step 1: Clear old sessions and detach videos (SET NULL)
+    tracing::info!("Scan task {} submitted: {} (workspace {})", task_id, ws_path, workspace_id);
+
+    let db = state.db.clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
+
+    state
+        .task_queue
+        .submit(task_id, move |cancel_token, progress_tx| async move {
+            scan_workspace_handler(
+                task_id,
+                workspace_id,
+                dir_buf,
+                ffprobe_path,
+                db,
+                cancel_token,
+                progress_tx,
+            )
+            .await
+        })
+        .await;
+
+    Ok(task_id)
+}
+
+/// 进度 message 的结构化载荷（JSON 序列化后塞入 TaskProgressEvent.message）
+#[derive(Debug, Serialize)]
+struct ScanProgressPayload {
+    stage: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    current: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<ScanResult>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ScanResult {
+    pub new_files: usize,
+    pub total_files: usize,
+    pub total_sessions: usize,
+    pub streamers: usize,
+}
+
+fn emit_progress(
+    tx: &crate::core::queue::TaskProgressSender,
+    task_id: i64,
+    progress: f64,
+    payload: ScanProgressPayload,
+) {
+    let message = serde_json::to_string(&payload).unwrap_or_default();
+    let _ = tx.send(TaskProgressEvent {
+        task_id,
+        status: TaskStatus::Processing,
+        progress,
+        message,
+    });
+}
+
+/// 实际执行扫描。错误字符串中若包含 "Task cancelled" 会被 TaskQueue 转成 Cancelled 状态。
+async fn scan_workspace_handler(
+    task_id: i64,
+    workspace_id: i64,
+    dir_buf: PathBuf,
+    ffprobe_path: String,
+    db: crate::db::Database,
+    cancel_token: tokio_util::sync::CancellationToken,
+    progress_tx: crate::core::queue::TaskProgressSender,
+) -> Result<(), String> {
+    use std::collections::HashMap;
+    use futures_util::stream::StreamExt;
+
+    macro_rules! check_cancel {
+        () => {
+            if cancel_token.is_cancelled() {
+                return Err("Task cancelled".to_string());
+            }
+        };
+    }
+
+    // Stage 1: preparing
+    emit_progress(
+        &progress_tx,
+        task_id,
+        0.02,
+        ScanProgressPayload {
+            stage: "preparing",
+            current: None,
+            total: None,
+            file: None,
+            path: None,
+            result: None,
+        },
+    );
+    check_cancel!();
+
+    // Stage 2: scanning（遍历目录，CPU 轻量；通过 spawn_blocking 避免阻塞异步线程）
+    emit_progress(
+        &progress_tx,
+        task_id,
+        0.05,
+        ScanProgressPayload {
+            stage: "scanning",
+            current: None,
+            total: None,
+            file: Some(dir_buf.to_string_lossy().to_string()),
+            path: None,
+            result: None,
+        },
+    );
+    let scan_dir = dir_buf.clone();
+    let scan = tokio::task::spawn_blocking(move || storage::scan_workspace(&scan_dir))
+        .await
+        .map_err(|e| format!("扫描目录失败: {}", e))?;
+    check_cancel!();
+
+    let total_files_found = scan.files.len();
+    emit_progress(
+        &progress_tx,
+        task_id,
+        0.12,
+        ScanProgressPayload {
+            stage: "scanning",
+            current: Some(total_files_found),
+            total: Some(total_files_found),
+            file: None,
+            path: None,
+            result: None,
+        },
+    );
+
+    // Stage 3: probing（FFprobe 并发探针）
+    let mut files_with_duration = scan.files.clone();
+    let mut probe_cache: HashMap<PathBuf, ffmpeg::ProbeResult> = HashMap::new();
+
+    if !ffprobe_path.is_empty() && !files_with_duration.is_empty() {
+        let probe_concurrency = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(2, 4))
+            .unwrap_or(4);
+        let pending: Vec<(usize, PathBuf, String)> = files_with_duration
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.duration_ms.is_none())
+            .map(|(i, f)| (i, f.file_path.clone(), f.file_name.clone()))
+            .collect();
+        let pending_total = pending.len();
+
+        if pending_total == 0 {
+            // 所有文件都已有 duration_ms，直接跳过进度上报
+        } else {
+            let mut stream = futures_util::stream::iter(pending.into_iter().map(
+                |(idx, path, file_name)| {
+                    let probe_path = ffprobe_path.clone();
+                    async move {
+                        let p = path.clone();
+                        let res = tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &p))
+                            .await
+                            .unwrap_or_else(|e| Err(format!("spawn_blocking join error: {}", e)));
+                        (idx, path, file_name, res)
+                    }
+                },
+            ))
+            .buffer_unordered(probe_concurrency);
+
+            let mut done: usize = 0;
+            while let Some((idx, path, file_name, res)) = stream.next().await {
+                if cancel_token.is_cancelled() {
+                    return Err("Task cancelled".to_string());
+                }
+                if let Ok(probe) = res {
+                    files_with_duration[idx].duration_ms = probe.duration_ms;
+                    probe_cache.insert(path.clone(), probe);
+                }
+                done += 1;
+                let progress = 0.15 + 0.70 * (done as f64 / pending_total as f64);
+                emit_progress(
+                    &progress_tx,
+                    task_id,
+                    progress,
+                    ScanProgressPayload {
+                        stage: "probing",
+                        current: Some(done),
+                        total: Some(pending_total),
+                        file: Some(file_name),
+                        path: Some(path.to_string_lossy().to_string()),
+                        result: None,
+                    },
+                );
+            }
+        }
+    } else if ffprobe_path.is_empty() {
+        tracing::warn!(
+            "ffprobe not available, skipping duration detection ({} files)",
+            files_with_duration.len()
+        );
+    }
+    check_cancel!();
+
+    // Stage 4: grouping
+    emit_progress(
+        &progress_tx,
+        task_id,
+        0.87,
+        ScanProgressPayload {
+            stage: "grouping",
+            current: None,
+            total: Some(scan.streamer_dirs.len()),
+            file: None,
+            path: None,
+            result: None,
+        },
+    );
+    let sessions = storage::group_into_sessions(&files_with_duration, 3600);
+    check_cancel!();
+
+    // Stage 5: writing — 数据库写入集中在末尾，探针阶段取消不会动 DB
+    let sessions_total = sessions.len();
+    emit_progress(
+        &progress_tx,
+        task_id,
+        0.90,
+        ScanProgressPayload {
+            stage: "writing",
+            current: Some(0),
+            total: Some(sessions_total),
+            file: None,
+            path: None,
+            result: None,
+        },
+    );
+
+    // 清理旧 session 并解绑 videos（写入阶段开始后不再检查 cancel，保持 DB 状态一致性）
     sea_orm::ConnectionTrait::execute_unprepared(
-        state.db.conn(),
+        db.conn(),
         &format!(
             "UPDATE videos SET session_id = NULL WHERE workspace_id = {}",
             workspace_id
@@ -319,7 +559,7 @@ pub async fn scan_workspace(
     .map_err(|e| e.to_string())?;
 
     sea_orm::ConnectionTrait::execute_unprepared(
-        state.db.conn(),
+        db.conn(),
         &format!(
             "DELETE FROM recording_sessions WHERE workspace_id = {}",
             workspace_id
@@ -328,13 +568,10 @@ pub async fn scan_workspace(
     .await
     .map_err(|e| e.to_string())?;
 
-    // Step 2: Scan directory
-    let scan = storage::scan_workspace(dir);
-
     // Import streamers
     for sd in &scan.streamer_dirs {
         let _ = sea_orm::ConnectionTrait::execute_unprepared(
-            state.db.conn(),
+            db.conn(),
             &format!(
                 "INSERT OR IGNORE INTO streamers (platform, room_id, name) VALUES ('bilibili', '{}', '{}')",
                 sd.room_id,
@@ -344,59 +581,11 @@ pub async fn scan_workspace(
         .await;
     }
 
-    // Step 3: Fill duration_ms via FFprobe before grouping (needed for accurate session merging).
-    // 并发执行以显著缩短大工作区扫描耗时；同时缓存 probe 结果供后续新增视频插入复用，避免重复 probe。
-    use futures_util::stream::StreamExt;
-    use std::collections::HashMap;
-    let mut files_with_duration = scan.files.clone();
-    let ffprobe_path = state.ffprobe_path.read_safe().clone();
-    let mut probe_cache: HashMap<PathBuf, ffmpeg::ProbeResult> = HashMap::new();
+    let mut new_files: usize = 0;
 
-    if !ffprobe_path.is_empty() {
-        let probe_concurrency = std::thread::available_parallelism()
-            .map(|n| n.get().clamp(2, 4))
-            .unwrap_or(4);
-        let pending: Vec<(usize, PathBuf)> = files_with_duration
-            .iter()
-            .enumerate()
-            .filter(|(_, f)| f.duration_ms.is_none())
-            .map(|(i, f)| (i, f.file_path.clone()))
-            .collect();
-
-        let results: Vec<(usize, PathBuf, Result<ffmpeg::ProbeResult, String>)> =
-            futures_util::stream::iter(pending.into_iter().map(|(idx, path)| {
-                let probe_path = ffprobe_path.clone();
-                async move {
-                    let p = path.clone();
-                    let res = tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &p))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("spawn_blocking join error: {}", e)));
-                    (idx, path, res)
-                }
-            }))
-            .buffer_unordered(probe_concurrency)
-            .collect()
-            .await;
-
-        for (idx, path, res) in results {
-            if let Ok(probe) = res {
-                files_with_duration[idx].duration_ms = probe.duration_ms;
-                probe_cache.insert(path, probe);
-            }
-        }
-    } else {
-        tracing::warn!("ffprobe not available, skipping duration detection ({} files)", files_with_duration.len());
-    }
-
-    // Step 4: Group into sessions (gap = next.start - prev.end > 1 hour)
-    let sessions = storage::group_into_sessions(&files_with_duration, 3600);
-
-    let mut new_files = 0;
-
-    for session in &sessions {
-        // Get streamer_id
+    for (sess_idx, session) in sessions.iter().enumerate() {
         let streamer_id: Option<i64> = sea_orm::ConnectionTrait::query_one(
-            state.db.conn(),
+            db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
                 format!("SELECT id FROM streamers WHERE room_id = '{}'", session.room_id),
@@ -409,9 +598,8 @@ pub async fn scan_workspace(
 
         let sid_sql = streamer_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
 
-        // Insert session
         let _ = sea_orm::ConnectionTrait::execute_unprepared(
-            state.db.conn(),
+            db.conn(),
             &format!(
                 "INSERT INTO recording_sessions (workspace_id, streamer_id, title, started_at, file_count) \
                  VALUES ({}, {}, '{}', '{}', {})",
@@ -424,7 +612,7 @@ pub async fn scan_workspace(
         .await;
 
         let sess_id: Option<i64> = sea_orm::ConnectionTrait::query_one(
-            state.db.conn(),
+            db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
                 "SELECT last_insert_rowid() as id".to_string(),
@@ -440,9 +628,8 @@ pub async fn scan_workspace(
         for file in &session.files {
             let fp = file.file_path.to_string_lossy();
 
-            // Check if video already exists in DB
             let existing: Option<i64> = sea_orm::ConnectionTrait::query_one(
-                state.db.conn(),
+                db.conn(),
                 sea_orm::Statement::from_string(
                     sea_orm::DatabaseBackend::Sqlite,
                     format!(
@@ -459,7 +646,7 @@ pub async fn scan_workspace(
             if let Some(video_id) = existing {
                 let dur_sql = file.duration_ms.map(|d| d.to_string()).unwrap_or("NULL".to_string());
                 let _ = sea_orm::ConnectionTrait::execute_unprepared(
-                    state.db.conn(),
+                    db.conn(),
                     &format!(
                         "UPDATE videos SET session_id = {}, streamer_id = {}, \
                          duration_ms = CASE WHEN duration_ms IS NULL OR duration_ms = 0 THEN {} ELSE duration_ms END \
@@ -469,14 +656,12 @@ pub async fn scan_workspace(
                 )
                 .await;
             } else {
-                // New video: probe and insert
                 let file_size = tokio::fs::metadata(&file.file_path)
                     .await
                     .map(|m| m.len() as i64)
                     .unwrap_or(0);
 
                 let dur = file.duration_ms;
-                // 优先使用 Step 3 的并发 probe 缓存；未命中时才现场同步 probe（极少数路径）。
                 let (w, h) = if let Some(cached) = probe_cache.get(&file.file_path) {
                     (cached.width, cached.height)
                 } else if !ffprobe_path.is_empty() {
@@ -514,16 +699,31 @@ pub async fn scan_workspace(
                     has_danmaku as i32,
                 );
 
-                if sea_orm::ConnectionTrait::execute_unprepared(state.db.conn(), &sql).await.is_ok()
-                {
+                if sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql).await.is_ok() {
                     new_files += 1;
                 }
             }
         }
+
+        // 写入阶段进度上报
+        let progress = 0.90 + 0.09 * ((sess_idx + 1) as f64 / sessions_total.max(1) as f64);
+        emit_progress(
+            &progress_tx,
+            task_id,
+            progress,
+            ScanProgressPayload {
+                stage: "writing",
+                current: Some(sess_idx + 1),
+                total: Some(sessions_total),
+                file: None,
+                path: None,
+                result: None,
+            },
+        );
     }
 
     let total_video_count: i64 = sea_orm::ConnectionTrait::query_one(
-        state.db.conn(),
+        db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
@@ -538,27 +738,46 @@ pub async fn scan_workspace(
     .and_then(|r| r.try_get("", "cnt").ok())
     .unwrap_or(0);
 
-    tracing::info!(
-        "Scan complete: {} new + {} total files, {} sessions",
-        new_files,
-        total_video_count,
-        sessions.len()
-    );
-
-    Ok(ScanResult {
+    let result = ScanResult {
         new_files,
         total_files: total_video_count as usize,
-        total_sessions: sessions.len(),
+        total_sessions: sessions_total,
         streamers: scan.streamer_dirs.len(),
-    })
+    };
+
+    tracing::info!(
+        "Scan complete (task {}): {} new + {} total files, {} sessions",
+        task_id,
+        result.new_files,
+        result.total_files,
+        result.total_sessions
+    );
+
+    // 最终进度事件携带扫描结果，供前端展示 toast
+    emit_progress(
+        &progress_tx,
+        task_id,
+        1.0,
+        ScanProgressPayload {
+            stage: "writing",
+            current: Some(sessions_total),
+            total: Some(sessions_total),
+            file: None,
+            path: None,
+            result: Some(result),
+        },
+    );
+
+    Ok(())
 }
 
-#[derive(Debug, Serialize)]
-pub struct ScanResult {
-    pub new_files: usize,
-    pub total_files: usize,
-    pub total_sessions: usize,
-    pub streamers: usize,
+/// 取消正在执行的扫描任务
+#[tauri::command]
+pub async fn cancel_scan(
+    state: State<'_, AppState>,
+    task_id: i64,
+) -> Result<bool, String> {
+    Ok(state.task_queue.cancel(task_id).await)
 }
 
 /// Update workspace editable fields

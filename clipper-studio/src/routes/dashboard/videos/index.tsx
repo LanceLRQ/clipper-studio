@@ -14,6 +14,8 @@ import {
 } from "@/services/video";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { scanWorkspace, getAppInfo } from "@/services/workspace";
+import type { ScanResult } from "@/services/workspace";
+import { ScanProgressCard } from "@/components/workspace/scan-progress-card";
 import { mergeVideos } from "@/services/media";
 import { VideoRow } from "@/components/video/video-row";
 import { PaginationBar } from "@/components/video/pagination-bar";
@@ -47,6 +49,7 @@ function VideosPage() {
   const [mergeMode, setMergeMode] = useState<"virtual" | "physical">("virtual");
   const [merging, setMerging] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [scanTaskId, setScanTaskId] = useState<number | null>(null);
   const [searchInput, setSearchInput] = useState(search);
   const [filterTagIds, setFilterTagIds] = useState<number[]>([]);
   const [videoTagsMap, setVideoTagsMap] = useState<Record<number, TagInfo[]>>({});
@@ -254,15 +257,40 @@ function VideosPage() {
     if (!activeWs) return;
     setScanning(true);
     try {
-      const result = await scanWorkspace(activeWs);
-      await loadData();
-      alert(`扫描完成：${result.total_files} 个视频，${result.total_sessions} 个场次`);
+      const taskId = await scanWorkspace(activeWs);
+      setScanTaskId(taskId);
     } catch (e) {
-      alert("扫描失败: " + String(e));
-    } finally {
       setScanning(false);
+      alert("启动扫描失败: " + String(e));
     }
   };
+
+  const handleScanComplete = useCallback(
+    async (result: ScanResult | null) => {
+      setScanTaskId(null);
+      setScanning(false);
+      await loadData();
+      if (result) {
+        alert(
+          `扫描完成：新增 ${result.new_files} 个视频，共 ${result.total_files} 个，${result.total_sessions} 个场次`
+        );
+      } else {
+        alert("扫描完成");
+      }
+    },
+    [loadData]
+  );
+
+  const handleScanCancelled = useCallback(() => {
+    setScanTaskId(null);
+    setScanning(false);
+  }, []);
+
+  const handleScanFailed = useCallback((msg: string) => {
+    setScanTaskId(null);
+    setScanning(false);
+    alert("扫描失败: " + msg);
+  }, []);
 
   const totalItems =
     view === "cards"
@@ -319,6 +347,16 @@ function VideosPage() {
           </Button>
         </div>
       </div>
+
+      {/* Scan progress card */}
+      {scanTaskId !== null && (
+        <ScanProgressCard
+          taskId={scanTaskId}
+          onComplete={handleScanComplete}
+          onCancelled={handleScanCancelled}
+          onFailed={handleScanFailed}
+        />
+      )}
 
       {/* Search bar (flat view only) */}
       {view === "flat" && (

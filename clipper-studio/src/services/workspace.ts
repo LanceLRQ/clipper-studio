@@ -41,15 +41,38 @@ export async function setActiveWorkspace(
 }
 
 export interface ScanResult {
+  new_files: number;
   total_files: number;
   total_sessions: number;
   streamers: number;
 }
 
+/** 启动扫描任务，返回 task_id。真实进度通过 `task-progress` 事件推送 */
 export async function scanWorkspace(
   workspaceId: number
-): Promise<ScanResult> {
-  return invoke<ScanResult>("scan_workspace", { workspaceId });
+): Promise<number> {
+  return invoke<number>("scan_workspace", { workspaceId });
+}
+
+/** 取消正在执行的扫描任务 */
+export async function cancelScan(taskId: number): Promise<boolean> {
+  return invoke<boolean>("cancel_scan", { taskId });
+}
+
+export type ScanStage =
+  | "preparing"
+  | "scanning"
+  | "probing"
+  | "grouping"
+  | "writing";
+
+export interface ScanProgressPayload {
+  stage: ScanStage;
+  current?: number;
+  total?: number;
+  file?: string;
+  path?: string;
+  result?: ScanResult;
 }
 
 export async function detectWorkspaceAdapter(
