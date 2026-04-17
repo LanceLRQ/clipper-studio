@@ -140,6 +140,14 @@ pub async fn create_workspace(
         let _ = config.save(&state.config_dir);
     }
 
+    // 媒体服务器白名单登记：允许播放工作区内的视频/音频文件
+    state.media_server.allow_prefix(&workspace.path);
+    if let Some(ref dir) = workspace.clip_output_dir {
+        if !dir.is_empty() {
+            state.media_server.allow_prefix(dir);
+        }
+    }
+
     // Start file watcher for this workspace
     if workspace.auto_scan {
         if let Err(e) = state
@@ -632,6 +640,13 @@ pub async fn update_workspace(
         clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
     };
+
+    // 更新 clip_output_dir 时同步登记到媒体服务器白名单
+    if let Some(ref dir) = workspace.clip_output_dir {
+        if !dir.is_empty() {
+            state.media_server.allow_prefix(dir);
+        }
+    }
 
     // Update watcher based on auto_scan
     if workspace.auto_scan {

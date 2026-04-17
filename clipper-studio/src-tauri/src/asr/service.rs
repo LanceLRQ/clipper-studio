@@ -447,9 +447,10 @@ pub async fn import_segments(
     Ok(count)
 }
 
-/// Read a setting value from settings_kv table
+/// Read a setting value from settings_kv table.
+/// 命中 `is_secret_key` 的 key 会透明 base64 解码（兼容旧明文）。
 pub async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
-    sea_orm::ConnectionTrait::query_one(
+    let raw = sea_orm::ConnectionTrait::query_one(
         db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
@@ -459,7 +460,13 @@ pub async fn read_setting_from_db(db: &Database, key: &str) -> Option<String> {
     .await
     .ok()
     .flatten()
-    .and_then(|r| r.try_get::<String>("", "value").ok())
+    .and_then(|r| r.try_get::<String>("", "value").ok())?;
+
+    if crate::utils::secrets::is_secret_key(key) {
+        Some(crate::utils::secrets::deobfuscate(&raw))
+    } else {
+        Some(raw)
+    }
 }
 
 /// Parse "yyyy-MM-dd HH:mm:ss" to Unix milliseconds (UTC)

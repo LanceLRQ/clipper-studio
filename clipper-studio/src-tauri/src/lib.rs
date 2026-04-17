@@ -40,6 +40,7 @@ pub struct AppState {
     pub config_dir: std::path::PathBuf,
     pub ffmpeg_path: Arc<RwLock<String>>,
     pub ffprobe_path: RwLock<String>,
+    pub media_server: Arc<MediaServer>,
     pub media_server_port: u16,
     pub task_queue: Arc<TaskQueue>,
     pub danmaku_factory_path: RwLock<String>,
@@ -207,6 +208,10 @@ pub fn run() {
                 MediaServer::start().await
             })?;
             let media_server_port = media_server.port();
+            let media_server = Arc::new(media_server);
+
+            // 默认允许应用数据目录下的 remux 缓存等文件（若后续使用）
+            media_server.allow_prefix(&data_dir);
 
             // Initialize task queue (max 2 concurrent tasks)
             let task_queue = Arc::new(TaskQueue::new(app.handle().clone(), 2));
@@ -257,6 +262,7 @@ pub fn run() {
                 ffmpeg_path: ffmpeg_path_shared,
                 ffprobe_path: RwLock::new(ffprobe_path.unwrap_or_default()),
                 danmaku_factory_path: RwLock::new(danmaku_factory_path.unwrap_or_default()),
+                media_server: media_server.clone(),
                 media_server_port,
                 task_queue,
                 watcher: watcher.clone(),
@@ -282,14 +288,16 @@ pub fn run() {
             // Start ASR task queue worker (after AppState is managed)
             asr_task_queue.start();
 
-            // Start watching existing workspaces with auto_scan enabled
+            // Start watching existing workspaces with auto_scan enabled，
+            // 同时为所有 workspace 路径及其 clip_output_dir 登记 media_server 白名单
             let watcher_clone = watcher.clone();
+            let media_server_clone = media_server.clone();
             tauri::async_runtime::spawn(async move {
                 if let Ok(rows) = sea_orm::ConnectionTrait::query_all(
                     db.conn(),
                     sea_orm::Statement::from_string(
                         sea_orm::DatabaseBackend::Sqlite,
-                        "SELECT id, path FROM workspaces WHERE auto_scan = 1".to_string(),
+                        "SELECT id, path, clip_output_dir, auto_scan FROM workspaces".to_string(),
                     ),
                 )
                 .await
@@ -297,7 +305,19 @@ pub fn run() {
                     for row in &rows {
                         let id: i64 = row.try_get("", "id").unwrap_or(0);
                         let path: String = row.try_get("", "path").unwrap_or_default();
+                        let clip_dir: Option<String> = row
+                            .try_get::<Option<String>>("", "clip_output_dir")
+                            .unwrap_or(None);
+                        let auto_scan: bool = row.try_get("", "auto_scan").unwrap_or(true);
+
                         if !path.is_empty() {
+                            media_server_clone.allow_prefix(&path);
+                        }
+                        if let Some(dir) = clip_dir.as_ref().filter(|s| !s.is_empty()) {
+                            media_server_clone.allow_prefix(dir);
+                        }
+
+                        if auto_scan && !path.is_empty() {
                             if let Err(e) = watcher_clone.watch(id, std::path::Path::new(&path)) {
                                 tracing::warn!("Failed to watch workspace {}: {}", id, e);
                             }

@@ -125,7 +125,8 @@ pub async fn track_event(
     Ok(())
 }
 
-/// Get a setting value from settings_kv
+/// Get a setting value from settings_kv.
+/// 对命中 `is_secret_key` 的 key 透明解码 base64（兼容旧明文）。
 #[tauri::command]
 pub async fn get_setting(
     state: State<'_, AppState>,
@@ -144,22 +145,35 @@ pub async fn get_setting(
     .await
     .map_err(|e| e.to_string())?;
 
-    Ok(row.and_then(|r| r.try_get::<String>("", "value").ok()))
+    let raw = row.and_then(|r| r.try_get::<String>("", "value").ok());
+    Ok(raw.map(|v| {
+        if crate::utils::secrets::is_secret_key(&key) {
+            crate::utils::secrets::deobfuscate(&v)
+        } else {
+            v
+        }
+    }))
 }
 
-/// Set a setting value in settings_kv
+/// Set a setting value in settings_kv.
+/// 对命中 `is_secret_key` 的 key 透明编码 base64（防君子）。
 #[tauri::command]
 pub async fn set_setting(
     state: State<'_, AppState>,
     key: String,
     value: String,
 ) -> Result<(), String> {
+    let stored = if crate::utils::secrets::is_secret_key(&key) {
+        crate::utils::secrets::obfuscate(&value)
+    } else {
+        value
+    };
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
             "INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('{}', '{}')",
             key.replace('\'', "''"),
-            value.replace('\'', "''"),
+            stored.replace('\'', "''"),
         ),
     )
     .await

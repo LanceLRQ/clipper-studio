@@ -313,7 +313,13 @@ pub async fn get_plugin_config(
         ) {
             // Strip the prefix to get the config key name
             if let Some(config_key) = key.strip_prefix(&pattern) {
-                result.insert(config_key.to_string(), val);
+                // 命中 secret 关键字的字段透明解码（兼容旧明文）
+                let decoded = if crate::utils::secrets::is_secret_key(config_key) {
+                    crate::utils::secrets::deobfuscate(&val)
+                } else {
+                    val
+                };
+                result.insert(config_key.to_string(), decoded);
             }
         }
     }
@@ -333,12 +339,18 @@ pub async fn set_plugin_config(
         plugin_id.replace('\'', "''"),
         key.replace('\'', "''")
     );
+    // 命中 secret 关键字的字段透明 base64 编码（防君子）
+    let stored = if crate::utils::secrets::is_secret_key(&key) {
+        crate::utils::secrets::obfuscate(&value)
+    } else {
+        value
+    };
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
             "INSERT OR REPLACE INTO settings_kv (key, value) VALUES ('{}', '{}')",
             full_key,
-            value.replace('\'', "''"),
+            stored.replace('\'', "''"),
         ),
     )
     .await

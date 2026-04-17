@@ -62,7 +62,13 @@ pub async fn transcode_video(
     // Determine output path
     let ext = if preset.audio_only.unwrap_or(false) { "m4a" } else { "mp4" };
     let output_dir = match &req.output_dir {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => {
+            // 安全校验：SEC-FS-03
+            if !state.media_server.is_path_allowed(dir) {
+                return Err("输出目录不在工作区允许范围内".to_string());
+            }
+            PathBuf::from(dir)
+        }
         None => {
             let src = PathBuf::from(&file_path);
             src.parent().unwrap_or(&PathBuf::from(".")).to_path_buf()
@@ -281,7 +287,13 @@ pub async fn merge_videos(
 
     // Determine output path: user override > workspace clip_output_dir > source dir
     let output_dir = match &req.output_dir {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => {
+            // 安全校验：SEC-FS-03
+            if !state.media_server.is_path_allowed(dir) {
+                return Err("输出目录不在工作区允许范围内".to_string());
+            }
+            PathBuf::from(dir)
+        }
         None => {
             if let Some(ref dir) = ws_clip_output_dir {
                 PathBuf::from(dir)

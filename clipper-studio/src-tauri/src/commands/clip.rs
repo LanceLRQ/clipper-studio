@@ -119,7 +119,14 @@ pub async fn create_clip(
     };
 
     let output_dir = match &req.output_dir {
-        Some(dir) => PathBuf::from(dir),
+        Some(dir) => {
+            // 安全校验：用户显式指定的输出目录必须位于已登记的工作区或其 clip_output_dir 下，
+            // 防止通过 IPC 将输出写入系统敏感目录（SEC-FS-03）。
+            if !state.media_server.is_path_allowed(dir) {
+                return Err("输出目录不在工作区允许范围内".to_string());
+            }
+            PathBuf::from(dir)
+        }
         None => {
             // Priority: workspace clip_output_dir > source file directory / clips/
             if let Some(ref dir) = ws_clip_output_dir {

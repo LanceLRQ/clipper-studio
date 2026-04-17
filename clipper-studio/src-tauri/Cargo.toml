@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # Tauri
-tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -56,6 +56,7 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 mime = "0.3"
 urlencoding = "2"
+base64 = "0.22"
 
 # Configuration
 toml = "0.8"
