@@ -28,7 +28,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { getPluginConfig, setPluginConfig } from "@/services/plugin";
+import {
+  callPlugin as invokePlugin,
+  getPluginConfig,
+  setPluginConfig,
+} from "@/services/plugin";
 
 const PLUGIN_ID = "builtin.storage.smb";
 const HISTORY_KEY = "mount_history";
@@ -76,11 +80,7 @@ export function StorageManager() {
 
   const callPlugin = useCallback(
     async (action: string, payload: Record<string, unknown> = {}) => {
-      return invoke<unknown>("call_plugin", {
-        pluginId: PLUGIN_ID,
-        action,
-        payload,
-      });
+      return invokePlugin(PLUGIN_ID, action, payload);
     },
     []
   );

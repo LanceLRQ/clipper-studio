@@ -1,6 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  getDashboardStats,
+  type DashboardStats,
+  type RecentClipInfo,
+  type TopStreamerInfo,
+} from "@/services/dashboard";
+import { getAppInfo } from "@/services/workspace";
+import type { AppInfo } from "@/types/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
 import {
   Video,
@@ -16,43 +23,8 @@ import {
 } from "lucide-react";
 
 // ===== Types =====
-
-interface DashboardStats {
-  video_count: number;
-  total_duration_ms: number;
-  total_storage_bytes: number;
-  streamer_count: number;
-  session_count: number;
-  subtitle_video_count: number;
-  danmaku_video_count: number;
-  clip_total: number;
-  clip_completed: number;
-  clip_failed: number;
-  clip_output_bytes: number;
-  recent_clips: RecentClipInfo[];
-  top_streamers: TopStreamerInfo[];
-}
-
-interface RecentClipInfo {
-  id: number;
-  title: string;
-  status: string;
-  created_at: string;
-}
-
-interface TopStreamerInfo {
-  name: string;
-  video_count: number;
-  total_duration_ms: number;
-}
-
-interface AppInfo {
-  version: string;
-  data_dir: string;
-  ffmpeg_available: boolean;
-  ffmpeg_version: string | null;
-  ffprobe_available: boolean;
-}
+// Re-export so JSX below can still reference RecentClipInfo/TopStreamerInfo by name
+export type { DashboardStats, RecentClipInfo, TopStreamerInfo, AppInfo };
 
 // ===== Helpers =====
 
@@ -126,12 +98,7 @@ function DashboardIndex() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([
-      invoke<DashboardStats>("get_dashboard_stats", {
-        workspaceId,
-      }),
-      invoke<AppInfo>("get_app_info"),
-    ])
+    Promise.all([getDashboardStats(workspaceId), getAppInfo()])
       .then(([s, a]) => {
         setStats(s);
         setAppInfo(a);

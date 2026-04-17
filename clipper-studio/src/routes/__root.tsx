@@ -1,7 +1,7 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
+import { isDebugMode } from "@/services/system";
 import { useThemeStore } from "@/stores/theme";
 import { useWorkspaceStore } from "@/stores/workspace";
 
@@ -13,7 +13,7 @@ const RootLayout = () => {
   useEffect(() => {
     initTheme();
     initWorkspace();
-    invoke<boolean>("is_debug_mode")
+    isDebugMode()
       .then(setDebugMode)
       .catch(() => setDebugMode(false));
   }, [initTheme, initWorkspace]);
