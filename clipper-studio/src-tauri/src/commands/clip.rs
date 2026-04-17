@@ -191,8 +191,8 @@ pub async fn create_clip(
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
-            "INSERT INTO clip_tasks (video_id, start_time_ms, end_time_ms, title, preset_id, status, batch_id, batch_title) \
-             VALUES ({}, {}, {}, '{}', {}, 'pending', {}, {})",
+            "INSERT INTO clip_tasks (video_id, start_time_ms, end_time_ms, title, preset_id, status, batch_id, batch_title, include_danmaku, include_subtitle, export_subtitle, export_danmaku) \
+             VALUES ({}, {}, {}, '{}', {}, 'pending', {}, {}, {}, {}, {}, {})",
             req.video_id,
             req.start_ms,
             req.end_ms,
@@ -200,6 +200,10 @@ pub async fn create_clip(
             preset_id_sql,
             batch_id_sql,
             batch_title_sql,
+            req.include_danmaku as i32,
+            req.include_subtitle as i32,
+            req.export_subtitle as i32,
+            req.export_danmaku as i32,
         ),
     )
     .await
@@ -413,23 +417,34 @@ pub async fn has_active_clip_tasks(
     Ok(state.task_queue.has_active_tasks().await)
 }
 
-/// Retry a failed/cancelled clip task: reset status and re-enqueue with original parameters
+/// Retry a failed/cancelled/completed clip task: reset status and re-enqueue with original parameters
 #[tauri::command]
 pub async fn retry_clip_task(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
     task_id: i64,
 ) -> Result<ClipTaskInfo, String> {
-    // Read original task parameters
+    retry_task_internal(&*state, &app_handle, task_id).await
+}
+
+/// Internal retry implementation, shared by single-task and batch retry paths.
+async fn retry_task_internal(
+    state: &AppState,
+    app_handle: &tauri::AppHandle,
+    task_id: i64,
+) -> Result<ClipTaskInfo, String> {
+    // Read original task parameters directly from clip_tasks so failed/cancelled
+    // tasks can still recover their burn/export settings.
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
                 "SELECT t.video_id, t.start_time_ms, t.end_time_ms, t.title, t.preset_id, t.status, \
-                 t.batch_id, t.batch_title, co.output_path, co.include_danmaku, co.include_subtitle \
+                 t.batch_id, t.batch_title, t.include_danmaku, t.include_subtitle, \
+                 t.export_subtitle, t.export_danmaku, \
+                 (SELECT output_path FROM clip_outputs WHERE clip_task_id = t.id LIMIT 1) AS output_path \
                  FROM clip_tasks t \
-                 LEFT JOIN clip_outputs co ON co.clip_task_id = t.id \
                  WHERE t.id = {}",
                 task_id
             ),
@@ -454,6 +469,8 @@ pub async fn retry_clip_task(
     let output_path: Option<String> = row.try_get("", "output_path").ok();
     let include_danmaku: bool = row.try_get::<i32>("", "include_danmaku").unwrap_or(0) != 0;
     let include_subtitle: bool = row.try_get::<i32>("", "include_subtitle").unwrap_or(0) != 0;
+    let export_subtitle: bool = row.try_get::<i32>("", "export_subtitle").unwrap_or(0) != 0;
+    let export_danmaku: bool = row.try_get::<i32>("", "export_danmaku").unwrap_or(0) != 0;
 
     // Get video info for re-enqueue (same query as create_clip)
     let video_row = sea_orm::ConnectionTrait::query_one(
@@ -530,12 +547,13 @@ pub async fn retry_clip_task(
         }
     };
 
-    // Atomically reset task status: only if still in failed/cancelled state
+    // Atomically reset task status: only if task is in a terminal state.
+    // Completed tasks are allowed so "重新生成" works (will overwrite output).
     let result = sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
             "UPDATE clip_tasks SET status = 'pending', progress = 0, error_message = NULL, completed_at = NULL \
-             WHERE id = {} AND status IN ('failed', 'cancelled')",
+             WHERE id = {} AND status IN ('failed', 'cancelled', 'completed')",
             task_id
         ),
     )
@@ -559,6 +577,7 @@ pub async fn retry_clip_task(
     let danmaku_factory_path = state.danmaku_factory_path.read_safe().clone();
     let db = state.db.clone();
     let input_path = PathBuf::from(video_path.clone());
+    let video_path_clone = video_path.clone();
     let output_clone = output.clone();
     let app = app_handle.clone();
     let output_filename = output.file_name()
@@ -646,7 +665,39 @@ pub async fn retry_clip_task(
                     )
                     .await;
 
-                    // Retry does not re-export subtitle/danmaku files (original export flags not stored in DB)
+                    // Re-export subtitle/danmaku sidecars if the original task requested them.
+                    let output_stem = output_clone.with_extension("");
+                    if export_subtitle {
+                        let srt_path = PathBuf::from(format!("{}.srt", output_stem.display()));
+                        match crate::core::subtitle::export_srt_for_clip(
+                            &db, video_id, start_ms, end_ms, &srt_path,
+                        ).await {
+                            Ok(true) => tracing::info!("Exported subtitle SRT: {}", srt_path.display()),
+                            Ok(false) => tracing::info!("No subtitles to export for clip [{}-{}ms]", start_ms, end_ms),
+                            Err(e) => tracing::warn!("Failed to export subtitle SRT: {}", e),
+                        }
+                    }
+                    if export_danmaku {
+                        let xml_path = PathBuf::from(format!("{}.xml", output_stem.display()));
+                        let source_xml = std::path::PathBuf::from(&video_path_clone).with_extension("xml");
+                        if source_xml.exists() {
+                            match crate::core::danmaku::parse_bilibili_xml(&source_xml).await {
+                                Ok(result) => {
+                                    let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
+                                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&result.items, start_ms, end_ms, scroll_ms);
+                                    if !filtered.is_empty() {
+                                        match crate::core::danmaku::write_bilibili_xml(&filtered, &xml_path) {
+                                            Ok(()) => tracing::info!("Exported danmaku XML: {}", xml_path.display()),
+                                            Err(e) => tracing::warn!("Failed to export danmaku XML: {}", e),
+                                        }
+                                    } else {
+                                        tracing::info!("No danmaku to export for clip [{}-{}ms]", start_ms, end_ms);
+                                    }
+                                }
+                                Err(e) => tracing::warn!("Failed to parse danmaku XML for export: {}", e),
+                            }
+                        }
+                    }
 
                     let _ = update_task_status(&db, task_id, "completed", None).await;
                     let _ = app.emit("clip-completed", serde_json::json!({
@@ -681,6 +732,78 @@ pub async fn retry_clip_task(
         batch_id,
         batch_title,
     })
+}
+
+/// Retry all finished (failed/cancelled/completed) tasks in a batch.
+/// If any task in the batch is still pending/processing, the request is rejected.
+#[tauri::command]
+pub async fn retry_clip_batch(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    batch_id: String,
+) -> Result<usize, String> {
+    let escaped = batch_id.replace('\'', "''");
+
+    // Reject if any sibling is still active
+    let active_row = sea_orm::ConnectionTrait::query_one(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT COUNT(*) AS cnt FROM clip_tasks \
+                 WHERE batch_id = '{}' AND status IN ('pending', 'processing')",
+                escaped
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?
+    .ok_or("查询批次状态失败".to_string())?;
+    let active: i64 = active_row.try_get("", "cnt").unwrap_or(0);
+    if active > 0 {
+        return Err("批次中有任务正在执行，请等待完成后再重试".to_string());
+    }
+
+    // Collect all retryable task ids
+    let rows = sea_orm::ConnectionTrait::query_all(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT id FROM clip_tasks \
+                 WHERE batch_id = '{}' AND status IN ('failed', 'cancelled', 'completed') \
+                 ORDER BY id ASC",
+                escaped
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if rows.is_empty() {
+        return Err("批次中没有可重试的任务".to_string());
+    }
+
+    let mut success = 0usize;
+    let mut last_err: Option<String> = None;
+    for row in rows {
+        let id: i64 = row.try_get("", "id").unwrap_or(0);
+        if id == 0 {
+            continue;
+        }
+        match retry_task_internal(&*state, &app_handle, id).await {
+            Ok(_) => success += 1,
+            Err(e) => {
+                tracing::warn!("Retry task {} in batch {} failed: {}", id, batch_id, e);
+                last_err = Some(e);
+            }
+        }
+    }
+
+    if success == 0 {
+        return Err(last_err.unwrap_or_else(|| "批次重试失败".to_string()));
+    }
+    Ok(success)
 }
 
 /// List clip tasks with optional video_id filter

@@ -23,6 +23,10 @@ export async function retryClipTask(taskId: number): Promise<ClipTaskInfo> {
   return invoke<ClipTaskInfo>("retry_clip_task", { taskId });
 }
 
+export async function retryClipBatch(batchId: string): Promise<number> {
+  return invoke<number>("retry_clip_batch", { batchId });
+}
+
 export async function listClipTasks(
   videoId?: number | null,
   workspaceId?: number | null,

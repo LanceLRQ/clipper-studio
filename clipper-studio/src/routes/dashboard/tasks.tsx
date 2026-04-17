@@ -36,6 +36,7 @@ import {
   listClipTasks,
   cancelClip,
   retryClipTask,
+  retryClipBatch,
   deleteClipTask,
   deleteClipBatch,
   clearFinishedClipTasks,
@@ -273,6 +274,38 @@ function TasksPage() {
     showDeleteDialog("删除任务", "确定要删除该任务记录吗？", async (df) => {
       await deleteClipTask(taskId, df);
     });
+  };
+
+  const handleRetryBatch = async (
+    batchId: string,
+    batchTasks: ClipTaskInfo[],
+  ) => {
+    // 双重保险：前端再检查一次当前批次状态
+    const hasActive = batchTasks.some((t) => {
+      const s = liveProgress[t.id]?.status ?? t.status;
+      return s === "pending" || s === "processing";
+    });
+    if (hasActive) {
+      alert("批次中有任务正在执行，请等待完成后再重试");
+      return;
+    }
+    const hasCompleted = batchTasks.some((t) => {
+      const s = liveProgress[t.id]?.status ?? t.status;
+      return s === "completed";
+    });
+    if (hasCompleted) {
+      const confirmed = await ask(
+        "批次内包含已完成的任务，重试将覆盖对应输出文件。确定继续吗？",
+        { title: "重试整批", kind: "warning" },
+      );
+      if (!confirmed) return;
+    }
+    try {
+      await retryClipBatch(batchId);
+      await loadTasks();
+    } catch (e) {
+      alert("批次重试失败: " + String(e));
+    }
   };
 
   const handleDeleteBatch = (batchId: string, title: string) => {
@@ -630,27 +663,50 @@ function TasksPage() {
                   </div>
                   <div className="flex items-center gap-1">
                     {!["processing", "pending"].includes(batchStatus) && (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              className="text-muted-foreground hover:text-red-500"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeleteBatch(
-                                  group.key,
-                                  group.title,
-                                );
-                              }}
-                            />
-                          }
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </TooltipTrigger>
-                        <TooltipContent>删除批次</TooltipContent>
-                      </Tooltip>
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRetryBatch(group.key, group.tasks);
+                                }}
+                              />
+                            }
+                          >
+                            <RotateCcwIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {batchStatus === "completed"
+                              ? "重新生成整批"
+                              : "重试整批"}
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-muted-foreground hover:text-red-500"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteBatch(
+                                    group.key,
+                                    group.title,
+                                  );
+                                }}
+                              />
+                            }
+                          >
+                            <Trash2Icon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>删除批次</TooltipContent>
+                        </Tooltip>
+                      </>
                     )}
                   </div>
                 </div>

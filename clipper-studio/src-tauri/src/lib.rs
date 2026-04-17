@@ -354,6 +354,7 @@ pub fn run() {
             commands::clip::create_clip,
             commands::clip::cancel_clip,
             commands::clip::retry_clip_task,
+            commands::clip::retry_clip_batch,
             commands::clip::list_clip_tasks,
             commands::clip::list_presets,
             commands::clip::create_batch_clips,
