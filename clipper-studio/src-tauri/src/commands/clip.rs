@@ -152,7 +152,23 @@ pub async fn create_clip(
         );
         format!("{}.{}", sanitize_filename(&clip_title), ext)
     };
-    let output_path = output_dir.join(&output_filename);
+    let output_path = {
+        let base = output_dir.join(&output_filename);
+        if base.exists() {
+            // Append timestamp suffix to avoid overwriting existing files
+            let stem = base.file_stem().unwrap_or_default().to_string_lossy();
+            let ext = base.extension().unwrap_or_default().to_string_lossy();
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let dedup = output_dir.join(format!("{}_{}.{}", stem, ts, ext));
+            tracing::info!("Output file already exists, using: {}", dedup.display());
+            dedup
+        } else {
+            base
+        }
+    };
 
     // Insert clip_task into database
     let preset_id_sql = req.preset_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
@@ -506,16 +522,21 @@ pub async fn retry_clip_task(
         }
     };
 
-    // Reset task status: pending, clear error, clear completed_at
-    sea_orm::ConnectionTrait::execute_unprepared(
+    // Atomically reset task status: only if still in failed/cancelled state
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!(
-            "UPDATE clip_tasks SET status = 'pending', progress = 0, error_message = NULL, completed_at = NULL WHERE id = {}",
+            "UPDATE clip_tasks SET status = 'pending', progress = 0, error_message = NULL, completed_at = NULL \
+             WHERE id = {} AND status IN ('failed', 'cancelled')",
             task_id
         ),
     )
     .await
     .map_err(|e| format!("重置任务状态失败: {}", e))?;
+
+    if result.rows_affected() == 0 {
+        return Err("任务状态已变更，无法重试（可能正在执行中）".to_string());
+    }
 
     // Delete old clip_outputs records (failed tasks usually have none, but just in case)
     sea_orm::ConnectionTrait::execute_unprepared(

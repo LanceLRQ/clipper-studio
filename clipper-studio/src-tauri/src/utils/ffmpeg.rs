@@ -2,6 +2,18 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Derive the ffprobe path from ffmpeg path by replacing only the filename component.
+/// Unlike simple string replace, this avoids corrupting paths like "/opt/ffmpeg-tools/ffmpeg".
+pub fn derive_ffprobe_path(ffmpeg_path: &str) -> String {
+    let path = Path::new(ffmpeg_path);
+    let ffprobe_name = if cfg!(target_os = "windows") { "ffprobe.exe" } else { "ffprobe" };
+    path.parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(ffprobe_name)
+        .to_string_lossy()
+        .to_string()
+}
+
 /// Detect a binary (ffmpeg/ffprobe) by checking:
 /// 1. Application's bin directory (bundled with installer)
 /// 2. System PATH
@@ -382,6 +394,7 @@ pub async fn burn_subtitle_with_progress(
     output: &Path,
     codec_hint: &str,
     crf: Option<u32>,
+    duration_hint_secs: Option<f64>,
     cancel: tokio_util::sync::CancellationToken,
     on_progress: impl Fn(BurnProgress) + Send + 'static,
 ) -> Result<(), String> {
@@ -392,13 +405,14 @@ pub async fn burn_subtitle_with_progress(
         return Err("FFmpeg not available".to_string());
     }
 
-    // Probe input duration for progress calculation
+    // Probe input duration for progress calculation, fallback to caller hint
     let duration_secs = {
-        let ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe");
+        let ffprobe_path = derive_ffprobe_path(ffmpeg_path);
         probe(&ffprobe_path, input)
             .ok()
             .and_then(|p| p.duration_ms)
             .map(|ms| ms as f64 / 1000.0)
+            .or(duration_hint_secs)
             .unwrap_or(0.0)
     };
 

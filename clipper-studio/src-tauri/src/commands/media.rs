@@ -269,7 +269,7 @@ pub async fn merge_videos(
 
     // Check compatibility for virtual merge
     if req.mode == "virtual" {
-        let ffprobe_path = state.ffmpeg_path.read().unwrap().replace("ffmpeg", "ffprobe");
+        let ffprobe_path = crate::utils::ffmpeg::derive_ffprobe_path(&state.ffmpeg_path.read().unwrap());
         let compatible = crate::core::merger::check_merge_compatibility(&ffprobe_path, &input_paths)
             .unwrap_or(false);
         if !compatible {

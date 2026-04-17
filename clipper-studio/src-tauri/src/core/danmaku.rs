@@ -355,7 +355,17 @@ pub async fn convert_to_ass(
             }
         })?;
 
-    if !output.status.success() {
+    // Check output file first: some tools (DanmakuFactory) produce valid output
+    // despite reporting a non-zero exit code
+    if output_ass.exists() {
+        if !output.status.success() {
+            tracing::warn!(
+                "{} exited with code {:?} but output file exists, treating as success",
+                tool_name,
+                output.status.code()
+            );
+        }
+    } else if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
             "{} exited with code {:?}: {}",
@@ -363,9 +373,7 @@ pub async fn convert_to_ass(
             output.status.code(),
             stderr
         ));
-    }
-
-    if !output_ass.exists() {
+    } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
         return Err(format!(

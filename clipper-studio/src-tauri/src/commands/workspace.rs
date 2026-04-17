@@ -290,7 +290,10 @@ pub async fn scan_workspace(
     let dir = Path::new(&ws_path);
 
     if !dir.exists() {
-        return Err(format!("工作区目录不存在: {}", ws_path));
+        return Err(format!(
+            "工作区目录不存在: {}。请在工作区设置中修改路径，或删除此工作区。",
+            ws_path
+        ));
     }
 
     tracing::info!("Scanning workspace: {} (id={})", ws_path, workspace_id);

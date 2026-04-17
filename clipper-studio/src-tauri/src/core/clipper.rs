@@ -328,11 +328,12 @@ pub async fn execute_clip_with_burn(
         && burn.subtitle_ass_path.is_some()
     {
         let merged_path = std::env::temp_dir().join(format!(
-            "clipper_merged_{}.ass",
+            "clipper_merged_{}_{}.ass",
+            std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_millis()
+                .as_nanos()
         ));
         merge_ass_files(
             burn.danmaku_ass_path.as_ref().unwrap(),
@@ -362,6 +363,8 @@ pub async fn execute_clip_with_burn(
     // === Pass 2: Burn ASS into clipped video ===
     tracing::info!("Clip+Burn Pass 2: burning {} into {}", ass_to_burn.display(), output.display());
 
+    // Use clip duration as fallback when ffprobe fails on the intermediate file
+    let clip_duration_hint = (end_ms - start_ms) as f64 / 1000.0;
     let burn_result = ffmpeg::burn_subtitle_with_progress(
         ffmpeg_path,
         &intermediate,
@@ -369,6 +372,7 @@ pub async fn execute_clip_with_burn(
         output,
         &burn.burn_codec,
         burn.burn_crf,
+        Some(clip_duration_hint),
         cancel,
         move |p| {
             // Map pass 2 progress to 40% ~ 100%
@@ -408,7 +412,7 @@ async fn merge_ass_files(
         .await
         .map_err(|e| format!("Failed to read subtitle ASS {}: {}", subtitle_ass.display(), e))?;
 
-    let mut merged = danmaku_content.clone();
+    let mut merged = danmaku_content;
 
     // Add a subtitle style to the danmaku ASS if not already present
     if !merged.contains("Style: Subtitle,") {

@@ -400,6 +400,9 @@ pub async fn import_segments(
         .and_then(|ts| parse_recorded_at_to_unix_ms(&ts))
         .unwrap_or(0); // If no recorded_at, use file-relative time (base = 0)
 
+    // Use a transaction for atomic delete + batch insert (10x faster on SQLite)
+    let _ = sea_orm::ConnectionTrait::execute_unprepared(db.conn(), "BEGIN").await;
+
     // Delete existing subtitles for this video (force mode)
     let _ = sea_orm::ConnectionTrait::execute_unprepared(
         db.conn(),
@@ -438,6 +441,8 @@ pub async fn import_segments(
             count += 1;
         }
     }
+
+    let _ = sea_orm::ConnectionTrait::execute_unprepared(db.conn(), "COMMIT").await;
 
     Ok(count)
 }

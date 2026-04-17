@@ -39,11 +39,12 @@ pub async fn merge_virtual(
 
     // Write concat list file
     let list_path = std::env::temp_dir().join(format!(
-        "clipper_concat_{}.txt",
+        "clipper_concat_{}_{}.txt",
+        std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis()
+            .as_nanos()
     ));
 
     {
@@ -195,7 +196,7 @@ pub fn check_merge_compatibility(
 // ====== Internal helpers ======
 
 fn estimate_total_duration(ffmpeg_path: &str, inputs: &[PathBuf]) -> f64 {
-    let ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe");
+    let ffprobe_path = crate::utils::ffmpeg::derive_ffprobe_path(ffmpeg_path);
     let mut total = 0.0;
     for input in inputs {
         if let Ok(probe) = crate::utils::ffmpeg::probe(&ffprobe_path, input) {
