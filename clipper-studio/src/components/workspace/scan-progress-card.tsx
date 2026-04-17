@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import type { ComponentType, SVGProps } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { XIcon } from "lucide-react";
+import {
+  AlertCircle,
+  FolderOpen,
+  Layers,
+  Loader2,
+  Save,
+  Search,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cancelScan } from "@/services/workspace";
@@ -15,12 +24,14 @@ interface ScanProgressCardProps {
   onFailed: (message: string) => void;
 }
 
-const STAGE_META: Record<ScanStage, { icon: string; title: string }> = {
-  preparing: { icon: "🧹", title: "清理旧记录…" },
-  scanning: { icon: "📁", title: "扫描目录结构…" },
-  probing: { icon: "🔍", title: "解析视频元数据" },
-  grouping: { icon: "🗂️", title: "分组为场次…" },
-  writing: { icon: "💾", title: "写入数据库" },
+type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
+
+const STAGE_META: Record<ScanStage, { Icon: IconComponent; title: string; spin?: boolean }> = {
+  preparing: { Icon: Loader2, title: "清理旧记录…", spin: true },
+  scanning: { Icon: FolderOpen, title: "扫描目录结构…" },
+  probing: { Icon: Search, title: "解析视频元数据" },
+  grouping: { Icon: Layers, title: "分组为场次…" },
+  writing: { Icon: Save, title: "写入数据库" },
 };
 
 function formatSec(s: number): string {
@@ -147,7 +158,13 @@ export function ScanProgressCard({
     <div className={`rounded-lg border ${borderColor} bg-card p-4 shadow-sm`}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <span className="text-lg">{isFailed ? "❌" : meta.icon}</span>
+          {isFailed ? (
+            <AlertCircle className="h-5 w-5 text-destructive" />
+          ) : (
+            <meta.Icon
+              className={`h-5 w-5 ${meta.spin ? "animate-spin" : ""}`}
+            />
+          )}
           <span>{isFailed ? "扫描失败" : meta.title}</span>
         </div>
         <div className="text-xs text-muted-foreground tabular-nums">

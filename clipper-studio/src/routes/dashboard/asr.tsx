@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Check, Loader2, Play, X } from "lucide-react";
 import { getSettings, setSetting } from "@/services/settings";
 import {
   checkASRHealth,
@@ -536,7 +537,12 @@ function ASRSettingsContent() {
 
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
+            {saving ? "保存中..." : saved ? (
+              <span className="inline-flex items-center gap-1">
+                <Check className="h-4 w-4" />
+                已保存
+              </span>
+            ) : "保存设置"}
           </Button>
           {asrMode !== "disabled" && (
             <Button variant="outline" onClick={handleCheckHealth} disabled={asrChecking}>
@@ -816,7 +822,10 @@ function ASRSettingsContent() {
                       </div>
                     ) : imagePulled === true ? (
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-xs text-green-600">✓ 镜像已就绪</p>
+                        <p className="text-xs text-green-600 inline-flex items-center gap-1">
+                          <Check className="h-3.5 w-3.5" />
+                          镜像已就绪
+                        </p>
                         <Button
                           variant="outline"
                           size="sm"
@@ -941,7 +950,12 @@ function ASRSettingsContent() {
 
             <div className="flex items-center gap-3 pt-2">
               <Button onClick={handleSave} disabled={saving}>
-                {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
+                {saving ? "保存中..." : saved ? (
+                  <span className="inline-flex items-center gap-1">
+                    <Check className="h-4 w-4" />
+                    已保存
+                  </span>
+                ) : "保存设置"}
               </Button>
             </div>
           </section>
@@ -1026,19 +1040,23 @@ function ASRQueueTaskRow({
     <div className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm shrink-0">
-            {isRunning ? "▶" : "⏳"}
+          <span className="shrink-0">
+            {isRunning ? (
+              <Play className="h-3.5 w-3.5 text-green-600" />
+            ) : (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+            )}
           </span>
           <span className="text-sm truncate" title={task.video_file_name}>
             {task.video_file_name}
           </span>
         </div>
         <button
-          className="shrink-0 px-1.5 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+          className="shrink-0 p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
           onClick={onCancel}
           title="取消任务"
         >
-          ✕
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">

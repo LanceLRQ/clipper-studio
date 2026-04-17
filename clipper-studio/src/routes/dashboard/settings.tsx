@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowRight, Check } from "lucide-react";
 import { getSettings, setSetting } from "@/services/settings";
 import {
   listDeps,
@@ -169,7 +170,12 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
       {/* Save */}
       <div className="flex items-center gap-3">
         <Button onClick={handleSave} disabled={saving}>
-          {saving ? "保存中..." : saved ? "已保存 ✓" : "保存设置"}
+          {saving ? "保存中..." : saved ? (
+            <span className="inline-flex items-center gap-1">
+              <Check className="h-4 w-4" />
+              已保存
+            </span>
+          ) : "保存设置"}
         </Button>
       </div>
     </div>
@@ -585,10 +591,11 @@ function DependencyManagerTab() {
                 {/* Manual download hint during downloading phase */}
                 {currentProgress.phase === "downloading" && dep.manual_download_url && (
                   <button
-                    className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0"
+                    className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 inline-flex items-center gap-0.5"
                     onClick={() => shellOpen(dep.manual_download_url!)}
                   >
-                    下载缓慢？尝试手动下载 →
+                    下载缓慢？尝试手动下载
+                    <ArrowRight className="h-3 w-3" />
                   </button>
                 )}
               </div>
@@ -656,10 +663,11 @@ function DependencyManagerTab() {
                   )}
                   {dep.manual_download_url && (
                     <button
-                      className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0"
+                      className="text-xs text-muted-foreground hover:text-primary transition-colors cursor-pointer bg-transparent border-none p-0 inline-flex items-center gap-0.5"
                       onClick={() => shellOpen(dep.manual_download_url!)}
                     >
-                      {dep.auto_install_available ? "无法下载？尝试手动下载 →" : "手动下载 →"}
+                      {dep.auto_install_available ? "无法下载？尝试手动下载" : "手动下载"}
+                      <ArrowRight className="h-3 w-3" />
                     </button>
                   )}
                 </>
@@ -847,7 +855,12 @@ function SystemSettingsTab() {
         </div>
         <div className="flex items-center gap-3 pt-2">
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : saved ? "已保存 ✓" : "保存"}
+            {saving ? "保存中..." : saved ? (
+              <span className="inline-flex items-center gap-1">
+                <Check className="h-4 w-4" />
+                已保存
+              </span>
+            ) : "保存"}
           </Button>
         </div>
       </section>
@@ -972,7 +985,12 @@ function PluginConfigTab({ plugin }: { plugin: PluginInfo }) {
 
       <div className="flex items-center gap-3 pt-2">
         <Button onClick={handleSave} disabled={saving}>
-          {saving ? "保存中..." : saved ? "已保存 ✓" : "保存配置"}
+          {saving ? "保存中..." : saved ? (
+            <span className="inline-flex items-center gap-1">
+              <Check className="h-4 w-4" />
+              已保存
+            </span>
+          ) : "保存配置"}
         </Button>
       </div>
 

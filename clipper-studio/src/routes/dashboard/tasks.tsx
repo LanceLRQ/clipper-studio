@@ -19,6 +19,8 @@ import {
   RotateCcwIcon,
   HardDriveIcon,
   CircleHelpIcon,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import {
   Dialog,
@@ -466,7 +468,7 @@ function TasksPage() {
                       </span>
                       <span className="font-medium">{group.title}</span>
                       <span className="text-xs text-muted-foreground">
-                        {formatTime(task.start_time_ms)} →{" "}
+                        {formatTime(task.start_time_ms)} -{" "}
                         {formatTime(task.end_time_ms)}
                       </span>
                     </div>
@@ -611,9 +613,11 @@ function TasksPage() {
                   onClick={() => toggleGroup(group.key)}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {isCollapsed ? "▸" : "▾"}
-                    </span>
+                    {isCollapsed ? (
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    )}
                     <span
                       className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${batchLabel.tag}`}
                     >
@@ -689,7 +693,7 @@ function TasksPage() {
                                 {task.title || `片段 #${task.id}`}
                               </span>
                               <span className="text-xs text-muted-foreground">
-                                {formatTime(task.start_time_ms)} →{" "}
+                                {formatTime(task.start_time_ms)} -{" "}
                                 {formatTime(task.end_time_ms)}
                                 <span className="ml-1">
                                   ({formatDurationMs(duration)})

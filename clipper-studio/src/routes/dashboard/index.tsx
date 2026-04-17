@@ -17,6 +17,7 @@ import {
   Clapperboard,
   CircleCheck,
   CircleX,
+  ArrowRight,
   Subtitles,
   MessageSquareText,
   Layers,
@@ -256,9 +257,10 @@ function DashboardIndex() {
               {stats.clip_total > 8 && (
                 <Link
                   to="/dashboard/tasks"
-                  className="text-xs text-primary hover:underline block text-center pt-1"
+                  className="text-xs text-primary hover:underline flex items-center justify-center gap-0.5 pt-1"
                 >
-                  查看全部 →
+                  查看全部
+                  <ArrowRight className="h-3 w-3" />
                 </Link>
               )}
             </div>
@@ -271,22 +273,26 @@ function DashboardIndex() {
         <div className="rounded-lg border p-4 space-y-2">
           <h3 className="font-medium text-sm">系统状态</h3>
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
-            <span>
+            <span className="inline-flex items-center gap-1">
               FFmpeg：
               {appInfo.ffmpeg_available ? (
-                <span className="text-green-600 dark:text-green-400">
-                  ✓ {appInfo.ffmpeg_version?.split(" ").slice(0, 3).join(" ")}
+                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                  <CircleCheck className="h-3.5 w-3.5" />
+                  {appInfo.ffmpeg_version?.split(" ").slice(0, 3).join(" ")}
                 </span>
               ) : (
-                <span className="text-red-500">✗ 未检测到</span>
+                <span className="inline-flex items-center gap-1 text-red-500">
+                  <CircleX className="h-3.5 w-3.5" />
+                  未检测到
+                </span>
               )}
             </span>
-            <span>
+            <span className="inline-flex items-center gap-1">
               FFprobe：
               {appInfo.ffprobe_available ? (
-                <span className="text-green-600 dark:text-green-400">✓</span>
+                <CircleCheck className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
               ) : (
-                <span className="text-red-500">✗</span>
+                <CircleX className="h-3.5 w-3.5 text-red-500" />
               )}
             </span>
             <span>数据目录：{appInfo.data_dir}</span>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Mic } from "lucide-react";
+import { Mic, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { SubtitleSegment, ASRServiceStatusInfo } from "@/services/asr";
@@ -140,11 +140,11 @@ export function SubtitlePanel({
   const handleSubmitASR = async () => {
     // Pre-check: ASR must be available
     if (asrMode === "disabled") {
-      alert("ASR 功能已禁用，请在「设置 → 语音识别」中启用");
+      alert("ASR 功能已禁用，请在「设置 > 语音识别」中启用");
       return;
     }
     if (asrMode === "local" && serviceStatus?.status !== "running") {
-      alert("本地 ASR 服务未运行，请先在「设置 → 语音识别」中启动服务");
+      alert("本地 ASR 服务未运行，请先在「设置 > 语音识别」中启动服务");
       return;
     }
 
@@ -153,7 +153,7 @@ export function SubtitlePanel({
       // Check health first
       const health = await checkASRHealth();
       if (health.status !== "ready") {
-        alert("ASR 引擎未就绪，请检查「设置 → 语音识别」中的服务状态");
+        alert("ASR 引擎未就绪，请检查「设置 > 语音识别」中的服务状态");
         return;
       }
 
@@ -294,11 +294,11 @@ export function SubtitlePanel({
                 <span>{Math.round(queueTask!.progress * 100)}%</span>
               )}
               <button
-                className="px-1 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+                className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                 onClick={() => cancelTask(queueTask!.task_id)}
                 title="取消任务"
               >
-                ✕
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
@@ -336,12 +336,12 @@ export function SubtitlePanel({
           <p className="text-xs text-muted-foreground">暂无字幕</p>
           {asrMode === "local" && !asrAvailable && (
             <p className="text-[11px] text-muted-foreground">
-              本地 ASR 服务未运行，请在「设置 → 语音识别」中启动
+              本地 ASR 服务未运行，请在「设置 > 语音识别」中启动
             </p>
           )}
           {asrMode === "remote" && remoteHealthy === false && (
             <p className="text-[11px] text-red-500">
-              远程 ASR 服务无法连接，请检查「设置 → 语音识别」
+              远程 ASR 服务无法连接，请检查「设置 > 语音识别」
             </p>
           )}
           {asrMode === "disabled" && (

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { CheckCircle2, Play, Square, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -213,7 +214,8 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
                 className="h-6 px-2 text-xs"
                 onClick={handleStopPreview}
               >
-                ■ 停止预览
+                <Square className="mr-1 h-3 w-3 fill-current" />
+                停止预览
               </Button>
             ) : (
               <Button
@@ -222,7 +224,8 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
                 className="h-6 px-2 text-xs"
                 onClick={handlePreview}
               >
-                ▶ 预览片段
+                <Play className="mr-1 h-3 w-3 fill-current" />
+                预览片段
               </Button>
             )
           )}
@@ -264,11 +267,11 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
             <div className="flex items-center gap-1.5">
               <span>{Math.round(taskProgress.progress * 100)}%</span>
               <button
-                className="px-1 py-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors text-xs leading-none"
+                className="p-0.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
                 onClick={handleCancel}
                 title="取消切片"
               >
-                ✕
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
@@ -283,11 +286,15 @@ export function ClipPanel({ videoId, currentTime, duration: _duration, onSeek }:
 
       {/* Completion message */}
       {taskProgress?.status === "completed" && !clipping && (
-        <div className="text-sm text-green-600">✓ 切片完成</div>
+        <div className="inline-flex items-center gap-1 text-sm text-green-600">
+          <CheckCircle2 className="h-4 w-4" />
+          切片完成
+        </div>
       )}
       {taskProgress?.status === "failed" && !clipping && (
-        <div className="text-sm text-red-500">
-          ✗ 切片失败: {taskProgress.message}
+        <div className="inline-flex items-center gap-1 text-sm text-red-500">
+          <XCircle className="h-4 w-4" />
+          切片失败: {taskProgress.message}
         </div>
       )}
 

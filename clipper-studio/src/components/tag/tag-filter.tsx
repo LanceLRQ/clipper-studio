@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { TagIcon } from "lucide-react";
+import { Check, TagIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import type { TagInfo } from "@/types/tag";
@@ -66,7 +66,7 @@ export function TagFilter({ selectedTagIds, onChange }: TagFilterProps) {
               />
               <span className="flex-1 text-left truncate">{tag.name}</span>
               {selectedSet.has(tag.id) && (
-                <span className="text-primary text-xs">✓</span>
+                <Check className="h-3.5 w-3.5 text-primary shrink-0" />
               )}
             </button>
           ))}

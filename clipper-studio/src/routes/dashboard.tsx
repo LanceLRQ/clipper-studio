@@ -13,7 +13,7 @@ import bannerDarkImg from "@/assets/banner-dark.png";
 import { listPlugins } from "@/services/plugin";
 import type { PluginInfo } from "@/services/plugin";
 import { useThemeStore } from "@/stores/theme";
-import { Sun, Moon, Monitor, Search, AlertTriangle, RefreshCw, Mic } from "lucide-react";
+import { Sun, Moon, Monitor, Search, AlertTriangle, RefreshCw, Mic, ChevronDown, ChevronRight } from "lucide-react";
 import { GlobalSearchDialog } from "@/components/search/global-search-dialog";
 
 // ===== Types =====
@@ -406,9 +406,11 @@ function DashboardLayout() {
                       onClick={() => toggleMenu(item.to)}
                     >
                       <span>{item.label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {isExpanded ? "▾" : "▸"}
-                      </span>
+                      {isExpanded ? (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      )}
                     </Button>
 
                     {/* Children */}

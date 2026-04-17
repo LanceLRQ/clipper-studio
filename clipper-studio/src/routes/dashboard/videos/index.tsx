@@ -337,7 +337,7 @@ function VideosPage() {
             variant="outline"
             onClick={handleScan}
             disabled={scanning || !wsPathAccessible || !ffprobeAvailable}
-            title={!ffprobeAvailable ? "请先在「设置 → 依赖管理」中安装 FFmpeg" : !wsPathAccessible ? "工作区目录不可访问" : undefined}
+            title={!ffprobeAvailable ? "请先在「设置 > 依赖管理」中安装 FFmpeg" : !wsPathAccessible ? "工作区目录不可访问" : undefined}
           >
             <FolderSyncIcon className="h-4 w-4 mr-1" />
             {scanning ? "扫描中..." : "扫描目录"}

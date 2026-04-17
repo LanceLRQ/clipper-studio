@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -109,7 +110,8 @@ function WelcomePage() {
           className="absolute top-4 left-4"
           onClick={handleGoBack}
         >
-          ← 返回
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          返回
         </Button>
       )}
       <div className="mx-auto max-w-lg space-y-8 p-8">
@@ -156,7 +158,8 @@ function WelcomePage() {
           <div className="space-y-6">
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={() => { setStep("choose"); setError(""); }}>
-                ← 返回
+                <ArrowLeft className="mr-1 h-4 w-4" />
+                返回
               </Button>
               <h2 className="text-lg font-medium">
                 {step === "import" ? "导入已有录播目录" : "创建全新工作区"}

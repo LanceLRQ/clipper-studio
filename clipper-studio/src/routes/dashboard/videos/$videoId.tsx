@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { revealFile } from "@/services/system";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { VideoPlayer } from "@/components/video-player/player";
@@ -305,7 +306,8 @@ function VideoDetailPage() {
           variant="ghost"
           onClick={() => window.history.back()}
         >
-          ← 返回列表
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          返回列表
         </Button>
         <div className="text-red-500">{error}</div>
       </div>
@@ -329,7 +331,8 @@ function VideoDetailPage() {
           size="sm"
           onClick={() => window.history.back()}
         >
-          ← 返回
+          <ArrowLeft className="mr-1 h-4 w-4" />
+          返回
         </Button>
         <h2 className="text-lg font-semibold truncate">{video.file_name}</h2>
       </div>
@@ -337,8 +340,9 @@ function VideoDetailPage() {
       {/* Path inaccessible warning */}
       {!wsPathAccessible && (
         <div className="shrink-0 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 mb-2 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-700 dark:text-yellow-300" />
           <span className="text-sm text-yellow-800 dark:text-yellow-200">
-            ⚠ 工作区目录不可访问，视频播放和切片功能不可用。请检查网络存储连接。
+            工作区目录不可访问，视频播放和切片功能不可用。请检查网络存储连接。
           </span>
         </div>
       )}
@@ -346,8 +350,10 @@ function VideoDetailPage() {
       {/* FFprobe missing warning */}
       {!ffprobeAvailable && (
         <div className="shrink-0 rounded-lg border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 mb-2 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-yellow-700 dark:text-yellow-300" />
           <span className="text-sm text-yellow-800 dark:text-yellow-200">
-            ⚠ FFprobe 未安装或不可用，切片、转码功能不可用。请在「设置 → 依赖管理」中安装 FFmpeg。
+            FFprobe 未安装或不可用，切片、转码功能不可用。请在「设置 &gt; 依赖管理」中安装
+            FFmpeg。
           </span>
         </div>
       )}
@@ -688,7 +694,7 @@ function VideoDetailPage() {
                     onClick={handleRemux}
                     disabled={remuxing}
                   >
-                    {remuxing ? "修复中..." : "转封装修复 (→ MP4)"}
+                    {remuxing ? "修复中..." : "转封装修复为 MP4"}
                   </Button>
                 </div>
               )}
