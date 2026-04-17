@@ -323,35 +323,33 @@ pub async fn execute_clip_with_burn(
     })?;
 
     // === Merge ASS files if both danmaku and subtitle are requested ===
-    let merged_ass = if burn.burn_danmaku && burn.burn_subtitle
-        && burn.danmaku_ass_path.is_some()
-        && burn.subtitle_ass_path.is_some()
-    {
-        let merged_path = std::env::temp_dir().join(format!(
-            "clipper_merged_{}_{}.ass",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        merge_ass_files(
-            burn.danmaku_ass_path.as_ref().unwrap(),
-            burn.subtitle_ass_path.as_ref().unwrap(),
-            &merged_path,
-        ).await?;
-        Some(merged_path)
-    } else {
-        None
+    let merged_ass = match (
+        burn.burn_danmaku && burn.burn_subtitle,
+        burn.danmaku_ass_path.as_ref(),
+        burn.subtitle_ass_path.as_ref(),
+    ) {
+        (true, Some(danmaku_path), Some(subtitle_path)) => {
+            let merged_path = std::env::temp_dir().join(format!(
+                "clipper_merged_{}_{}.ass",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            merge_ass_files(danmaku_path, subtitle_path, &merged_path).await?;
+            Some(merged_path)
+        }
+        _ => None,
     };
 
     // Determine which ASS file to burn
     let ass_to_burn = if let Some(ref merged) = merged_ass {
         merged.clone()
-    } else if burn.burn_danmaku && burn.danmaku_ass_path.is_some() {
-        burn.danmaku_ass_path.clone().unwrap()
-    } else if burn.burn_subtitle && burn.subtitle_ass_path.is_some() {
-        burn.subtitle_ass_path.clone().unwrap()
+    } else if let (true, Some(path)) = (burn.burn_danmaku, burn.danmaku_ass_path.as_ref()) {
+        path.clone()
+    } else if let (true, Some(path)) = (burn.burn_subtitle, burn.subtitle_ass_path.as_ref()) {
+        path.clone()
     } else {
         // No ASS file available to burn — skip burn pass, just rename intermediate to output
         tracing::warn!("No ASS file available for burning, skipping burn pass");

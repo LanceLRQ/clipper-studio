@@ -14,6 +14,23 @@ use crate::asr::remote::RemoteASRProvider;
 use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult, SubtitleSegment};
 use crate::AppState;
 
+/// Validate ASR remote URL scheme: only `http://` and `https://` are allowed.
+/// Rejects `file://`, `javascript:`, and other schemes that could be abused.
+fn validate_asr_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err("远程 ASR 地址不能为空".to_string());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return Err(format!(
+            "远程 ASR 地址协议不受支持，仅允许 http:// 或 https://（当前：{}）",
+            trimmed
+        ));
+    }
+    Ok(())
+}
+
 /// Helper: read a setting from settings_kv
 async fn read_setting(state: &AppState, key: &str) -> Option<String> {
     sea_orm::ConnectionTrait::query_one(
@@ -52,6 +69,7 @@ async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> 
             let url = read_setting(state, "asr_url")
                 .await
                 .ok_or("请先在设置中配置远程 ASR 地址")?;
+            validate_asr_url(&url)?;
             tracing::info!("[ASR] Using remote provider: {}", url);
             let api_key = read_setting(state, "asr_api_key").await;
             Ok(Arc::new(RemoteASRProvider::new(&url, api_key)))
