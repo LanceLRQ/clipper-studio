@@ -3,7 +3,7 @@ import { CheckIcon, PlusIcon, TagIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { TagBadge, TAG_COLORS } from "@/components/tag/tag-badge";
+import { TAG_COLORS } from "@/components/tag/tag-badge";
 import type { TagInfo } from "@/types/tag";
 import { listTags, createTag } from "@/services/tag";
 

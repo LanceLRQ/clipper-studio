@@ -64,9 +64,8 @@ jobs:
       - name: TypeScript check
         run: pnpm exec tsc --noEmit
 
-      - name: ESLint (soft)
+      - name: ESLint
         run: pnpm lint
-        continue-on-error: true
 
       - name: Rust fmt check
         working-directory: clipper-studio/src-tauri

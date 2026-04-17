@@ -4,8 +4,6 @@ import type {
   ImportVideoRequest,
   ListVideosRequest,
   ListVideosResponse,
-  SessionInfo,
-  StreamerInfo,
   ListStreamersRequest,
   ListStreamersResponse,
   ListSessionsRequest,

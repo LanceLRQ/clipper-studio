@@ -27,7 +27,6 @@ function WelcomePage() {
   const navigate = useNavigate();
   const { name: qName, path: qPath, step: qStep, adapter_config: qAdapterConfig } = Route.useSearch();
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
-  const wsActiveId = useWorkspaceStore((s) => s.activeId);
   const [hasExisting, setHasExisting] = useState(false);
   const [step, setStep] = useState<WizardStep>(qStep || "choose");
   const [name, setName] = useState(qName || "");

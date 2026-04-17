@@ -158,7 +158,7 @@ function VidstackPlayer({
     <div ref={containerRef}>
       <MediaPlayer
         title={title}
-        src={mediaSrc as any}
+        src={mediaSrc as React.ComponentProps<typeof MediaPlayer>["src"]}
         className="w-full aspect-video bg-black rounded-lg overflow-hidden"
       >
         <MediaProvider />

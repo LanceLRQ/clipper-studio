@@ -113,7 +113,8 @@ export function DanmakuLayer({
   useEffect(() => {
     const dm = danmakuRef.current;
     if (!dm) return;
-    enabled ? dm.show() : dm.hide();
+    if (enabled) dm.show();
+    else dm.hide();
   }, [enabled]);
 
   // Resize when container dimensions change

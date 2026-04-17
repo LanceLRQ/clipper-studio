@@ -22,7 +22,6 @@ import {
 import type {
   DependencyStatus,
   InstallProgress,
-  DepStatus,
 } from "@/types/deps";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import {
@@ -354,7 +353,7 @@ function DependencyManagerTab() {
 
     listen<{ dep_id: string; version: string | null }>(
       "dep:install-complete",
-      (event) => {
+      () => {
         setInstallingId(null);
         setProgress(null);
         loadDeps();
@@ -365,7 +364,7 @@ function DependencyManagerTab() {
 
     listen<{ dep_id: string; error: string }>(
       "dep:install-error",
-      (event) => {
+      () => {
         setInstallingId(null);
         setProgress(null);
         loadDeps();
@@ -430,7 +429,7 @@ function DependencyManagerTab() {
     }
   };
 
-  const handlePickCustomPath = async (depId: string) => {
+  const handlePickCustomPath = async (_depId: string) => {
     const selected = await open({
       directory: false,
       multiple: false,

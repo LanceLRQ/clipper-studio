@@ -63,7 +63,11 @@ export function ScanProgressCard({
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [elapsed, setElapsed] = useState(0);
   const [cancelling, setCancelling] = useState(false);
-  const startedAtRef = useRef<number>(Date.now());
+  const startedAtRef = useRef<number>(0);
+  if (startedAtRef.current === 0) {
+    // eslint-disable-next-line react-hooks/purity -- 一次性惰性初始化，等价于 useMemo(Date.now, [])
+    startedAtRef.current = Date.now();
+  }
   const resultRef = useRef<ScanResult | null>(null);
 
   // 监听 task-progress 事件

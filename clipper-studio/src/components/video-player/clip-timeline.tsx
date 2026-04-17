@@ -340,7 +340,7 @@ export function ClipTimeline({
         const deltaX = e.clientX - dragState.startX;
         const deltaTime = (deltaX / timelineWidth) * duration;
         const clip = dragState.clip;
-        let newClip = { ...clip };
+        const newClip = { ...clip };
 
         if (dragState.type === "move") {
           const clipDur = clip.end - clip.start;
