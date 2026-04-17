@@ -1,7 +1,7 @@
 {
     "$schema": "../gen/schemas/desktop-schema.json",
     "identifier": "default",
-    "description": "Default capabilities for ClipperStudio main window",
+    "description": "Default capabilities for ClipperStudio main window. All file writes, mkdirs, ffmpeg invocations, and ASR/Docker operations run inside Rust commands (bypassing the fs/shell plugin ACLs entirely), so only the plugin APIs that frontend JS actually imports are listed here. fs plugin permissions were removed to enforce least-privilege — frontend uses no @tauri-apps/plugin-fs calls.",
     "windows": ["main"],
     "permissions": [
         "core:default",
@@ -10,8 +10,6 @@
         "dialog:allow-save",
         "dialog:allow-message",
         "dialog:allow-ask",
-        "dialog:allow-confirm",
-        "fs:allow-read-file",
-        "fs:default"
+        "dialog:allow-confirm"
     ]
 }
