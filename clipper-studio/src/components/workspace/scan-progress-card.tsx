@@ -6,7 +6,6 @@ import {
   AlertCircle,
   FolderOpen,
   Layers,
-  Loader2,
   Save,
   Search,
   XIcon,
@@ -27,7 +26,6 @@ interface ScanProgressCardProps {
 type IconComponent = ComponentType<SVGProps<SVGSVGElement>>;
 
 const STAGE_META: Record<ScanStage, { Icon: IconComponent; title: string; spin?: boolean }> = {
-  preparing: { Icon: Loader2, title: "清理旧记录…", spin: true },
   scanning: { Icon: FolderOpen, title: "扫描目录结构…" },
   probing: { Icon: Search, title: "解析视频元数据" },
   grouping: { Icon: Layers, title: "分组为场次…" },
@@ -121,7 +119,7 @@ export function ScanProgressCard({
     await cancelScan(taskId);
   };
 
-  const stage = payload?.stage ?? "preparing";
+  const stage = payload?.stage ?? "scanning";
   const meta = STAGE_META[stage];
   const pct = Math.round(progress * 100);
   const current = payload?.current;

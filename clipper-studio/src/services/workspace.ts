@@ -60,7 +60,6 @@ export async function cancelScan(taskId: number): Promise<boolean> {
 }
 
 export type ScanStage =
-  | "preparing"
   | "scanning"
   | "probing"
   | "grouping"

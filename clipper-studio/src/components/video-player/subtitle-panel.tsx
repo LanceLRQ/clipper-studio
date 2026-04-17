@@ -26,6 +26,8 @@ interface SubtitlePanelProps {
   /** Set clip start/end time */
   onSetClipStart?: (timeSecs: number) => void;
   onSetClipEnd?: (timeSecs: number) => void;
+  /** 禁用 ASR 识别等需要访问原始文件的操作（如视频文件已缺失） */
+  disabled?: boolean;
 }
 
 function formatTime(secs: number): string {
@@ -54,6 +56,7 @@ export function SubtitlePanel({
   onSeek,
   onSetClipStart,
   onSetClipEnd,
+  disabled = false,
 }: SubtitlePanelProps) {
   const [segments, setSegments] = useState<SubtitleSegment[]>([]);
   const [baseTimeMs, setBaseTimeMs] = useState(0);
@@ -210,7 +213,7 @@ export function SubtitlePanel({
               size="sm"
               className="h-7 px-2.5 gap-1.5"
               onClick={handleSubmitASR}
-              disabled={!asrAvailable || loading}
+              disabled={!asrAvailable || loading || disabled}
               title={
                 asrMode === "disabled" ? "ASR 功能已禁用"
                   : asrMode === "remote" && remoteHealthy !== true
@@ -274,7 +277,7 @@ export function SubtitlePanel({
                   if (!(await ask("重新识别将覆盖当前字幕，确定继续？", { title: "重新 ASR 识别", kind: "warning" }))) return;
                   await handleSubmitASR();
                 }}
-                disabled={!asrAvailable || loading || isTaskActive}
+                disabled={!asrAvailable || loading || isTaskActive || disabled}
                 title={!asrAvailable ? "ASR 服务未就绪" : "重新识别（将覆盖当前字幕）"}
               >
                 重新生成
@@ -327,7 +330,7 @@ export function SubtitlePanel({
             ASR 失败: {queueTask.error_message}
           </div>
           <Button size="sm" variant="outline" className="text-xs" onClick={handleSubmitASR}
-            disabled={!asrAvailable}>
+            disabled={!asrAvailable || disabled}>
             重试
           </Button>
         </div>
@@ -336,12 +339,12 @@ export function SubtitlePanel({
           <p className="text-xs text-muted-foreground">暂无字幕</p>
           {asrMode === "local" && !asrAvailable && (
             <p className="text-[11px] text-muted-foreground">
-              本地 ASR 服务未运行，请在「设置 > 语音识别」中启动
+              本地 ASR 服务未运行，请在「设置 &gt; 语音识别」中启动
             </p>
           )}
           {asrMode === "remote" && remoteHealthy === false && (
             <p className="text-[11px] text-red-500">
-              远程 ASR 服务无法连接，请检查「设置 > 语音识别」
+              远程 ASR 服务无法连接，请检查「设置 &gt; 语音识别」
             </p>
           )}
           {asrMode === "disabled" && (

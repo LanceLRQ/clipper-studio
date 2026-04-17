@@ -1,3 +1,4 @@
+import { FileX2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VideoInfo } from "@/types/video";
 import type { TagInfo } from "@/types/tag";
@@ -59,10 +60,13 @@ export function VideoRow({
       ? "px-4 py-2 pl-10"
       : "rounded-lg border p-3";
 
+  const missing = video.file_missing;
+
   return (
     <div
-      className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass} ${selected ? "bg-accent/40" : ""}`}
+      className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass} ${selected ? "bg-accent/40" : ""} ${missing ? "opacity-60" : ""}`}
       onClick={onNavigate}
+      title={missing ? "文件已缺失（磁盘上找不到），操作功能将被禁用" : undefined}
     >
       <div className="flex items-center gap-3 min-w-0">
         {onToggleSelect && (
@@ -100,6 +104,12 @@ export function VideoRow({
         </div>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
+        {missing && (
+          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
+            <FileX2 className="h-3 w-3" />
+            已缺失
+          </span>
+        )}
         {video.has_subtitle && (
           <span className="text-xs px-1 py-0.5 rounded bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">
             字幕

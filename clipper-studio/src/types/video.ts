@@ -13,6 +13,7 @@ export interface VideoInfo {
   has_subtitle: boolean;
   has_danmaku: boolean;
   has_envelope: boolean;
+  file_missing: boolean;
   workspace_id: number | null;
   session_id: number | null;
   streamer_id: number | null;

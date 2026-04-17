@@ -358,6 +358,16 @@ function VideoDetailPage() {
         </div>
       )}
 
+      {/* File missing warning */}
+      {video.file_missing && (
+        <div className="shrink-0 rounded-lg border border-destructive/40 bg-destructive/10 p-3 mb-2 flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+          <span className="text-sm text-destructive">
+            视频文件已从磁盘删除或移动，播放、切片、转码、ASR 等操作不可用。数据库记录（字幕、标签、历史切片）保留可查。
+          </span>
+        </div>
+      )}
+
       {/* Main layout: Left (scrollable) + Right (full height tabs) */}
       <div ref={containerRef} className="flex-1 flex min-h-0">
         {/* Left column: Monitor (top, flex) + Timeline (bottom, fixed) — fills remaining space */}
@@ -439,7 +449,7 @@ function VideoDetailPage() {
               burnAvailability={burnAvailability}
               videoId={video?.id}
               onClipCreated={() => setActiveTab(1)}
-              disabled={!ffprobeAvailable}
+              disabled={!ffprobeAvailable || video.file_missing}
             />
           </div>
         </div>
@@ -574,7 +584,7 @@ function VideoDetailPage() {
                       clips={clips}
                       presetId={selectedPresetId}
                       clipOptions={clipOptions}
-                      disabled={!wsPathAccessible || !ffprobeAvailable}
+                      disabled={!wsPathAccessible || !ffprobeAvailable || video.file_missing}
                     />
                   </div>
                 </div>
@@ -589,6 +599,7 @@ function VideoDetailPage() {
                 onSeek={handleSeek}
                 onSetClipStart={handleSetClipStart}
                 onSetClipEnd={handleSetClipEnd}
+                disabled={video.file_missing}
               />
             </TabsContent>
 
@@ -692,7 +703,7 @@ function VideoDetailPage() {
                     variant="outline"
                     className="text-xs"
                     onClick={handleRemux}
-                    disabled={remuxing}
+                    disabled={remuxing || video.file_missing}
                   >
                     {remuxing ? "修复中..." : "转封装修复为 MP4"}
                   </Button>
@@ -733,7 +744,7 @@ function VideoDetailPage() {
                         alert("转码失败: " + String(e));
                       }
                     }}
-                    disabled={!selectedPresetId || !ffprobeAvailable}
+                    disabled={!selectedPresetId || !ffprobeAvailable || video.file_missing}
                   >
                     开始转码
                   </Button>

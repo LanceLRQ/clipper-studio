@@ -396,27 +396,11 @@ async fn scan_workspace_handler(
         };
     }
 
-    // Stage 1: preparing
+    // Stage 1: scanning（遍历目录，CPU 轻量；通过 spawn_blocking 避免阻塞异步线程）
     emit_progress(
         &progress_tx,
         task_id,
         0.02,
-        ScanProgressPayload {
-            stage: "preparing",
-            current: None,
-            total: None,
-            file: None,
-            path: None,
-            result: None,
-        },
-    );
-    check_cancel!();
-
-    // Stage 2: scanning（遍历目录，CPU 轻量；通过 spawn_blocking 避免阻塞异步线程）
-    emit_progress(
-        &progress_tx,
-        task_id,
-        0.05,
         ScanProgressPayload {
             stage: "scanning",
             current: None,
@@ -426,6 +410,7 @@ async fn scan_workspace_handler(
             result: None,
         },
     );
+    check_cancel!();
     let scan_dir = dir_buf.clone();
     let scan = tokio::task::spawn_blocking(move || storage::scan_workspace(&scan_dir))
         .await
@@ -547,11 +532,12 @@ async fn scan_workspace_handler(
         },
     );
 
-    // 清理旧 session 并解绑 videos（写入阶段开始后不再检查 cancel，保持 DB 状态一致性）
+    // 清理旧 session、解绑 videos、先将所有 video 预标记为 missing
+    // 随后每个扫到的 video 在 INSERT/UPDATE 时会把 file_missing 置 0，没扫到的保持 1
     sea_orm::ConnectionTrait::execute_unprepared(
         db.conn(),
         &format!(
-            "UPDATE videos SET session_id = NULL WHERE workspace_id = {}",
+            "UPDATE videos SET session_id = NULL, file_missing = 1 WHERE workspace_id = {}",
             workspace_id
         ),
     )
@@ -648,7 +634,7 @@ async fn scan_workspace_handler(
                 let _ = sea_orm::ConnectionTrait::execute_unprepared(
                     db.conn(),
                     &format!(
-                        "UPDATE videos SET session_id = {}, streamer_id = {}, \
+                        "UPDATE videos SET session_id = {}, streamer_id = {}, file_missing = 0, \
                          duration_ms = CASE WHEN duration_ms IS NULL OR duration_ms = 0 THEN {} ELSE duration_ms END \
                          WHERE id = {}",
                         sess_id_sql, sid_sql, dur_sql, video_id
@@ -682,8 +668,8 @@ async fn scan_workspace_handler(
 
                 let sql = format!(
                     "INSERT INTO videos (file_path, file_name, file_size, duration_ms, width, height, \
-                     workspace_id, streamer_id, session_id, stream_title, recorded_at, adapter_id, has_danmaku) \
-                     VALUES ('{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', {})",
+                     workspace_id, streamer_id, session_id, stream_title, recorded_at, adapter_id, has_danmaku, file_missing) \
+                     VALUES ('{}', '{}', {}, {}, {}, {}, {}, {}, {}, {}, {}, '{}', {}, 0)",
                     fp.replace('\'', "''"),
                     file.file_name.replace('\'', "''"),
                     file_size,
