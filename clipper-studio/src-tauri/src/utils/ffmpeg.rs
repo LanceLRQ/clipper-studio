@@ -6,7 +6,11 @@ use std::process::Command;
 /// Unlike simple string replace, this avoids corrupting paths like "/opt/ffmpeg-tools/ffmpeg".
 pub fn derive_ffprobe_path(ffmpeg_path: &str) -> String {
     let path = Path::new(ffmpeg_path);
-    let ffprobe_name = if cfg!(target_os = "windows") { "ffprobe.exe" } else { "ffprobe" };
+    let ffprobe_name = if cfg!(target_os = "windows") {
+        "ffprobe.exe"
+    } else {
+        "ffprobe"
+    };
     path.parent()
         .unwrap_or_else(|| Path::new("."))
         .join(ffprobe_name)
@@ -93,8 +97,10 @@ pub fn probe(ffprobe_path: &str, file_path: &std::path::Path) -> Result<ProbeRes
 
     let output = Command::new(ffprobe_path)
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
         ])
@@ -107,11 +113,11 @@ pub fn probe(ffprobe_path: &str, file_path: &std::path::Path) -> Result<ProbeRes
         return Err(format!("FFprobe failed: {}", stderr));
     }
 
-    let json_str = String::from_utf8(output.stdout)
-        .map_err(|e| format!("FFprobe output not UTF-8: {}", e))?;
+    let json_str =
+        String::from_utf8(output.stdout).map_err(|e| format!("FFprobe output not UTF-8: {}", e))?;
 
-    let json: serde_json::Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("FFprobe JSON parse error: {}", e))?;
+    let json: serde_json::Value =
+        serde_json::from_str(&json_str).map_err(|e| format!("FFprobe JSON parse error: {}", e))?;
 
     // Extract format info
     let format = json.get("format");
@@ -149,8 +155,14 @@ pub fn probe(ffprobe_path: &str, file_path: &std::path::Path) -> Result<ProbeRes
                         .get("codec_name")
                         .and_then(|c| c.as_str())
                         .map(|s| s.to_string());
-                    width = stream.get("width").and_then(|w| w.as_i64()).map(|w| w as i32);
-                    height = stream.get("height").and_then(|h| h.as_i64()).map(|h| h as i32);
+                    width = stream
+                        .get("width")
+                        .and_then(|w| w.as_i64())
+                        .map(|w| w as i32);
+                    height = stream
+                        .get("height")
+                        .and_then(|h| h.as_i64())
+                        .map(|h| h as i32);
                 }
                 Some("audio") if audio_codec.is_none() => {
                     audio_codec = stream
@@ -204,10 +216,14 @@ pub async fn extract_audio_envelope(
         .args([
             "-i",
             &file_path.to_string_lossy(),
-            "-ac", "1",           // mono
-            "-ar", &sample_rate.to_string(),
-            "-f", "f32le",        // raw float32 little-endian
-            "-v", "quiet",
+            "-ac",
+            "1", // mono
+            "-ar",
+            &sample_rate.to_string(),
+            "-f",
+            "f32le", // raw float32 little-endian
+            "-v",
+            "quiet",
             "pipe:1",
         ])
         .stdout(std::process::Stdio::piped())
@@ -331,10 +347,7 @@ pub struct IntegrityResult {
 /// - Missing duration (common sign of broken FLV)
 /// - Missing video/audio streams
 /// - FFprobe failure (corrupt container)
-pub fn check_integrity(
-    ffprobe_path: &str,
-    file_path: &Path,
-) -> Result<IntegrityResult, String> {
+pub fn check_integrity(ffprobe_path: &str, file_path: &Path) -> Result<IntegrityResult, String> {
     let probe_result = probe(ffprobe_path, file_path)?;
     let mut issues = Vec::new();
 
@@ -356,11 +369,7 @@ pub fn check_integrity(
 ///
 /// This fixes most FLV issues: missing keyframe index, broken metadata, etc.
 /// Returns the output file path.
-pub async fn remux_to_mp4(
-    ffmpeg_path: &str,
-    input: &Path,
-    output: &Path,
-) -> Result<(), String> {
+pub async fn remux_to_mp4(ffmpeg_path: &str, input: &Path, output: &Path) -> Result<(), String> {
     use tokio::process::Command as AsyncCommand;
 
     if ffmpeg_path.is_empty() {
@@ -371,8 +380,10 @@ pub async fn remux_to_mp4(
         .args([
             "-i",
             &input.to_string_lossy(),
-            "-c", "copy",
-            "-movflags", "+faststart",
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
             "-y",
             &output.to_string_lossy(),
         ])
@@ -410,7 +421,8 @@ pub async fn burn_subtitle(
             &input.to_string_lossy(),
             "-vf",
             &format!("ass={}", ass_escaped),
-            "-c:a", "copy",
+            "-c:a",
+            "copy",
             "-y",
             &output.to_string_lossy(),
         ])
@@ -604,7 +616,10 @@ pub async fn burn_subtitle_with_progress(
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr_data);
         tracing::error!("FFmpeg burn failed ({}), stderr:\n{}", status, stderr);
-        return Err(format!("FFmpeg burn exited with code: {}, stderr: {}", status, stderr));
+        return Err(format!(
+            "FFmpeg burn exited with code: {}, stderr: {}",
+            status, stderr
+        ));
     }
 
     if !output.exists() {
@@ -741,7 +756,10 @@ mod tests {
         assert_eq!(parsed.height, Some(1080));
         assert_eq!(parsed.video_codec, Some("h264".to_string()));
         assert_eq!(parsed.audio_codec, Some("aac".to_string()));
-        assert_eq!(parsed.format_name, Some("mov,mp4,m4a,3gp,3g2,mj2".to_string()));
+        assert_eq!(
+            parsed.format_name,
+            Some("mov,mp4,m4a,3gp,3g2,mj2".to_string())
+        );
         assert_eq!(parsed.file_size, 1048576);
     }
 

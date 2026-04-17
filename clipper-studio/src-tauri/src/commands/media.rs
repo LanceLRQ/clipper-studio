@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, State};
 
-use crate::AppState;
 use crate::core::clipper::{self, PresetOptions};
 use crate::core::queue::{TaskProgressEvent, TaskStatus};
+use crate::AppState;
 
 // ====== Types ======
 
@@ -61,7 +61,11 @@ pub async fn transcode_video(
     let preset = load_preset(state.db.conn(), req.preset_id).await?;
 
     // Determine output path
-    let ext = if preset.audio_only.unwrap_or(false) { "m4a" } else { "mp4" };
+    let ext = if preset.audio_only.unwrap_or(false) {
+        "m4a"
+    } else {
+        "mp4"
+    };
     let output_dir = match &req.output_dir {
         Some(dir) => {
             // 安全校验：SEC-FS-03
@@ -138,15 +142,22 @@ pub async fn transcode_video(
                         .map(|m| m.len() as i64)
                         .unwrap_or(0);
                     let _ = update_media_task_status(&db, task_id, "completed", None).await;
-                    let _ = app.emit("media-task-completed", serde_json::json!({
-                        "task_id": task_id,
-                        "task_type": "transcode",
-                        "output_path": output.to_string_lossy(),
-                        "file_size": file_size,
-                    }));
+                    let _ = app.emit(
+                        "media-task-completed",
+                        serde_json::json!({
+                            "task_id": task_id,
+                            "task_type": "transcode",
+                            "output_path": output.to_string_lossy(),
+                            "file_size": file_size,
+                        }),
+                    );
                 }
                 Err(e) => {
-                    let status = if e == "Task cancelled" { "cancelled" } else { "failed" };
+                    let status = if e == "Task cancelled" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
                     let _ = update_media_task_status(&db, task_id, status, Some(e)).await;
                 }
             }
@@ -196,8 +207,7 @@ pub async fn list_media_tasks(
         .iter()
         .map(|row| {
             let video_ids_json: String = row.try_get("", "video_ids").unwrap_or_default();
-            let video_ids: Vec<i64> =
-                serde_json::from_str(&video_ids_json).unwrap_or_default();
+            let video_ids: Vec<i64> = serde_json::from_str(&video_ids_json).unwrap_or_default();
             MediaTaskInfo {
                 id: row.try_get("", "id").unwrap_or(0),
                 task_type: row.try_get("", "task_type").unwrap_or_default(),
@@ -276,12 +286,15 @@ pub async fn merge_videos(
 
     // Check compatibility for virtual merge
     if req.mode == "virtual" {
-        let ffprobe_path = crate::utils::ffmpeg::derive_ffprobe_path(&state.ffmpeg_path.read_safe());
-        let compatible = crate::core::merger::check_merge_compatibility(&ffprobe_path, &input_paths)
-            .unwrap_or(false);
+        let ffprobe_path =
+            crate::utils::ffmpeg::derive_ffprobe_path(&state.ffmpeg_path.read_safe());
+        let compatible =
+            crate::core::merger::check_merge_compatibility(&ffprobe_path, &input_paths)
+                .unwrap_or(false);
         if !compatible {
             return Err(
-                "所选视频的编码/分辨率不一致，无法使用快速合并。请使用「重编码合并」模式。".to_string(),
+                "所选视频的编码/分辨率不一致，无法使用快速合并。请使用「重编码合并」模式。"
+                    .to_string(),
             );
         }
     }
@@ -320,7 +333,9 @@ pub async fn merge_videos(
              VALUES ('merge', '{}', '{}', {}, 'pending')",
             video_ids_json.replace('\'', "''"),
             output_path.to_string_lossy().replace('\'', "''"),
-            req.preset_id.map(|id| id.to_string()).unwrap_or("NULL".to_string()),
+            req.preset_id
+                .map(|id| id.to_string())
+                .unwrap_or("NULL".to_string()),
         ),
     )
     .await
@@ -393,15 +408,22 @@ pub async fn merge_videos(
                         .map(|m| m.len() as i64)
                         .unwrap_or(0);
                     let _ = update_media_task_status(&db, task_id, "completed", None).await;
-                    let _ = app.emit("media-task-completed", serde_json::json!({
-                        "task_id": task_id,
-                        "task_type": "merge",
-                        "output_path": output.to_string_lossy(),
-                        "file_size": file_size,
-                    }));
+                    let _ = app.emit(
+                        "media-task-completed",
+                        serde_json::json!({
+                            "task_id": task_id,
+                            "task_type": "merge",
+                            "output_path": output.to_string_lossy(),
+                            "file_size": file_size,
+                        }),
+                    );
                 }
                 Err(e) => {
-                    let status = if e == "Task cancelled" { "cancelled" } else { "failed" };
+                    let status = if e == "Task cancelled" {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
                     let _ = update_media_task_status(&db, task_id, status, Some(e)).await;
                 }
             }
@@ -433,7 +455,10 @@ async fn load_preset(
         conn,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT options FROM encoding_presets WHERE id = {}", preset_id),
+            format!(
+                "SELECT options FROM encoding_presets WHERE id = {}",
+                preset_id
+            ),
         ),
     )
     .await
@@ -480,7 +505,11 @@ async fn update_media_task_status(
         &format!(
             "UPDATE media_tasks SET status = '{}', progress = {}{}{} WHERE id = {}",
             status,
-            if status == "completed" { "1.0" } else { "progress" },
+            if status == "completed" {
+                "1.0"
+            } else {
+                "progress"
+            },
             error_sql,
             completed_sql,
             task_id,
@@ -514,7 +543,10 @@ pub async fn delete_media_task(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT status, output_path FROM media_tasks WHERE id = {}", task_id),
+            format!(
+                "SELECT status, output_path FROM media_tasks WHERE id = {}",
+                task_id
+            ),
         ),
     )
     .await
@@ -539,7 +571,11 @@ pub async fn delete_media_task(
     .await
     .map_err(|e| e.to_string())?;
 
-    tracing::info!("Media task deleted: id={}, delete_files={}", task_id, delete_files.unwrap_or(false));
+    tracing::info!(
+        "Media task deleted: id={}, delete_files={}",
+        task_id,
+        delete_files.unwrap_or(false)
+    );
     Ok(())
 }
 
@@ -574,6 +610,10 @@ pub async fn clear_finished_media_tasks(
     .map_err(|e| e.to_string())?;
 
     let deleted = result.rows_affected();
-    tracing::info!("Cleared {} finished media tasks, delete_files={}", deleted, delete_files.unwrap_or(false));
+    tracing::info!(
+        "Cleared {} finished media tasks, delete_files={}",
+        deleted,
+        delete_files.unwrap_or(false)
+    );
     Ok(deleted)
 }

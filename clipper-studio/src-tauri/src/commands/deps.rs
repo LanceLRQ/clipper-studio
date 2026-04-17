@@ -1,8 +1,8 @@
 use crate::utils::locks::RwLockExt;
 use tauri::{AppHandle, State};
 
-use crate::deps::registry::{DependencyStatus, DepStatus};
 use crate::deps::config_overrides_from_app_config;
+use crate::deps::registry::{DepStatus, DependencyStatus};
 use crate::AppState;
 
 /// List all managed dependencies and their status
@@ -21,7 +21,9 @@ pub async fn check_dep(
 ) -> Result<DependencyStatus, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     let overrides = config_overrides_from_app_config(&config);
-    let status = state.dep_manager.check_dep(&dep_id, &overrides, &state.bin_dir)?;
+    let status = state
+        .dep_manager
+        .check_dep(&dep_id, &overrides, &state.bin_dir)?;
     drop(config);
     if status.status == DepStatus::Installed || status.system_available {
         refresh_tool_paths(&dep_id, &state);
@@ -39,9 +41,16 @@ pub async fn install_dep(
     let proxy_url = {
         let config = state.config.read().map_err(|e| e.to_string())?;
         let url = config.network.proxy_url.clone();
-        if url.is_empty() { None } else { Some(url) }
+        if url.is_empty() {
+            None
+        } else {
+            Some(url)
+        }
     };
-    state.dep_manager.install_dep(&dep_id, &app_handle, proxy_url.as_deref()).await?;
+    state
+        .dep_manager
+        .install_dep(&dep_id, &app_handle, proxy_url.as_deref())
+        .await?;
 
     // Hot-refresh: update AppState paths so the new binary is usable immediately
     refresh_tool_paths(&dep_id, &state);
@@ -68,7 +77,10 @@ fn refresh_tool_paths(dep_id: &str, state: &AppState) {
         }
         "danmaku-factory" => {
             // get_binary_path handles both DanmakuFactory (Windows) and dmconvert (macOS venv)
-            if let Some(p) = state.dep_manager.get_binary_path("danmaku-factory", "DanmakuFactory") {
+            if let Some(p) = state
+                .dep_manager
+                .get_binary_path("danmaku-factory", "DanmakuFactory")
+            {
                 if let Ok(mut path) = state.danmaku_factory_path.write() {
                     *path = p.to_string_lossy().to_string();
                     tracing::info!("Hot-refreshed danmaku tool path: {}", *path);
@@ -81,10 +93,7 @@ fn refresh_tool_paths(dep_id: &str, state: &AppState) {
 
 /// Uninstall a dependency
 #[tauri::command]
-pub async fn uninstall_dep(
-    dep_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn uninstall_dep(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {
     state.dep_manager.uninstall_dep(&dep_id)?;
 
     // Re-detect paths from remaining sources (config > bin_dir > PATH)
@@ -109,7 +118,10 @@ fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
             };
             if let Ok(mut path) = state.ffmpeg_path.write() {
                 let val = new_ffmpeg.unwrap_or_default();
-                tracing::info!("Re-detected ffmpeg_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                tracing::info!(
+                    "Re-detected ffmpeg_path: {}",
+                    if val.is_empty() { "(empty)" } else { &val }
+                );
                 *path = val;
             }
 
@@ -121,7 +133,10 @@ fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
             };
             if let Ok(mut path) = state.ffprobe_path.write() {
                 let val = new_ffprobe.unwrap_or_default();
-                tracing::info!("Re-detected ffprobe_path: {}", if val.is_empty() { "(empty)" } else { &val });
+                tracing::info!(
+                    "Re-detected ffprobe_path: {}",
+                    if val.is_empty() { "(empty)" } else { &val }
+                );
                 *path = val;
             }
         }
@@ -134,7 +149,10 @@ fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
             };
             if let Ok(mut path) = state.danmaku_factory_path.write() {
                 let val = new_path.unwrap_or_default();
-                tracing::info!("Re-detected danmaku tool path: {}", if val.is_empty() { "(empty)" } else { &val });
+                tracing::info!(
+                    "Re-detected danmaku tool path: {}",
+                    if val.is_empty() { "(empty)" } else { &val }
+                );
                 *path = val;
             }
         }
@@ -190,10 +208,7 @@ pub async fn set_dep_custom_path(
 
 /// Set HTTP proxy for dependency downloads (saves to config.toml and updates HTTP client)
 #[tauri::command]
-pub async fn set_deps_proxy(
-    proxy_url: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn set_deps_proxy(proxy_url: String, state: State<'_, AppState>) -> Result<(), String> {
     // Save to config.toml
     let mut config = state.config.write().map_err(|e| e.to_string())?;
     config.network.proxy_url = proxy_url.clone();
@@ -202,28 +217,34 @@ pub async fn set_deps_proxy(
         .map_err(|e| format!("Failed to save config: {}", e))?;
 
     // Update HTTP client immediately
-    let proxy = if proxy_url.is_empty() { None } else { Some(proxy_url.as_str()) };
+    let proxy = if proxy_url.is_empty() {
+        None
+    } else {
+        Some(proxy_url.as_str())
+    };
     state.dep_manager.update_proxy(proxy);
 
-    tracing::info!("Deps proxy updated: {}", if proxy_url.is_empty() { "(disabled)" } else { &proxy_url });
+    tracing::info!(
+        "Deps proxy updated: {}",
+        if proxy_url.is_empty() {
+            "(disabled)"
+        } else {
+            &proxy_url
+        }
+    );
     Ok(())
 }
 
 /// Get current proxy URL from config
 #[tauri::command]
-pub async fn get_deps_proxy(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn get_deps_proxy(state: State<'_, AppState>) -> Result<String, String> {
     let config = state.config.read().map_err(|e| e.to_string())?;
     Ok(config.network.proxy_url.clone())
 }
 
 /// Open the dependency installation directory in file manager
 #[tauri::command]
-pub async fn reveal_dep_dir(
-    dep_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn reveal_dep_dir(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {
     let dep_dir = state.dep_manager.deps_dir().join(&dep_id);
     if !dep_dir.exists() {
         return Err(format!("依赖 '{}' 未安装", dep_id));

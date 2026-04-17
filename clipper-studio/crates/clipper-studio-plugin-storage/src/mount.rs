@@ -31,7 +31,11 @@ pub struct MountBackend;
 impl MountBackend {
     /// Check if current platform is supported for SMB mounting
     pub fn is_supported() -> bool {
-        cfg!(any(target_os = "macos", target_os = "linux", target_os = "windows"))
+        cfg!(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "windows"
+        ))
     }
 
     /// Mount a SMB share and return the local mount point
@@ -109,7 +113,10 @@ impl MountBackend {
             (Some(user), Some(pass)) => {
                 // URL-encode special characters in password
                 let encoded_pass = Self::url_encode(pass);
-                format!("//{}:{}@{}/{}", user, encoded_pass, params.server, params.share)
+                format!(
+                    "//{}:{}@{}/{}",
+                    user, encoded_pass, params.server, params.share
+                )
             }
             (Some(user), None) => {
                 format!("//{}@{}/{}", user, params.server, params.share)
@@ -241,7 +248,13 @@ impl MountBackend {
     fn parse_net_use_drive(output: &str) -> Option<String> {
         // Look for pattern like "Drive X:" or "驱动器 X:"
         for word in output.split_whitespace() {
-            if word.len() == 2 && word.ends_with(':') && word.chars().next().map_or(false, |c| c.is_ascii_alphabetic()) {
+            if word.len() == 2
+                && word.ends_with(':')
+                && word
+                    .chars()
+                    .next()
+                    .map_or(false, |c| c.is_ascii_alphabetic())
+            {
                 return Some(word.to_uppercase());
             }
         }
@@ -310,9 +323,7 @@ impl MountBackend {
         #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             // Use `mount` command and grep for the path
-            let output = tokio::process::Command::new("mount")
-                .output()
-                .await;
+            let output = tokio::process::Command::new("mount").output().await;
             match output {
                 Ok(o) => {
                     let stdout = String::from_utf8_lossy(&o.stdout);
@@ -339,9 +350,9 @@ impl MountBackend {
                 Ok(o) => {
                     let stdout = String::from_utf8_lossy(&o.stdout);
                     let path_upper = path.to_uppercase();
-                    stdout.lines().any(|line| {
-                        line.to_uppercase().contains(&path_upper)
-                    })
+                    stdout
+                        .lines()
+                        .any(|line| line.to_uppercase().contains(&path_upper))
                 }
                 Err(_) => false,
             }

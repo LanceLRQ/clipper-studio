@@ -64,9 +64,6 @@ impl PluginTransport for BuiltinTransport {
     }
 
     async fn shutdown(&self) -> Result<(), String> {
-        self.instance
-            .shutdown()
-            .await
-            .map_err(|e| e.to_string())
+        self.instance.shutdown().await.map_err(|e| e.to_string())
     }
 }

@@ -25,9 +25,7 @@ impl<T: ?Sized> MutexExt<T> for Mutex<T> {
         match self.lock() {
             Ok(g) => g,
             Err(poisoned) => {
-                tracing::warn!(
-                    "Mutex poisoned, recovering inner guard (a prior holder panicked)"
-                );
+                tracing::warn!("Mutex poisoned, recovering inner guard (a prior holder panicked)");
                 poisoned.into_inner()
             }
         }
@@ -46,9 +44,7 @@ impl<T: ?Sized> RwLockExt<T> for RwLock<T> {
         match self.read() {
             Ok(g) => g,
             Err(poisoned) => {
-                tracing::warn!(
-                    "RwLock read poisoned, recovering inner guard"
-                );
+                tracing::warn!("RwLock read poisoned, recovering inner guard");
                 poisoned.into_inner()
             }
         }
@@ -58,9 +54,7 @@ impl<T: ?Sized> RwLockExt<T> for RwLock<T> {
         match self.write() {
             Ok(g) => g,
             Err(poisoned) => {
-                tracing::warn!(
-                    "RwLock write poisoned, recovering inner guard"
-                );
+                tracing::warn!("RwLock write poisoned, recovering inner guard");
                 poisoned.into_inner()
             }
         }

@@ -174,7 +174,11 @@ pub async fn execute_clip(
 
     if !status.success() {
         let stderr_str = String::from_utf8_lossy(&stderr_output);
-        return Err(format!("FFmpeg exited with code: {} (stderr: {})", status, stderr_str.chars().take(500).collect::<String>()));
+        return Err(format!(
+            "FFmpeg exited with code: {} (stderr: {})",
+            status,
+            stderr_str.chars().take(500).collect::<String>()
+        ));
     }
 
     // Verify output exists
@@ -200,8 +204,8 @@ fn detect_best_h264(ffmpeg_path: &str) -> String {
     let candidates = [
         "h264_videotoolbox", // macOS
         "h264_nvenc",        // NVIDIA
-        "h264_qsv",         // Intel
-        "h264_amf",         // AMD
+        "h264_qsv",          // Intel
+        "h264_amf",          // AMD
     ];
     for c in candidates {
         if encoder_available(ffmpeg_path, c) {
@@ -213,12 +217,7 @@ fn detect_best_h264(ffmpeg_path: &str) -> String {
 }
 
 fn detect_best_h265(ffmpeg_path: &str) -> String {
-    let candidates = [
-        "hevc_videotoolbox",
-        "hevc_nvenc",
-        "hevc_qsv",
-        "hevc_amf",
-    ];
+    let candidates = ["hevc_videotoolbox", "hevc_nvenc", "hevc_qsv", "hevc_amf"];
     for c in candidates {
         if encoder_available(ffmpeg_path, c) {
             tracing::info!("Using hardware H.265 encoder: {}", c);
@@ -234,9 +233,7 @@ fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
         .args(["-hide_banner", "-encoders"])
         .output()
         .ok()
-        .map(|output| {
-            String::from_utf8_lossy(&output.stdout).contains(encoder)
-        })
+        .map(|output| String::from_utf8_lossy(&output.stdout).contains(encoder))
         .unwrap_or(false)
 }
 
@@ -290,14 +287,27 @@ pub async fn execute_clip_with_burn(
 
     if !needs_burn {
         // No burning — just do a regular clip with full progress range
-        return execute_clip(ffmpeg_path, input, output, start_ms, end_ms, preset, cancel, on_progress).await;
+        return execute_clip(
+            ffmpeg_path,
+            input,
+            output,
+            start_ms,
+            end_ms,
+            preset,
+            cancel,
+            on_progress,
+        )
+        .await;
     }
 
     // === Pass 1: Clip to intermediate file ===
     let intermediate = output.with_extension("_tmp.mp4");
     let on_progress_p1 = on_progress.clone();
 
-    tracing::info!("Clip+Burn Pass 1: clipping to intermediate {}", intermediate.display());
+    tracing::info!(
+        "Clip+Burn Pass 1: clipping to intermediate {}",
+        intermediate.display()
+    );
 
     execute_clip(
         ffmpeg_path,
@@ -359,7 +369,11 @@ pub async fn execute_clip_with_burn(
     };
 
     // === Pass 2: Burn ASS into clipped video ===
-    tracing::info!("Clip+Burn Pass 2: burning {} into {}", ass_to_burn.display(), output.display());
+    tracing::info!(
+        "Clip+Burn Pass 2: burning {} into {}",
+        ass_to_burn.display(),
+        output.display()
+    );
 
     // Use clip duration as fallback when ffprobe fails on the intermediate file
     let clip_duration_hint = (end_ms - start_ms) as f64 / 1000.0;
@@ -403,12 +417,20 @@ async fn merge_ass_files(
     subtitle_ass: &Path,
     output: &Path,
 ) -> Result<(), String> {
-    let danmaku_content = tokio::fs::read_to_string(danmaku_ass)
-        .await
-        .map_err(|e| format!("Failed to read danmaku ASS {}: {}", danmaku_ass.display(), e))?;
-    let subtitle_content = tokio::fs::read_to_string(subtitle_ass)
-        .await
-        .map_err(|e| format!("Failed to read subtitle ASS {}: {}", subtitle_ass.display(), e))?;
+    let danmaku_content = tokio::fs::read_to_string(danmaku_ass).await.map_err(|e| {
+        format!(
+            "Failed to read danmaku ASS {}: {}",
+            danmaku_ass.display(),
+            e
+        )
+    })?;
+    let subtitle_content = tokio::fs::read_to_string(subtitle_ass).await.map_err(|e| {
+        format!(
+            "Failed to read subtitle ASS {}: {}",
+            subtitle_ass.display(),
+            e
+        )
+    })?;
 
     let mut merged = danmaku_content;
 

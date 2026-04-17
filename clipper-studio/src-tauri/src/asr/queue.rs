@@ -133,11 +133,7 @@ impl ASRTaskQueue {
     }
 
     /// Enqueue an ASR task for a video. Returns the asr_task_id.
-    pub async fn enqueue(
-        &self,
-        video_id: i64,
-        language: String,
-    ) -> Result<i64, String> {
+    pub async fn enqueue(&self, video_id: i64, language: String) -> Result<i64, String> {
         // Duplicate check (quick, no await while holding lock)
         {
             let inner = self.inner.lock_safe();
@@ -221,7 +217,12 @@ impl ASRTaskQueue {
         .and_then(|r| r.try_get("", "id").ok())
         .unwrap_or(0);
 
-        tracing::info!("ASR task {} enqueued for video {} ({})", task_id, video_id, file_name);
+        tracing::info!(
+            "ASR task {} enqueued for video {} ({})",
+            task_id,
+            video_id,
+            file_name
+        );
 
         // Push to queue (quick lock, no await)
         {
@@ -235,7 +236,16 @@ impl ASRTaskQueue {
             });
         }
 
-        Self::emit_progress(&self.app_handle, task_id, video_id, "queued", 0.0, Some("排队中"), None, &file_name);
+        Self::emit_progress(
+            &self.app_handle,
+            task_id,
+            video_id,
+            "queued",
+            0.0,
+            Some("排队中"),
+            None,
+            &file_name,
+        );
         self.queue_notify.notify_one();
         Ok(task_id)
     }
@@ -245,7 +255,11 @@ impl ASRTaskQueue {
         let mut inner = self.inner.lock_safe();
 
         // Check pending queue
-        if let Some(pos) = inner.pending.iter().position(|e| e.asr_task_id == asr_task_id) {
+        if let Some(pos) = inner
+            .pending
+            .iter()
+            .position(|e| e.asr_task_id == asr_task_id)
+        {
             let entry = inner.pending.remove(pos).unwrap();
             drop(inner); // release lock before DB/emit
 
@@ -255,9 +269,22 @@ impl ASRTaskQueue {
             tauri::async_runtime::spawn(async move {
                 let _ = sea_orm::ConnectionTrait::execute_unprepared(
                     db.conn(),
-                    &format!("UPDATE asr_tasks SET status = 'cancelled' WHERE id = {}", asr_task_id),
-                ).await;
-                Self::emit_progress(&app, asr_task_id, entry.video_id, "cancelled", 0.0, Some("已取消"), None, &entry.video_file_name);
+                    &format!(
+                        "UPDATE asr_tasks SET status = 'cancelled' WHERE id = {}",
+                        asr_task_id
+                    ),
+                )
+                .await;
+                Self::emit_progress(
+                    &app,
+                    asr_task_id,
+                    entry.video_id,
+                    "cancelled",
+                    0.0,
+                    Some("已取消"),
+                    None,
+                    &entry.video_file_name,
+                );
             });
 
             tracing::info!("ASR task {} cancelled (was queued)", asr_task_id);
@@ -370,11 +397,24 @@ impl ASRTaskQueue {
                 tracing::info!("ASR task {} recovered from DB (was queued)", task_id);
             }
             // Drop lock before emitting events
-            let recovered: Vec<_> = q.pending.iter().map(|e| (e.asr_task_id, e.video_id, e.video_file_name.clone())).collect();
+            let recovered: Vec<_> = q
+                .pending
+                .iter()
+                .map(|e| (e.asr_task_id, e.video_id, e.video_file_name.clone()))
+                .collect();
             drop(q);
 
             for (tid, vid, fname) in recovered {
-                Self::emit_progress(app_handle, tid, vid, "queued", 0.0, Some("排队中（已恢复）"), None, &fname);
+                Self::emit_progress(
+                    app_handle,
+                    tid,
+                    vid,
+                    "queued",
+                    0.0,
+                    Some("排队中（已恢复）"),
+                    None,
+                    &fname,
+                );
             }
         }
     }
@@ -418,7 +458,13 @@ impl ASRTaskQueue {
                 if q.cancelled_ids.remove(&task_id) {
                     true
                 } else {
-                    q.running = Some((task_id, video_id, file_name.clone(), "converting".to_string(), 0.0));
+                    q.running = Some((
+                        task_id,
+                        video_id,
+                        file_name.clone(),
+                        "converting".to_string(),
+                        0.0,
+                    ));
                     false
                 }
             };
@@ -429,8 +475,14 @@ impl ASRTaskQueue {
 
             // Execute the task
             let result = Self::execute_task(
-                &db, &app_handle, &ffmpeg_path, &inner, inner.clone(), &entry,
-            ).await;
+                &db,
+                &app_handle,
+                &ffmpeg_path,
+                &inner,
+                inner.clone(),
+                &entry,
+            )
+            .await;
 
             if let Err(e) = result {
                 tracing::error!("ASR task {} failed: {}", task_id, e);
@@ -460,7 +512,16 @@ impl ASRTaskQueue {
 
         // --- Phase 1: Convert to WAV ---
         Self::update_running(inner, "converting", 0.0);
-        Self::emit_progress(app_handle, task_id, video_id, "converting", 0.0, Some("音频转换中..."), None, file_name);
+        Self::emit_progress(
+            app_handle,
+            task_id,
+            video_id,
+            "converting",
+            0.0,
+            Some("音频转换中..."),
+            None,
+            file_name,
+        );
 
         let ffmpeg = ffmpeg_path.read_safe().clone();
         // Build an atomic cancel flag so WAV conversion can be interrupted
@@ -489,7 +550,16 @@ impl ASRTaskQueue {
         .map_err(|e| {
             watcher.abort();
             let msg = format!("音频转换失败: {}", e);
-            Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+            Self::emit_progress(
+                app_handle,
+                task_id,
+                video_id,
+                "failed",
+                0.0,
+                None,
+                Some(&msg),
+                file_name,
+            );
             Self::spawn_mark_failed(db.clone(), task_id, &msg);
             msg
         })?;
@@ -506,12 +576,30 @@ impl ASRTaskQueue {
 
         // --- Phase 2: Build provider and submit ---
         Self::update_running(inner, "submitting", 0.0);
-        Self::emit_progress(app_handle, task_id, video_id, "submitting", 0.0, Some("提交识别任务..."), None, file_name);
+        Self::emit_progress(
+            app_handle,
+            task_id,
+            video_id,
+            "submitting",
+            0.0,
+            Some("提交识别任务..."),
+            None,
+            file_name,
+        );
 
         let provider = match Self::build_provider(db).await {
             Ok(p) => p,
             Err(e) => {
-                Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&e), file_name);
+                Self::emit_progress(
+                    app_handle,
+                    task_id,
+                    video_id,
+                    "failed",
+                    0.0,
+                    None,
+                    Some(&e),
+                    file_name,
+                );
                 Self::spawn_mark_failed(db.clone(), task_id, &e);
                 return Err(e);
             }
@@ -521,7 +609,16 @@ impl ASRTaskQueue {
             Ok(id) => id,
             Err(e) => {
                 let msg = format!("ASR 提交失败: {}", e);
-                Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+                Self::emit_progress(
+                    app_handle,
+                    task_id,
+                    video_id,
+                    "failed",
+                    0.0,
+                    None,
+                    Some(&msg),
+                    file_name,
+                );
                 Self::spawn_mark_failed(db.clone(), task_id, &msg);
                 return Err(msg);
             }
@@ -571,7 +668,16 @@ impl ASRTaskQueue {
                     retry_count += 1;
                     if retry_count > MAX_AUTO_RETRIES {
                         let msg = format!("轮询失败: {}", e);
-                        Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+                        Self::emit_progress(
+                            app_handle,
+                            task_id,
+                            video_id,
+                            "failed",
+                            0.0,
+                            None,
+                            Some(&msg),
+                            file_name,
+                        );
                         Self::spawn_mark_failed(db.clone(), task_id, &msg);
                         return Err(msg);
                     }
@@ -581,7 +687,16 @@ impl ASRTaskQueue {
 
             match status {
                 ASRTaskStatus::Pending => {
-                    Self::emit_progress(app_handle, task_id, video_id, "processing", 0.0, Some("等待识别引擎处理..."), None, file_name);
+                    Self::emit_progress(
+                        app_handle,
+                        task_id,
+                        video_id,
+                        "processing",
+                        0.0,
+                        Some("等待识别引擎处理..."),
+                        None,
+                        file_name,
+                    );
                 }
                 ASRTaskStatus::Processing { progress } => {
                     Self::update_running(inner, "processing", progress);
@@ -593,9 +708,20 @@ impl ASRTaskQueue {
                         ),
                     )
                     .await;
-                    Self::emit_progress(app_handle, task_id, video_id, "processing", progress, None, None, file_name);
+                    Self::emit_progress(
+                        app_handle,
+                        task_id,
+                        video_id,
+                        "processing",
+                        progress,
+                        None,
+                        None,
+                        file_name,
+                    );
                 }
-                ASRTaskStatus::Completed { segments: raw_segments } => {
+                ASRTaskStatus::Completed {
+                    segments: raw_segments,
+                } => {
                     let max_chars = service::read_setting_from_db(db, "asr_max_chars")
                         .await
                         .and_then(|v| v.parse::<usize>().ok())
@@ -606,7 +732,16 @@ impl ASRTaskQueue {
                         .await
                         .map_err(|e| {
                             let msg = format!("字幕导入失败: {}", e);
-                            Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+                            Self::emit_progress(
+                                app_handle,
+                                task_id,
+                                video_id,
+                                "failed",
+                                0.0,
+                                None,
+                                Some(&msg),
+                                file_name,
+                            );
                             Self::spawn_mark_failed(db.clone(), task_id, &msg);
                             msg
                         })?;
@@ -628,36 +763,89 @@ impl ASRTaskQueue {
                     .await;
 
                     Self::update_running(inner, "completed", 1.0);
-                    Self::emit_progress(app_handle, task_id, video_id, "completed", 1.0, Some(&format!("完成，共 {} 条字幕", count)), None, file_name);
-                    tracing::info!("ASR task {} completed: {} segments imported", task_id, count);
+                    Self::emit_progress(
+                        app_handle,
+                        task_id,
+                        video_id,
+                        "completed",
+                        1.0,
+                        Some(&format!("完成，共 {} 条字幕", count)),
+                        None,
+                        file_name,
+                    );
+                    tracing::info!(
+                        "ASR task {} completed: {} segments imported",
+                        task_id,
+                        count
+                    );
                     return Ok(());
                 }
                 ASRTaskStatus::RetryableError { error, .. } => {
                     retry_count += 1;
                     if retry_count > MAX_AUTO_RETRIES {
                         let msg = format!("重试次数已用尽: {}", error);
-                        Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&msg), file_name);
+                        Self::emit_progress(
+                            app_handle,
+                            task_id,
+                            video_id,
+                            "failed",
+                            0.0,
+                            None,
+                            Some(&msg),
+                            file_name,
+                        );
                         Self::spawn_mark_failed(db.clone(), task_id, &msg);
                         return Err(msg);
                     }
 
                     let delay = INITIAL_RETRY_DELAY_SECS * 2u64.pow(retry_count - 1);
-                    tracing::warn!("ASR task {} retryable error (attempt {}): {}. Retry in {}s", task_id, retry_count, error, delay);
+                    tracing::warn!(
+                        "ASR task {} retryable error (attempt {}): {}. Retry in {}s",
+                        task_id,
+                        retry_count,
+                        error,
+                        delay
+                    );
 
                     let _ = sea_orm::ConnectionTrait::execute_unprepared(
                         db.conn(),
-                        &format!("UPDATE asr_tasks SET retry_count = {} WHERE id = {}", retry_count, task_id),
+                        &format!(
+                            "UPDATE asr_tasks SET retry_count = {} WHERE id = {}",
+                            retry_count, task_id
+                        ),
                     )
                     .await;
 
-                    let cur_progress = inner.lock_safe().running.as_ref().map(|r| r.4).unwrap_or(0.0);
-                    Self::emit_progress(app_handle, task_id, video_id, "processing", cur_progress,
-                        Some(&format!("重试中（第 {} 次）...", retry_count)), None, file_name);
+                    let cur_progress = inner
+                        .lock_safe()
+                        .running
+                        .as_ref()
+                        .map(|r| r.4)
+                        .unwrap_or(0.0);
+                    Self::emit_progress(
+                        app_handle,
+                        task_id,
+                        video_id,
+                        "processing",
+                        cur_progress,
+                        Some(&format!("重试中（第 {} 次）...", retry_count)),
+                        None,
+                        file_name,
+                    );
 
                     tokio::time::sleep(tokio::time::Duration::from_secs(delay)).await;
                 }
                 ASRTaskStatus::PermanentError { error } => {
-                    Self::emit_progress(app_handle, task_id, video_id, "failed", 0.0, None, Some(&error), file_name);
+                    Self::emit_progress(
+                        app_handle,
+                        task_id,
+                        video_id,
+                        "failed",
+                        0.0,
+                        None,
+                        Some(&error),
+                        file_name,
+                    );
                     Self::spawn_mark_failed(db.clone(), task_id, &error);
                     return Err(error);
                 }
@@ -704,10 +892,22 @@ impl ASRTaskQueue {
     ) {
         let _ = sea_orm::ConnectionTrait::execute_unprepared(
             db.conn(),
-            &format!("UPDATE asr_tasks SET status = 'cancelled' WHERE id = {}", task_id),
+            &format!(
+                "UPDATE asr_tasks SET status = 'cancelled' WHERE id = {}",
+                task_id
+            ),
         )
         .await;
-        Self::emit_progress(app_handle, task_id, video_id, "cancelled", 0.0, Some("已取消"), None, file_name);
+        Self::emit_progress(
+            app_handle,
+            task_id,
+            video_id,
+            "cancelled",
+            0.0,
+            Some("已取消"),
+            None,
+            file_name,
+        );
         tracing::info!("ASR task {} cancelled", task_id);
     }
 

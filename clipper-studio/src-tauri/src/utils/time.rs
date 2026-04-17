@@ -178,13 +178,27 @@ mod tests {
     #[test]
     fn test_roundtrip_various() {
         let test_values = [
-            1i64, 999, 1_000, 59_999, 60_000, 90_000, 3_599_999,
-            3_600_000, 3_661_500, 86_399_999, 86_400_000, 360_000_000,
+            1i64,
+            999,
+            1_000,
+            59_999,
+            60_000,
+            90_000,
+            3_599_999,
+            3_600_000,
+            3_661_500,
+            86_399_999,
+            86_400_000,
+            360_000_000,
         ];
         for ms in test_values {
             let formatted = format_duration_ms(ms);
             let parsed = parse_duration_ms(&formatted).unwrap();
-            assert_eq!(ms, parsed, "roundtrip failed for {} (formatted as {})", ms, formatted);
+            assert_eq!(
+                ms, parsed,
+                "roundtrip failed for {} (formatted as {})",
+                ms, formatted
+            );
         }
     }
 }

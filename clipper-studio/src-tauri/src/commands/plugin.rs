@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use tauri::State;
 
-use crate::AppState;
 use crate::plugin::manager::PluginInfo;
+use crate::AppState;
 
 /// Simple base64 encoding (standard alphabet, no padding)
 fn base64_encode(input: &str) -> String {
@@ -74,7 +74,10 @@ async fn query_enabled_plugin_ids(state: &State<'_, AppState>) -> HashSet<String
         for row in &rows {
             if let Ok(key) = row.try_get::<String>("", "key") {
                 // key format: plugin:{id}:enabled
-                if let Some(id) = key.strip_prefix("plugin:").and_then(|s| s.strip_suffix(":enabled")) {
+                if let Some(id) = key
+                    .strip_prefix("plugin:")
+                    .and_then(|s| s.strip_suffix(":enabled"))
+                {
                     ids.insert(id.to_string());
                 }
             }
@@ -85,9 +88,7 @@ async fn query_enabled_plugin_ids(state: &State<'_, AppState>) -> HashSet<String
 
 /// Scan plugin directory and return all discovered plugins
 #[tauri::command]
-pub async fn scan_plugins(
-    state: State<'_, AppState>,
-) -> Result<Vec<PluginInfo>, String> {
+pub async fn scan_plugins(state: State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
     let plugin_dir = resolve_plugin_dir(&state).await;
     let _ = tokio::fs::create_dir_all(&plugin_dir).await;
     state.plugin_manager.scan(&plugin_dir).await;
@@ -97,9 +98,7 @@ pub async fn scan_plugins(
 
 /// List all discovered plugins (builtin + external)
 #[tauri::command]
-pub async fn list_plugins(
-    state: State<'_, AppState>,
-) -> Result<Vec<PluginInfo>, String> {
+pub async fn list_plugins(state: State<'_, AppState>) -> Result<Vec<PluginInfo>, String> {
     let enabled_ids = query_enabled_plugin_ids(&state).await;
 
     // Builtin plugins from registry
@@ -140,10 +139,7 @@ pub async fn list_plugins(
 
 /// Load a plugin (builtin or external)
 #[tauri::command]
-pub async fn load_plugin(
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
+pub async fn load_plugin(state: State<'_, AppState>, plugin_id: String) -> Result<(), String> {
     // Check if it's a builtin plugin
     if state.plugin_registry.is_builtin(&plugin_id) {
         // Load builtin plugin via registry (transport stored in registry's instances)
@@ -159,10 +155,7 @@ pub async fn load_plugin(
 
 /// Unload a plugin
 #[tauri::command]
-pub async fn unload_plugin(
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
+pub async fn unload_plugin(state: State<'_, AppState>, plugin_id: String) -> Result<(), String> {
     if state.plugin_registry.is_builtin(&plugin_id) {
         // Unload builtin plugin via registry
         state.plugin_registry.unload_builtin(&plugin_id).await?;
@@ -209,8 +202,13 @@ pub async fn call_plugin(
             Some(t) => t,
             None => {
                 tracing::info!("Builtin plugin '{}' not loaded, auto-loading...", plugin_id);
-                state.plugin_registry.load_builtin(&plugin_id).await
-                    .map_err(|e| format!("Failed to auto-load builtin plugin '{}': {}", plugin_id, e))?
+                state
+                    .plugin_registry
+                    .load_builtin(&plugin_id)
+                    .await
+                    .map_err(|e| {
+                        format!("Failed to auto-load builtin plugin '{}': {}", plugin_id, e)
+                    })?
             }
         };
 
@@ -243,7 +241,10 @@ async fn call_plugin_http(
         let mut map = serde_json::Map::new();
         if let Some(obj) = payload.as_object() {
             for (k, v) in obj {
-                if !["base_url", "api_key", "basic_user", "basic_pass"].iter().any(|x| x == k) {
+                if !["base_url", "api_key", "basic_user", "basic_pass"]
+                    .iter()
+                    .any(|x| x == k)
+                {
                     map.insert(k.clone(), v.clone());
                 }
             }
@@ -251,7 +252,11 @@ async fn call_plugin_http(
         serde_json::Value::Object(map)
     };
 
-    let url = format!("{}/{}", base_url.trim_end_matches('/'), action.trim_start_matches('/'));
+    let url = format!(
+        "{}/{}",
+        base_url.trim_end_matches('/'),
+        action.trim_start_matches('/')
+    );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -275,7 +280,10 @@ async fn call_plugin_http(
         }
     }
 
-    let resp = req.send().await.map_err(|e| format!("HTTP request failed: {}", e))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -299,7 +307,10 @@ pub async fn get_plugin_config(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT key, value FROM settings_kv WHERE key LIKE '{}%'", pattern),
+            format!(
+                "SELECT key, value FROM settings_kv WHERE key LIKE '{}%'",
+                pattern
+            ),
         ),
     )
     .await
@@ -365,10 +376,7 @@ pub async fn set_plugin_enabled(
     plugin_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let full_key = format!(
-        "plugin:{}:enabled",
-        plugin_id.replace('\'', "''")
-    );
+    let full_key = format!("plugin:{}:enabled", plugin_id.replace('\'', "''"));
 
     // Persist enabled state to settings_kv
     sea_orm::ConnectionTrait::execute_unprepared(
@@ -406,9 +414,7 @@ pub async fn set_plugin_enabled(
 /// Auto-load all plugins that are marked as enabled in settings_kv
 /// Called once during app startup
 #[tauri::command]
-pub async fn auto_load_plugins(
-    state: State<'_, AppState>,
-) -> Result<Vec<String>, String> {
+pub async fn auto_load_plugins(state: State<'_, AppState>) -> Result<Vec<String>, String> {
     // First scan external plugins so they are discovered
     let plugin_dir = resolve_plugin_dir(&state).await;
     let _ = tokio::fs::create_dir_all(&plugin_dir).await;
@@ -420,7 +426,11 @@ pub async fn auto_load_plugins(
 
     for plugin_id in &enabled_ids {
         let result = if state.plugin_registry.is_builtin(plugin_id) {
-            state.plugin_registry.load_builtin(plugin_id).await.map(|_| ())
+            state
+                .plugin_registry
+                .load_builtin(plugin_id)
+                .await
+                .map(|_| ())
         } else {
             state.plugin_manager.load(plugin_id).await
         };

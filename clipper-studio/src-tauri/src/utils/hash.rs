@@ -87,11 +87,7 @@ mod tests {
     #[tokio::test]
     async fn test_blake3_small_file_uses_full_hash() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        std::io::Write::write_all(
-            &mut tmp.as_file().try_clone().unwrap(),
-            b"hello world",
-        )
-        .unwrap();
+        std::io::Write::write_all(&mut tmp.as_file().try_clone().unwrap(), b"hello world").unwrap();
 
         let hash = blake3_file(tmp.path()).await.unwrap();
         let expected = blake3::hash(b"hello world").to_hex().to_string();
@@ -135,7 +131,10 @@ mod tests {
 
         let hash1 = blake3_file(tmp1.path()).await.unwrap();
         let hash2 = blake3_file(tmp2.path()).await.unwrap();
-        assert_ne!(hash1, hash2, "Different file sizes should produce different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Different file sizes should produce different hashes"
+        );
     }
 
     #[tokio::test]
@@ -155,7 +154,10 @@ mod tests {
 
         let hash1 = blake3_file(tmp1.path()).await.unwrap();
         let hash2 = blake3_file(tmp2.path()).await.unwrap();
-        assert_ne!(hash1, hash2, "Files differing within sample range should have different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Files differing within sample range should have different hashes"
+        );
     }
 
     #[tokio::test]

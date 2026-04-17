@@ -93,9 +93,7 @@ impl Default for FfmpegConfig {
 
 impl Default for WorkspacesConfig {
     fn default() -> Self {
-        Self {
-            recent: Vec::new(),
-        }
+        Self { recent: Vec::new() }
     }
 }
 
@@ -124,17 +122,11 @@ impl AppConfig {
                         return config;
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse config.toml, using defaults: {}",
-                            e
-                        );
+                        tracing::warn!("Failed to parse config.toml, using defaults: {}", e);
                     }
                 },
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to read config.toml, using defaults: {}",
-                        e
-                    );
+                    tracing::warn!("Failed to read config.toml, using defaults: {}", e);
                 }
             }
         }
@@ -210,7 +202,11 @@ mod tests {
     fn test_load_custom_config() {
         let tmp = TempDir::new().unwrap();
         let mut f = fs::File::create(tmp.path().join("config.toml")).unwrap();
-        writeln!(f, "[general]\nlog_level = \"debug\"\n\n[ffmpeg]\nffmpeg_path = \"/usr/local/bin/ffmpeg\"").unwrap();
+        writeln!(
+            f,
+            "[general]\nlog_level = \"debug\"\n\n[ffmpeg]\nffmpeg_path = \"/usr/local/bin/ffmpeg\""
+        )
+        .unwrap();
 
         let config = AppConfig::load(tmp.path());
         assert_eq!(config.general.log_level, "debug");
@@ -255,7 +251,10 @@ mod tests {
         config.add_recent_workspace("/path/c");
         // Re-add "a" — should move to front
         config.add_recent_workspace("/path/a");
-        assert_eq!(config.workspaces.recent, vec!["/path/a", "/path/c", "/path/b"]);
+        assert_eq!(
+            config.workspaces.recent,
+            vec!["/path/a", "/path/c", "/path/b"]
+        );
     }
 
     #[test]

@@ -7,8 +7,7 @@ use super::provider::{ASRSegment, RawASRSegment};
 
 /// Punctuation characters used as sentence boundaries
 const PUNCTUATION: &[char] = &[
-    '，', '。', '！', '？', '；', '：', '、', '…',
-    ',', '.', '!', '?', ';', ':',
+    '，', '。', '！', '？', '；', '：', '、', '…', ',', '.', '!', '?', ';', ':',
 ];
 
 /// A sentence span within a segment's text
@@ -254,9 +253,17 @@ mod tests {
         let text = "效率，兄弟们，这把图的就是一个呃两个字，效率，效率还是效，哎，快快快快！";
         let raw = vec![make_raw(0.0, 10.0, text, None)];
         let result = split_segments(&raw, 15);
-        assert!(result.len() >= 2, "Expected at least 2 segments, got {}", result.len());
+        assert!(
+            result.len() >= 2,
+            "Expected at least 2 segments, got {}",
+            result.len()
+        );
         // All text should be preserved
-        let combined: String = result.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("");
+        let combined: String = result
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join("");
         let original_no_space: String = text.chars().collect();
         assert_eq!(combined, original_no_space);
     }
@@ -264,12 +271,36 @@ mod tests {
     #[test]
     fn test_split_with_word_timestamps() {
         let words = vec![
-            ASRWord { text: "你".into(), start: 0.0, end: 0.2 },
-            ASRWord { text: "好".into(), start: 0.2, end: 0.4 },
-            ASRWord { text: "，".into(), start: 0.4, end: 0.5 },
-            ASRWord { text: "世".into(), start: 0.5, end: 0.7 },
-            ASRWord { text: "界".into(), start: 0.7, end: 0.9 },
-            ASRWord { text: "！".into(), start: 0.9, end: 1.0 },
+            ASRWord {
+                text: "你".into(),
+                start: 0.0,
+                end: 0.2,
+            },
+            ASRWord {
+                text: "好".into(),
+                start: 0.2,
+                end: 0.4,
+            },
+            ASRWord {
+                text: "，".into(),
+                start: 0.4,
+                end: 0.5,
+            },
+            ASRWord {
+                text: "世".into(),
+                start: 0.5,
+                end: 0.7,
+            },
+            ASRWord {
+                text: "界".into(),
+                start: 0.7,
+                end: 0.9,
+            },
+            ASRWord {
+                text: "！".into(),
+                start: 0.9,
+                end: 1.0,
+            },
         ];
         let raw = vec![make_raw(0.0, 1.0, "你好，世界！", Some(words))];
         let result = split_segments(&raw, 3);
@@ -288,7 +319,11 @@ mod tests {
         // Single sentence without punctuation should not be split
         let raw = vec![make_raw(0.0, 5.0, "这是一个没有标点符号的很长的句子", None)];
         let result = split_segments(&raw, 5);
-        assert_eq!(result.len(), 1, "Single sentence without punctuation should stay intact");
+        assert_eq!(
+            result.len(),
+            1,
+            "Single sentence without punctuation should stay intact"
+        );
     }
 
     #[test]

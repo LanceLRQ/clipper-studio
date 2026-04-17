@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, State};
 
-use crate::AppState;
 use crate::core::clipper::{self, BurnOptions, PresetOptions};
 use crate::core::queue::{TaskProgressEvent, TaskStatus};
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateClipRequest {
@@ -179,11 +179,18 @@ pub async fn create_clip(
     };
 
     // Insert clip_task into database
-    let preset_id_sql = req.preset_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
-    let batch_id_sql = req.batch_id.as_ref()
+    let preset_id_sql = req
+        .preset_id
+        .map(|id| id.to_string())
+        .unwrap_or("NULL".to_string());
+    let batch_id_sql = req
+        .batch_id
+        .as_ref()
         .map(|s| format!("'{}'", s.replace('\'', "''")))
         .unwrap_or("NULL".to_string());
-    let batch_title_sql = req.batch_title.as_ref()
+    let batch_title_sql = req
+        .batch_title
+        .as_ref()
         .map(|s| format!("'{}'", s.replace('\'', "''")))
         .unwrap_or("NULL".to_string());
     // Store user-given clip name as task title (for display), not the full filename
@@ -398,10 +405,7 @@ pub async fn create_clip(
 
 /// Cancel a clip task
 #[tauri::command]
-pub async fn cancel_clip(
-    state: State<'_, AppState>,
-    task_id: i64,
-) -> Result<bool, String> {
+pub async fn cancel_clip(state: State<'_, AppState>, task_id: i64) -> Result<bool, String> {
     let cancelled = state.task_queue.cancel(task_id).await;
     if cancelled {
         let _ = update_task_status(&state.db, task_id, "cancelled", None).await;
@@ -411,9 +415,7 @@ pub async fn cancel_clip(
 
 /// Check if there are any active clip tasks (pending or processing)
 #[tauri::command]
-pub async fn has_active_clip_tasks(
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub async fn has_active_clip_tasks(state: State<'_, AppState>) -> Result<bool, String> {
     Ok(state.task_queue.has_active_tasks().await)
 }
 
@@ -462,7 +464,10 @@ async fn retry_task_internal(
     let video_id: i64 = row.try_get("", "video_id").unwrap_or(0);
     let start_ms: i64 = row.try_get("", "start_time_ms").unwrap_or(0);
     let end_ms: i64 = row.try_get("", "end_time_ms").unwrap_or(0);
-    let title: Option<String> = row.try_get("", "title").ok().filter(|s: &String| !s.is_empty());
+    let title: Option<String> = row
+        .try_get("", "title")
+        .ok()
+        .filter(|s: &String| !s.is_empty());
     let preset_id: Option<i64> = row.try_get("", "preset_id").ok();
     let batch_id: Option<String> = row.try_get("", "batch_id").ok();
     let batch_title: Option<String> = row.try_get("", "batch_title").ok();
@@ -580,7 +585,8 @@ async fn retry_task_internal(
     let video_path_clone = video_path.clone();
     let output_clone = output.clone();
     let app = app_handle.clone();
-    let output_filename = output.file_name()
+    let output_filename = output
+        .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_default();
     let clip_title_for_notify = output_filename
@@ -823,10 +829,16 @@ pub async fn list_clip_tasks(
         conditions.push(format!("v.workspace_id = {}", ws_id));
     }
     if let Some(ref from) = date_from {
-        conditions.push(format!("t.created_at >= '{} 00:00:00'", from.replace('\'', "")));
+        conditions.push(format!(
+            "t.created_at >= '{} 00:00:00'",
+            from.replace('\'', "")
+        ));
     }
     if let Some(ref to) = date_to {
-        conditions.push(format!("t.created_at <= '{} 23:59:59'", to.replace('\'', "")));
+        conditions.push(format!(
+            "t.created_at <= '{} 23:59:59'",
+            to.replace('\'', "")
+        ));
     }
     let where_clause = if conditions.is_empty() {
         String::new()
@@ -861,7 +873,9 @@ pub async fn list_clip_tasks(
             status: row.try_get("", "status").unwrap_or_default(),
             progress: row.try_get("", "progress").unwrap_or(0.0),
             error_message: row.try_get("", "error_message").ok(),
-            output_path: row.try_get::<Option<String>>("", "output_path").unwrap_or(None),
+            output_path: row
+                .try_get::<Option<String>>("", "output_path")
+                .unwrap_or(None),
             created_at: row.try_get("", "created_at").unwrap_or_default(),
             completed_at: row.try_get("", "completed_at").ok(),
             batch_id: row.try_get("", "batch_id").ok(),
@@ -874,9 +888,7 @@ pub async fn list_clip_tasks(
 
 /// List encoding presets
 #[tauri::command]
-pub async fn list_presets(
-    state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn list_presets(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let rows = sea_orm::ConnectionTrait::query_all(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -913,7 +925,10 @@ async fn load_preset(
         conn,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT options FROM encoding_presets WHERE id = {}", preset_id),
+            format!(
+                "SELECT options FROM encoding_presets WHERE id = {}",
+                preset_id
+            ),
         ),
     )
     .await
@@ -1010,10 +1025,7 @@ fn build_clip_name(
                     let am = (day_s % 3600) / 60;
                     // Simple day offset (not calendar-accurate, good enough for display)
                     let ad = d + extra_days;
-                    format!(
-                        "{:02}{:02}{:02}-{:02}{:02}",
-                        y % 100, mo, ad, ah, am
-                    )
+                    format!("{:02}{:02}{:02}-{:02}{:02}", y % 100, mo, ad, ah, am)
                 };
                 parts.push(fmt_absolute(start_ms));
                 parts.push(fmt_absolute(end_ms));
@@ -1028,7 +1040,11 @@ fn build_clip_name(
             let s = total_s % 60;
             format!("{:02}{:02}{:02}", h, m, s)
         };
-        parts.push(format!("{}-{}", fmt_relative(start_ms), fmt_relative(end_ms)));
+        parts.push(format!(
+            "{}-{}",
+            fmt_relative(start_ms),
+            fmt_relative(end_ms)
+        ));
     }
 
     if parts.is_empty() {
@@ -1158,10 +1174,12 @@ async fn build_batch_output_dir(
     .ok()
     .flatten();
 
-    let date_part: String = time_row.as_ref()
+    let date_part: String = time_row
+        .as_ref()
         .and_then(|r| r.try_get("", "date_part").ok())
         .unwrap_or_else(|| "00000000".to_string());
-    let time_part: String = time_row.as_ref()
+    let time_part: String = time_row
+        .as_ref()
         .and_then(|r| r.try_get("", "time_part").ok())
         .unwrap_or_else(|| "0000".to_string());
 
@@ -1232,16 +1250,20 @@ pub async fn create_batch_clips(
     req: CreateBatchClipsRequest,
 ) -> Result<Vec<ClipTaskInfo>, String> {
     // Generate batch ID and title
-    let batch_id = format!("batch-{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis());
+    let batch_id = format!(
+        "batch-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
 
     let batch_title = build_batch_title(state.db.conn(), req.video_id).await;
 
     // Build batch subfolder: determine base output dir, then create subfolder
     let ffprobe_path = state.ffprobe_path.read_safe().clone();
-    let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &ffprobe_path).await?;
+    let batch_output_dir =
+        build_batch_output_dir(state.db.conn(), req.video_id, &ffprobe_path).await?;
     // Ensure the subfolder exists
     tokio::fs::create_dir_all(&batch_output_dir)
         .await
@@ -1326,8 +1348,14 @@ async fn prepare_burn_options(
             match crate::core::danmaku::parse_bilibili_xml(&xml_path).await {
                 Ok(result) => {
                     // Filter to clip range and shift timestamps
-                    let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time * 1000.0) as i64;
-                    let filtered = crate::core::danmaku::filter_danmaku_by_range(&result.items, start_ms, end_ms, scroll_ms);
+                    let scroll_ms = (crate::core::danmaku::DanmakuAssOptions::default().scroll_time
+                        * 1000.0) as i64;
+                    let filtered = crate::core::danmaku::filter_danmaku_by_range(
+                        &result.items,
+                        start_ms,
+                        end_ms,
+                        scroll_ms,
+                    );
                     if !filtered.is_empty() {
                         // Write filtered XML for DanmakuFactory
                         let tmp_xml = tmp_dir.join(format!("clipper_{}_danmaku.xml", task_id));
@@ -1339,7 +1367,9 @@ async fn prepare_burn_options(
                                 &tmp_xml,
                                 &tmp_ass,
                                 &options,
-                            ).await {
+                            )
+                            .await
+                            {
                                 Ok(()) => {
                                     danmaku_ass_path = Some(tmp_ass);
                                     tracing::info!("Generated danmaku ASS for task {}", task_id);
@@ -1366,10 +1396,8 @@ async fn prepare_burn_options(
     // Generate subtitle ASS
     if include_subtitle {
         let tmp_ass = tmp_dir.join(format!("clipper_{}_subtitle.ass", task_id));
-        match crate::core::subtitle::export_ass_for_clip(
-            db, video_id, start_ms, end_ms, &tmp_ass,
-        )
-        .await
+        match crate::core::subtitle::export_ass_for_clip(db, video_id, start_ms, end_ms, &tmp_ass)
+            .await
         {
             Ok(true) => {
                 subtitle_ass_path = Some(tmp_ass);
@@ -1419,7 +1447,10 @@ pub async fn check_video_burn_availability(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT file_path, has_subtitle FROM videos WHERE id = {}", video_id),
+            format!(
+                "SELECT file_path, has_subtitle FROM videos WHERE id = {}",
+                video_id
+            ),
         ),
     )
     .await
@@ -1460,7 +1491,10 @@ pub async fn auto_segment(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT window_ms, data FROM audio_envelopes WHERE video_id = {}", video_id),
+            format!(
+                "SELECT window_ms, data FROM audio_envelopes WHERE video_id = {}",
+                video_id
+            ),
         ),
     )
     .await
@@ -1522,8 +1556,12 @@ async fn build_batch_title(conn: &sea_orm::DatabaseConnection, video_id: i64) ->
     .ok()
     .flatten();
 
-    let streamer_name: Option<String> = row.as_ref().and_then(|r| r.try_get("", "streamer_name").ok());
-    let stream_title: Option<String> = row.as_ref().and_then(|r| r.try_get("", "stream_title").ok());
+    let streamer_name: Option<String> = row
+        .as_ref()
+        .and_then(|r| r.try_get("", "streamer_name").ok());
+    let stream_title: Option<String> = row
+        .as_ref()
+        .and_then(|r| r.try_get("", "stream_title").ok());
 
     // Get local time from SQLite
     let now_str = query_local_datetime_cn(conn).await;
@@ -1643,7 +1681,10 @@ pub async fn delete_clip_task(
             state.db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
-                format!("SELECT output_path FROM clip_outputs WHERE clip_task_id = {}", task_id),
+                format!(
+                    "SELECT output_path FROM clip_outputs WHERE clip_task_id = {}",
+                    task_id
+                ),
             ),
         )
         .await
@@ -1666,7 +1707,11 @@ pub async fn delete_clip_task(
     .await
     .map_err(|e| e.to_string())?;
 
-    tracing::info!("Clip task deleted: id={}, delete_files={}", task_id, delete_files.unwrap_or(false));
+    tracing::info!(
+        "Clip task deleted: id={}, delete_files={}",
+        task_id,
+        delete_files.unwrap_or(false)
+    );
     Ok(())
 }
 
@@ -1739,7 +1784,13 @@ pub async fn delete_clip_batch(
     .map_err(|e| e.to_string())?;
 
     let deleted = result.rows_affected();
-    tracing::info!("Batch '{}' deleted: {} tasks, {} skipped, delete_files={}", batch_id, deleted, active, delete_files.unwrap_or(false));
+    tracing::info!(
+        "Batch '{}' deleted: {} tasks, {} skipped, delete_files={}",
+        batch_id,
+        deleted,
+        active,
+        delete_files.unwrap_or(false)
+    );
 
     Ok(DeleteBatchResult {
         deleted,
@@ -1760,7 +1811,8 @@ pub async fn clear_finished_clip_tasks(
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
                 "SELECT output_path FROM clip_outputs WHERE clip_task_id IN (\
-                 SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))".to_string(),
+                 SELECT id FROM clip_tasks WHERE status NOT IN ('pending','processing'))"
+                    .to_string(),
             ),
         )
         .await
@@ -1786,7 +1838,11 @@ pub async fn clear_finished_clip_tasks(
     .map_err(|e| e.to_string())?;
 
     let deleted = result.rows_affected();
-    tracing::info!("Cleared {} finished clip tasks, delete_files={}", deleted, delete_files.unwrap_or(false));
+    tracing::info!(
+        "Cleared {} finished clip tasks, delete_files={}",
+        deleted,
+        delete_files.unwrap_or(false)
+    );
     Ok(deleted)
 }
 

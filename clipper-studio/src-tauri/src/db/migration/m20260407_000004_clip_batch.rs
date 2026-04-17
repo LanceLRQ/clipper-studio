@@ -14,15 +14,11 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
 
         // Add batch columns to clip_tasks for grouping batch clips
-        db.execute_unprepared(
-            "ALTER TABLE clip_tasks ADD COLUMN batch_id TEXT",
-        )
-        .await?;
+        db.execute_unprepared("ALTER TABLE clip_tasks ADD COLUMN batch_id TEXT")
+            .await?;
 
-        db.execute_unprepared(
-            "ALTER TABLE clip_tasks ADD COLUMN batch_title TEXT",
-        )
-        .await?;
+        db.execute_unprepared("ALTER TABLE clip_tasks ADD COLUMN batch_title TEXT")
+            .await?;
 
         db.execute_unprepared(
             "CREATE INDEX IF NOT EXISTS idx_clip_tasks_batch ON clip_tasks(batch_id)",

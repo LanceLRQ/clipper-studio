@@ -6,8 +6,8 @@ pub mod deps;
 pub mod shell;
 pub mod utils;
 
-pub mod plugin;
 pub mod asr;
+pub mod plugin;
 
 // Phase 5+
 // pub mod llm;
@@ -27,10 +27,10 @@ use crate::config::AppConfig;
 use crate::core::media_server::MediaServer;
 use crate::core::queue::TaskQueue;
 use crate::core::watcher::WorkspaceWatcher;
+use crate::db::Database;
 use crate::deps::DependencyManager;
 use crate::plugin::manager::PluginManager;
 use crate::plugin::registry::PluginRegistry;
-use crate::db::Database;
 use crate::utils::ffmpeg;
 
 /// Application shared state, injected via Tauri State

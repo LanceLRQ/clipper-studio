@@ -51,10 +51,7 @@ impl PluginManager {
         let mut results = Vec::new();
 
         if !plugin_dir.exists() {
-            tracing::debug!(
-                "Plugin directory does not exist: {}",
-                plugin_dir.display()
-            );
+            tracing::debug!("Plugin directory does not exist: {}", plugin_dir.display());
             return results;
         }
 
@@ -164,7 +161,10 @@ impl PluginManager {
                 Box::new(StdioTransport::new(full_path, meta.dir.clone()))
             }
             Transport::Builtin => {
-                return Err("Builtin plugins are not loaded via this method. Use PluginRegistry.".to_string());
+                return Err(
+                    "Builtin plugins are not loaded via this method. Use PluginRegistry."
+                        .to_string(),
+                );
             }
         };
 
@@ -212,7 +212,10 @@ impl PluginManager {
             meta.status = PluginStatus::Loaded;
         } else {
             // Plugin not in our list yet - this shouldn't happen for external plugins
-            tracing::warn!("Plugin {} not found in registry when registering transport", plugin_id);
+            tracing::warn!(
+                "Plugin {} not found in registry when registering transport",
+                plugin_id
+            );
         }
 
         self.transports
@@ -317,10 +320,7 @@ impl PluginManager {
     }
 
     /// Get a transport by plugin_id (for custom HTTP calls)
-    pub async fn get_transport(
-        &self,
-        plugin_id: &str,
-    ) -> Option<Arc<Box<dyn PluginTransport>>> {
+    pub async fn get_transport(&self, plugin_id: &str) -> Option<Arc<Box<dyn PluginTransport>>> {
         self.transports.read().await.get(plugin_id).cloned()
     }
 
@@ -366,7 +366,11 @@ impl PluginManager {
     }
 
     /// List plugins by type
-    pub async fn list_by_type(&self, plugin_type: &PluginType, enabled_ids: &std::collections::HashSet<String>) -> Vec<PluginInfo> {
+    pub async fn list_by_type(
+        &self,
+        plugin_type: &PluginType,
+        enabled_ids: &std::collections::HashSet<String>,
+    ) -> Vec<PluginInfo> {
         let all = self.list(enabled_ids).await;
         let type_str = format!("{:?}", plugin_type);
         all.into_iter()

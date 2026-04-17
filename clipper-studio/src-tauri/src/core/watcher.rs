@@ -51,12 +51,8 @@ impl WorkspaceWatcher {
 
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let mut debouncer = new_debouncer(
-            Duration::from_secs(3),
-            None,
-            tx,
-        )
-        .map_err(|e| format!("Failed to create watcher: {}", e))?;
+        let mut debouncer = new_debouncer(Duration::from_secs(3), None, tx)
+            .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
         debouncer
             .watch(path, RecursiveMode::Recursive)
@@ -69,11 +65,7 @@ impl WorkspaceWatcher {
         });
 
         watchers.insert(workspace_id, debouncer);
-        tracing::info!(
-            "Started watching workspace {} at {}",
-            workspace_id,
-            ws_path
-        );
+        tracing::info!("Started watching workspace {} at {}", workspace_id, ws_path);
 
         Ok(())
     }
@@ -125,8 +117,7 @@ fn process_events(
 
                     for path in &event.event.paths {
                         if is_video_file(path) {
-                            new_video_files
-                                .push(path.to_string_lossy().to_string());
+                            new_video_files.push(path.to_string_lossy().to_string());
                         }
                     }
                 }

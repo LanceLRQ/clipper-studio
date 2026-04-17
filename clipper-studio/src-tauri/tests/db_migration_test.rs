@@ -5,9 +5,7 @@ async fn setup_test_db() -> Database {
     let db = Database::connect(std::path::Path::new(":memory:"))
         .await
         .expect("failed to connect to in-memory SQLite");
-    db.run_migrations()
-        .await
-        .expect("failed to run migrations");
+    db.run_migrations().await.expect("failed to run migrations");
     db
 }
 
@@ -127,7 +125,8 @@ async fn test_migration_inserts_builtin_presets() {
         .filter_map(|r| r.try_get::<String>("", "name").ok())
         .collect();
 
-    assert!(names.contains(&"\u{6781}\u{901f}\u{ff08}\u{65e0}\u{91cd}\u{7f16}\u{7801}\u{ff09}".to_string()));
+    assert!(names
+        .contains(&"\u{6781}\u{901f}\u{ff08}\u{65e0}\u{91cd}\u{7f16}\u{7801}\u{ff09}".to_string()));
     assert!(names.contains(&"\u{6807}\u{51c6}\u{8d28}\u{91cf}".to_string()));
 }
 

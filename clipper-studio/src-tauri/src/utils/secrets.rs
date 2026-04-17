@@ -21,9 +21,12 @@ const OBFUSCATE_PREFIX: &str = "b64:";
 pub fn is_secret_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     const KEYWORDS: &[&str] = &[
-        "api_key", "apikey", "api-key",
+        "api_key",
+        "apikey",
+        "api-key",
         "token",
-        "password", "passwd",
+        "password",
+        "passwd",
         "secret",
         "basic_pass",
     ];

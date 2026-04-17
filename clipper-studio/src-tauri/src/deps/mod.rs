@@ -210,7 +210,11 @@ impl DependencyManager {
             };
 
             // Download
-            let client = self.http_client.read().map_err(|e| format!("Failed to acquire HTTP client: {}", e))?.clone();
+            let client = self
+                .http_client
+                .read()
+                .map_err(|e| format!("Failed to acquire HTTP client: {}", e))?
+                .clone();
             let download_result = installer::download_file(
                 &client,
                 source.url,
@@ -344,7 +348,10 @@ impl DependencyManager {
         if let Some(def) = get_def(dep_id) {
             if let Some(py_source) = registry::get_python_source_for_current_platform(def) {
                 #[cfg(target_os = "windows")]
-                let path = dep_dir.join("venv").join("Scripts").join(format!("{}.exe", py_source.entry_point));
+                let path = dep_dir
+                    .join("venv")
+                    .join("Scripts")
+                    .join(format!("{}.exe", py_source.entry_point));
                 #[cfg(not(target_os = "windows"))]
                 let path = dep_dir.join("venv").join("bin").join(py_source.entry_point);
                 return if path.exists() { Some(path) } else { None };
@@ -412,20 +419,25 @@ impl DependencyManager {
         app_handle: &AppHandle,
     ) -> Result<(), String> {
         // Detect python3
-        let python3 = installer::detect_python3()
-            .ok_or_else(|| "未找到 Python3。请安装 Python 3（brew install python3 或从 python.org 下载）".to_string())?;
+        let python3 = installer::detect_python3().ok_or_else(|| {
+            "未找到 Python3。请安装 Python 3（brew install python3 或从 python.org 下载）"
+                .to_string()
+        })?;
 
         let dep_dir = self.deps_dir.join(dep_id);
         let venv_dir = dep_dir.join("venv");
 
         // Update status
-        self.update_registry(dep_id, InstalledDepState {
-            status: DepStatus::Installing,
-            version: None,
-            installed_at: None,
-            path: None,
-            error_message: None,
-        });
+        self.update_registry(
+            dep_id,
+            InstalledDepState {
+                status: DepStatus::Installing,
+                version: None,
+                installed_at: None,
+                path: None,
+                error_message: None,
+            },
+        );
 
         // Clean existing
         if dep_dir.exists() {
@@ -436,7 +448,12 @@ impl DependencyManager {
 
         // Install via venv + pip
         if let Err(e) = installer::install_python_package(
-            &python3, &venv_dir, py_source.pip_package, proxy_url, dep_id, app_handle,
+            &python3,
+            &venv_dir,
+            py_source.pip_package,
+            proxy_url,
+            dep_id,
+            app_handle,
         ) {
             self.set_error(dep_id, &e);
             let _ = std::fs::remove_dir_all(&dep_dir);
@@ -464,13 +481,16 @@ impl DependencyManager {
 
         // Success
         let now = chrono_now();
-        self.update_registry(dep_id, InstalledDepState {
-            status: DepStatus::Installed,
-            version: version.clone(),
-            installed_at: Some(now),
-            path: Some(dep_dir.to_string_lossy().to_string()),
-            error_message: None,
-        });
+        self.update_registry(
+            dep_id,
+            InstalledDepState {
+                status: DepStatus::Installed,
+                version: version.clone(),
+                installed_at: Some(now),
+                path: Some(dep_dir.to_string_lossy().to_string()),
+                error_message: None,
+            },
+        );
 
         let _ = app_handle.emit(
             "dep:install-complete",
@@ -616,10 +636,7 @@ pub fn config_overrides_from_app_config(config: &crate::config::AppConfig) -> Co
 
 /// Extract filename from URL
 fn url_to_filename(url: &str) -> String {
-    url.rsplit('/')
-        .next()
-        .unwrap_or("download.zip")
-        .to_string()
+    url.rsplit('/').next().unwrap_or("download.zip").to_string()
 }
 
 /// Get current timestamp as ISO string (without chrono crate)
@@ -630,4 +647,3 @@ fn chrono_now() -> String {
         .unwrap_or_default();
     format!("{}s", duration.as_secs())
 }
-

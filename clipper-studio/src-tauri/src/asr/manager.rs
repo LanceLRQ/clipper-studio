@@ -147,7 +147,10 @@ impl ASRServiceManager {
             let setup_hint = if !has_portable_python && !has_main {
                 Some("请先运行 setup.bat 安装 Python 环境和依赖".to_string())
             } else if !has_portable_python {
-                Some("未找到便携 Python 环境（bin/python/python.exe 或 lib/），请运行 setup.bat".to_string())
+                Some(
+                    "未找到便携 Python 环境（bin/python/python.exe 或 lib/），请运行 setup.bat"
+                        .to_string(),
+                )
             } else if !has_main {
                 Some("未找到入口文件 app/main.py，请检查服务目录".to_string())
             } else {
@@ -301,7 +304,12 @@ impl ASRServiceManager {
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
             // Create a new process group so we can kill the entire tree
-            unsafe { cmd.pre_exec(|| { libc::setpgid(0, 0); Ok(()) }); }
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setpgid(0, 0);
+                    Ok(())
+                });
+            }
             cmd.spawn()
                 .map_err(|e| format!("启动 ASR 服务失败：{}", e))?
         };
@@ -360,7 +368,12 @@ impl ASRServiceManager {
                 data_dir,
                 use_gpu,
                 force_platform,
-            } => (image.clone(), data_dir.clone(), *use_gpu, force_platform.clone()),
+            } => (
+                image.clone(),
+                data_dir.clone(),
+                *use_gpu,
+                force_platform.clone(),
+            ),
             _ => return Err("launch_mode 不是 Docker".to_string()),
         };
 
@@ -428,7 +441,10 @@ impl ASRServiceManager {
             run_args.push(a);
         }
 
-        tracing::info!("Starting ASR service (docker): docker {}", run_args.join(" "));
+        tracing::info!(
+            "Starting ASR service (docker): docker {}",
+            run_args.join(" ")
+        );
 
         let out = tokio::process::Command::new("docker")
             .args(&run_args)
@@ -478,7 +494,16 @@ impl ASRServiceManager {
     async fn run_native_health_loop(self: Arc<Self>, health_url: String, app_h: AppHandle) {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        for var in &["HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy", "NO_PROXY", "no_proxy"] {
+        for var in &[
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ] {
             if let Ok(val) = std::env::var(var) {
                 tracing::warn!("[ASR] Env proxy detected: {}={}", var, val);
             }
@@ -529,7 +554,8 @@ impl ASRServiceManager {
             if slow_mode {
                 slow_mode_attempts += 1;
                 if slow_mode_attempts >= MAX_SLOW_MODE_ATTEMPTS {
-                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。".to_string();
+                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。"
+                        .to_string();
                     tracing::error!("{}", msg);
                     self.set_status(ASRServiceStatus::Error { message: msg });
                     self.emit_status(&app_h);
@@ -537,7 +563,11 @@ impl ASRServiceManager {
                 }
             }
 
-            let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };
+            let interval_secs = if slow_mode {
+                15
+            } else {
+                HEALTH_CHECK_INTERVAL_SECS
+            };
             tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
         }
     }
@@ -598,7 +628,8 @@ impl ASRServiceManager {
             if slow_mode {
                 slow_mode_attempts += 1;
                 if slow_mode_attempts >= MAX_SLOW_MODE_ATTEMPTS {
-                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。".to_string();
+                    let msg = "ASR 服务在 30 分钟内仍未就绪，已自动停止。请检查日志排查问题。"
+                        .to_string();
                     tracing::error!("{}", msg);
                     self.set_status(ASRServiceStatus::Error { message: msg });
                     self.emit_status(&app_h);
@@ -606,19 +637,18 @@ impl ASRServiceManager {
                 }
             }
 
-            let interval_secs = if slow_mode { 15 } else { HEALTH_CHECK_INTERVAL_SECS };
+            let interval_secs = if slow_mode {
+                15
+            } else {
+                HEALTH_CHECK_INTERVAL_SECS
+            };
             tokio::time::sleep(std::time::Duration::from_secs(interval_secs)).await;
         }
     }
 
     /// Perform a single /v1/health probe and update state on success.
     /// Returns true when the service is healthy.
-    async fn probe_health(
-        &self,
-        client: &reqwest::Client,
-        health_url: &str,
-        attempt: u32,
-    ) -> bool {
+    async fn probe_health(&self, client: &reqwest::Client, health_url: &str, attempt: u32) -> bool {
         match client.get(health_url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
@@ -802,11 +832,7 @@ impl ASRServiceManager {
         self.set_status(ASRServiceStatus::Stopping);
 
         // Take a snapshot of current mode
-        let mode = self
-            .current_mode
-            .lock()
-            .ok()
-            .and_then(|m| m.clone());
+        let mode = self.current_mode.lock().ok().and_then(|m| m.clone());
 
         match mode {
             Some(ASRLaunchMode::Docker { .. }) => {
@@ -831,10 +857,14 @@ impl ASRServiceManager {
                     #[cfg(not(target_os = "windows"))]
                     {
                         if let Some(pid) = child.id() {
-                            unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
+                            unsafe {
+                                libc::kill(-(pid as i32), libc::SIGTERM);
+                            }
                             tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                             if child.try_wait().ok().flatten().is_none() {
-                                unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+                                unsafe {
+                                    libc::kill(-(pid as i32), libc::SIGKILL);
+                                }
                             }
                         }
                     }
@@ -856,7 +886,9 @@ impl ASRServiceManager {
                     );
                     #[cfg(not(target_os = "windows"))]
                     {
-                        unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGTERM);
+                        }
                     }
                     #[cfg(target_os = "windows")]
                     {
@@ -973,14 +1005,12 @@ impl ASRServiceManager {
 
     /// Get combined status info for frontend
     pub fn status_info(&self) -> ASRServiceStatusInfo {
-        let launch_kind = self
-            .current_mode
-            .lock()
-            .ok()
-            .and_then(|m| m.as_ref().map(|mode| match mode {
+        let launch_kind = self.current_mode.lock().ok().and_then(|m| {
+            m.as_ref().map(|mode| match mode {
                 ASRLaunchMode::Native { .. } => "native",
                 ASRLaunchMode::Docker { .. } => "docker",
-            }));
+            })
+        });
         ASRServiceStatusInfo {
             status: self.status(),
             health_info: self.health_info(),

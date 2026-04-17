@@ -133,8 +133,7 @@ pub async fn export_srt_for_clip(
         ));
     }
 
-    std::fs::write(output_path, &out)
-        .map_err(|e| format!("Failed to write SRT file: {}", e))?;
+    std::fs::write(output_path, &out).map_err(|e| format!("Failed to write SRT file: {}", e))?;
 
     tracing::info!(
         "Exported {} subtitle segments as SRT for clip [{}-{}ms] to {}",

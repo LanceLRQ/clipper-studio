@@ -98,7 +98,9 @@ impl PluginInstance for BilibiliRecorderPlugin {
 
         match action {
             "status" => {
-                let rooms_res = self.call_bilibili(&config, "/api/room", serde_json::Value::Null).await;
+                let rooms_res = self
+                    .call_bilibili(&config, "/api/room", serde_json::Value::Null)
+                    .await;
                 match rooms_res {
                     Ok(rooms) => Ok(serde_json::json!({
                         "connected": true,
@@ -168,34 +170,46 @@ impl BilibiliRecorderPlugin {
             health_endpoint: None,
             port: None,
             config_schema: [
-                ("api_url".to_string(), serde_json::json!({
-                    "type": "string",
-                    "default": "http://127.0.0.1:2007",
-                    "label": "API 地址",
-                    "description": "录播姬 HTTP API 地址（只填根地址，不要带 /api 路径）",
-                    "order": 1
-                })),
-                ("api_key".to_string(), serde_json::json!({
-                    "type": "string",
-                    "default": "",
-                    "label": "API 密钥",
-                    "description": "录播姬 API 密钥（可选，留空不使用）",
-                    "order": 2
-                })),
-                ("basic_user".to_string(), serde_json::json!({
-                    "type": "string",
-                    "default": "",
-                    "label": "认证用户名",
-                    "description": "HTTP Basic 认证用户名（留空关闭）",
-                    "order": 3
-                })),
-                ("basic_pass".to_string(), serde_json::json!({
-                    "type": "string",
-                    "default": "",
-                    "label": "认证密码",
-                    "description": "HTTP Basic 认证密码",
-                    "order": 4
-                })),
+                (
+                    "api_url".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "default": "http://127.0.0.1:2007",
+                        "label": "API 地址",
+                        "description": "录播姬 HTTP API 地址（只填根地址，不要带 /api 路径）",
+                        "order": 1
+                    }),
+                ),
+                (
+                    "api_key".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "default": "",
+                        "label": "API 密钥",
+                        "description": "录播姬 API 密钥（可选，留空不使用）",
+                        "order": 2
+                    }),
+                ),
+                (
+                    "basic_user".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "default": "",
+                        "label": "认证用户名",
+                        "description": "HTTP Basic 认证用户名（留空关闭）",
+                        "order": 3
+                    }),
+                ),
+                (
+                    "basic_pass".to_string(),
+                    serde_json::json!({
+                        "type": "string",
+                        "default": "",
+                        "label": "认证密码",
+                        "description": "HTTP Basic 认证密码",
+                        "order": 4
+                    }),
+                ),
             ]
             .into_iter()
             .collect(),
@@ -232,16 +246,16 @@ impl BilibiliRecorderPlugin {
         endpoint: &str,
         _payload: serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
-        let url = format!(
-            "{}{}",
-            config.api_url.trim_end_matches('/'),
-            endpoint
-        );
+        let url = format!("{}{}", config.api_url.trim_end_matches('/'), endpoint);
 
         tracing::info!(
             "[BilibiliRecorder] Request: GET {} | basic_user={:?} | has_api_key={}",
             url,
-            if config.basic_user.is_empty() { "(empty)" } else { &config.basic_user },
+            if config.basic_user.is_empty() {
+                "(empty)"
+            } else {
+                &config.basic_user
+            },
             !config.api_key.is_empty(),
         );
 
@@ -255,10 +269,8 @@ impl BilibiliRecorderPlugin {
 
         // Add Basic Auth
         if !config.basic_user.is_empty() {
-            let credentials = Self::base64_encode(&format!(
-                "{}:{}",
-                config.basic_user, config.basic_pass
-            ));
+            let credentials =
+                Self::base64_encode(&format!("{}:{}", config.basic_user, config.basic_pass));
             tracing::info!(
                 "[BilibiliRecorder] Authorization: Basic {} (raw: {}:***)",
                 &credentials,
@@ -298,8 +310,7 @@ impl BilibiliRecorderPlugin {
 
     /// Simple base64 encoding (standard alphabet, no padding)
     fn base64_encode(input: &str) -> String {
-        const ALPHABET: &[u8] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let bytes = input.as_bytes();
         let mut result = String::new();
         for chunk in bytes.chunks(3) {
@@ -309,21 +320,15 @@ impl BilibiliRecorderPlugin {
                 _ => [chunk[0], chunk[1], chunk[2]],
             };
             result.push(ALPHABET[(b[0] >> 2) as usize] as char);
-            result.push(
-                ALPHABET[((b[0] & 0x03) << 4 | b[1] >> 4) as usize] as char,
-            );
+            result.push(ALPHABET[((b[0] & 0x03) << 4 | b[1] >> 4) as usize] as char);
             match chunk.len() {
                 1 => result.push_str("=="),
                 2 => {
-                    result.push(
-                        ALPHABET[((b[1] & 0x0f) << 2 | b[2] >> 6) as usize] as char,
-                    );
+                    result.push(ALPHABET[((b[1] & 0x0f) << 2 | b[2] >> 6) as usize] as char);
                     result.push('=');
                 }
                 _ => {
-                    result.push(
-                        ALPHABET[((b[1] & 0x0f) << 2 | b[2] >> 6) as usize] as char,
-                    );
+                    result.push(ALPHABET[((b[1] & 0x0f) << 2 | b[2] >> 6) as usize] as char);
                     result.push(ALPHABET[(b[2] & 0x3f) as usize] as char);
                 }
             }

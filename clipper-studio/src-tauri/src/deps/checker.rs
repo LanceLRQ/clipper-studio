@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use super::registry::{self, DependencyDef, DepType, VersionCheck};
+use super::registry::{self, DepType, DependencyDef, VersionCheck};
 
 /// Check if a binary exists at the given path
 pub fn binary_exists(dep_dir: &Path, binary_name: &str) -> bool {
@@ -47,10 +47,7 @@ pub fn detect_version(dep_dir: &Path, check: &VersionCheck) -> Option<String> {
         return None;
     }
 
-    let output = Command::new(&binary_path)
-        .args(check.args)
-        .output()
-        .ok()?;
+    let output = Command::new(&binary_path).args(check.args).output().ok()?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -145,7 +142,10 @@ fn validate_python_package(
     let script = venv_bin.join(py_source.entry_point);
 
     if !script.exists() {
-        return Err(format!("Entry point '{}' not found in venv", py_source.entry_point));
+        return Err(format!(
+            "Entry point '{}' not found in venv",
+            py_source.entry_point
+        ));
     }
 
     // Version check: use the entry_point as the binary

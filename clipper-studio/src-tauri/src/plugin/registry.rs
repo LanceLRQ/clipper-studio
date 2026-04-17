@@ -28,7 +28,8 @@ impl PluginRegistry {
 
     /// Register a builtin plugin builder
     pub fn register<T: PluginBuilder + 'static>(&mut self, builder: T) {
-        self.builders.insert(builder.id().to_string(), Arc::new(builder));
+        self.builders
+            .insert(builder.id().to_string(), Arc::new(builder));
     }
 
     /// Get all registered builtin plugin manifests (for listing)
@@ -37,14 +38,12 @@ impl PluginRegistry {
     }
 
     /// Get all registered builtin plugins with their current status
-    pub fn list_builtin_with_status(&self, enabled_ids: &std::collections::HashSet<String>) -> Vec<BuiltinPluginInfo> {
-        let loaded: std::collections::HashSet<String> = self
-            .instances
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect();
+    pub fn list_builtin_with_status(
+        &self,
+        enabled_ids: &std::collections::HashSet<String>,
+    ) -> Vec<BuiltinPluginInfo> {
+        let loaded: std::collections::HashSet<String> =
+            self.instances.read().unwrap().keys().cloned().collect();
 
         self.builders
             .values()
@@ -63,7 +62,10 @@ impl PluginRegistry {
     }
 
     /// Load a builtin plugin and create its transport
-    pub async fn load_builtin(&self, plugin_id: &str) -> Result<Arc<Box<dyn PluginTransport>>, String> {
+    pub async fn load_builtin(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Arc<Box<dyn PluginTransport>>, String> {
         let builder = self
             .builders
             .get(plugin_id)
@@ -147,7 +149,11 @@ impl BuiltinPluginInfo {
             plugin_type: format!("{:?}", m.plugin_type),
             transport: format!("{:?}", m.transport),
             managed: m.managed,
-            status: if is_loaded { "loaded".to_string() } else { "discovered".to_string() },
+            status: if is_loaded {
+                "loaded".to_string()
+            } else {
+                "discovered".to_string()
+            },
             description: m.description.clone(),
             has_config: !m.config_schema.is_empty(),
             enabled: is_enabled,

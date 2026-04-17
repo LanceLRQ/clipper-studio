@@ -33,11 +33,7 @@ impl ServiceManager {
     }
 
     /// Start the service process
-    pub async fn start(
-        &self,
-        startup: &PlatformCommand,
-        working_dir: &Path,
-    ) -> Result<(), String> {
+    pub async fn start(&self, startup: &PlatformCommand, working_dir: &Path) -> Result<(), String> {
         // Check if already running
         if self.is_running() {
             return Ok(());

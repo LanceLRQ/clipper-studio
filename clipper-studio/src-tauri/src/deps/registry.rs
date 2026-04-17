@@ -216,7 +216,10 @@ pub fn get_sources_for_current_platform(def: &DependencyDef) -> Vec<&DownloadSou
         Some(p) => p,
         None => return Vec::new(),
     };
-    def.sources.iter().filter(|s| s.platform == platform).collect()
+    def.sources
+        .iter()
+        .filter(|s| s.platform == platform)
+        .collect()
 }
 
 /// Get Python package source for the current platform (if any)
@@ -297,8 +300,8 @@ impl LocalRegistry {
     /// Save to file
     pub fn save(&self, deps_dir: &Path) -> Result<(), String> {
         let path = deps_dir.join("registry.json");
-        let content =
-            serde_json::to_string_pretty(self).map_err(|e| format!("JSON serialize error: {}", e))?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("JSON serialize error: {}", e))?;
         std::fs::write(&path, content).map_err(|e| format!("Write registry.json failed: {}", e))?;
         Ok(())
     }
@@ -492,7 +495,10 @@ mod tests {
                 error_message: None,
             },
         );
-        assert_eq!(registry.get("ffmpeg").unwrap().status, DepStatus::Downloading);
+        assert_eq!(
+            registry.get("ffmpeg").unwrap().status,
+            DepStatus::Downloading
+        );
 
         registry.set(
             "ffmpeg",

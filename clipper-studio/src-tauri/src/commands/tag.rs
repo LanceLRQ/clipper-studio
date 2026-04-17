@@ -130,11 +130,7 @@ pub async fn update_tag(
         return Err("没有需要更新的字段".to_string());
     }
 
-    let sql = format!(
-        "UPDATE tags SET {} WHERE id = {}",
-        sets.join(", "),
-        req.id,
-    );
+    let sql = format!("UPDATE tags SET {} WHERE id = {}", sets.join(", "), req.id,);
 
     sea_orm::ConnectionTrait::execute_unprepared(state.db.conn(), &sql)
         .await

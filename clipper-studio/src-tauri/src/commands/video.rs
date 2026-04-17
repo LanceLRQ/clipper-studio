@@ -2,9 +2,9 @@ use crate::utils::locks::RwLockExt;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::AppState;
 use crate::utils::ffmpeg;
 use crate::utils::hash;
+use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct VideoInfo {
@@ -133,7 +133,10 @@ pub async fn import_video(
             state.db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
-                format!("SELECT id, file_path FROM videos WHERE file_hash = '{}'", fh),
+                format!(
+                    "SELECT id, file_path FROM videos WHERE file_hash = '{}'",
+                    fh
+                ),
             ),
         )
         .await
@@ -153,9 +156,17 @@ pub async fn import_video(
     let video_codec = probe_result.as_ref().and_then(|p| p.video_codec.clone());
     let _audio_codec = probe_result.as_ref().and_then(|p| p.audio_codec.clone());
 
-    let ws_id_sql = req.workspace_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
-    let hash_sql = file_hash.as_deref().map(|h| format!("'{}'", h)).unwrap_or("NULL".to_string());
-    let dur_sql = duration_ms.map(|d| d.to_string()).unwrap_or("NULL".to_string());
+    let ws_id_sql = req
+        .workspace_id
+        .map(|id| id.to_string())
+        .unwrap_or("NULL".to_string());
+    let hash_sql = file_hash
+        .as_deref()
+        .map(|h| format!("'{}'", h))
+        .unwrap_or("NULL".to_string());
+    let dur_sql = duration_ms
+        .map(|d| d.to_string())
+        .unwrap_or("NULL".to_string());
     let w_sql = width.map(|w| w.to_string()).unwrap_or("NULL".to_string());
     let h_sql = height.map(|h| h.to_string()).unwrap_or("NULL".to_string());
 
@@ -257,7 +268,11 @@ pub async fn list_videos(
 
     // Tag filter: videos that have ALL specified tags
     let tag_join = if let Some(ref tag_ids) = req.tag_ids {
-        let ids: Vec<String> = tag_ids.iter().filter(|id| **id > 0).map(|id| id.to_string()).collect();
+        let ids: Vec<String> = tag_ids
+            .iter()
+            .filter(|id| **id > 0)
+            .map(|id| id.to_string())
+            .collect();
         if !ids.is_empty() {
             let id_list = ids.join(",");
             let count = ids.len();
@@ -331,10 +346,7 @@ pub async fn list_videos(
 
 /// Get a single video by ID
 #[tauri::command]
-pub async fn get_video(
-    state: State<'_, AppState>,
-    video_id: i64,
-) -> Result<VideoInfo, String> {
+pub async fn get_video(state: State<'_, AppState>, video_id: i64) -> Result<VideoInfo, String> {
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -356,10 +368,7 @@ pub async fn get_video(
 
 /// Delete a video record (does not delete file on disk)
 #[tauri::command]
-pub async fn delete_video(
-    state: State<'_, AppState>,
-    video_id: i64,
-) -> Result<(), String> {
+pub async fn delete_video(state: State<'_, AppState>, video_id: i64) -> Result<(), String> {
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!("DELETE FROM videos WHERE id = {}", video_id),
@@ -496,7 +505,10 @@ pub async fn list_sessions(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT COUNT(*) as cnt FROM recording_sessions s {}", where_clause),
+            format!(
+                "SELECT COUNT(*) as cnt FROM recording_sessions s {}",
+                where_clause
+            ),
         ),
     )
     .await
@@ -732,7 +744,11 @@ pub async fn extract_envelope(
     .await
     .map_err(|e| e.to_string())?;
 
-    tracing::info!("Audio envelope extracted: video_id={}, {} points", video_id, envelope.values.len());
+    tracing::info!(
+        "Audio envelope extracted: video_id={}, {} points",
+        video_id,
+        envelope.values.len()
+    );
 
     Ok(envelope.values)
 }
@@ -747,7 +763,10 @@ pub async fn get_envelope(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT data FROM audio_envelopes WHERE video_id = {}", video_id),
+            format!(
+                "SELECT data FROM audio_envelopes WHERE video_id = {}",
+                video_id
+            ),
         ),
     )
     .await
@@ -792,10 +811,7 @@ pub async fn check_video_integrity(
 
 /// Remux a video file to MP4 (stream copy, fixes most FLV issues)
 #[tauri::command]
-pub async fn remux_video(
-    state: State<'_, AppState>,
-    video_id: i64,
-) -> Result<String, String> {
+pub async fn remux_video(state: State<'_, AppState>, video_id: i64) -> Result<String, String> {
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(

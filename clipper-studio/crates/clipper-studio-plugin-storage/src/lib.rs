@@ -6,7 +6,9 @@
 //! - Windows: `net use`
 
 use async_trait::async_trait;
-use clipper_studio_plugin_core::{PluginError, PluginInstance, PluginManifest, PluginType, Transport};
+use clipper_studio_plugin_core::{
+    PluginError, PluginInstance, PluginManifest, PluginType, Transport,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
@@ -125,14 +127,26 @@ impl StorageProviderPlugin {
         let params = MountParams {
             server: req.server.clone(),
             share: req.share.clone(),
-            username: if req.username.is_empty() { None } else { Some(req.username.clone()) },
-            password: if req.password.is_empty() { None } else { Some(req.password.clone()) },
-            mount_point: if req.mount_point.is_empty() { None } else { Some(req.mount_point.clone()) },
+            username: if req.username.is_empty() {
+                None
+            } else {
+                Some(req.username.clone())
+            },
+            password: if req.password.is_empty() {
+                None
+            } else {
+                Some(req.password.clone())
+            },
+            mount_point: if req.mount_point.is_empty() {
+                None
+            } else {
+                Some(req.mount_point.clone())
+            },
         };
 
-        let info = MountBackend::mount(params).await.map_err(|e| {
-            PluginError::Transport(format!("Mount failed: {}", e))
-        })?;
+        let info = MountBackend::mount(params)
+            .await
+            .map_err(|e| PluginError::Transport(format!("Mount failed: {}", e)))?;
 
         tracing::info!(
             "SMB share mounted: //{}/{} -> {}",
@@ -158,9 +172,9 @@ impl StorageProviderPlugin {
             .ok_or_else(|| PluginError::InvalidPayload("mount_point is required".to_string()))?
             .to_string();
 
-        MountBackend::unmount(&mount_point).await.map_err(|e| {
-            PluginError::Transport(format!("Unmount failed: {}", e))
-        })?;
+        MountBackend::unmount(&mount_point)
+            .await
+            .map_err(|e| PluginError::Transport(format!("Unmount failed: {}", e)))?;
 
         // Remove from tracked mounts
         let mut mounts = self.active_mounts.write().await;

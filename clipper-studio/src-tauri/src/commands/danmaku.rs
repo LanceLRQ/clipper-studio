@@ -114,12 +114,7 @@ pub async fn convert_danmaku_to_ass(
         }
     }
 
-    danmaku::convert_to_ass(
-        &danmaku_factory_path,
-        &xml_path,
-        &ass_path,
-        &opts,
-    ).await?;
+    danmaku::convert_to_ass(&danmaku_factory_path, &xml_path, &ass_path, &opts).await?;
 
     let output = ass_path.to_string_lossy().to_string();
     tracing::info!("Danmaku ASS generated: {}", output);

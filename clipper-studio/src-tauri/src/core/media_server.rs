@@ -158,10 +158,7 @@ async fn serve_file(
         Err(_) => false,
     };
     if !allowed {
-        tracing::warn!(
-            "[media_server] 拒绝访问越界路径: {}",
-            canonical.display()
-        );
+        tracing::warn!("[media_server] 拒绝访问越界路径: {}", canonical.display());
         return (StatusCode::FORBIDDEN, "Path not allowed").into_response();
     }
 

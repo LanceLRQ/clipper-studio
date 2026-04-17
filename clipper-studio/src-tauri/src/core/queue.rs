@@ -31,7 +31,13 @@ pub struct TaskProgressEvent {
 pub struct TaskDefinition {
     pub task_id: TaskId,
     pub cancel_token: CancellationToken,
-    pub handler: Box<dyn FnOnce(CancellationToken, TaskProgressSender) -> tokio::task::JoinHandle<Result<(), String>> + Send>,
+    pub handler: Box<
+        dyn FnOnce(
+                CancellationToken,
+                TaskProgressSender,
+            ) -> tokio::task::JoinHandle<Result<(), String>>
+            + Send,
+    >,
 }
 
 /// Sender for progress updates from within a task

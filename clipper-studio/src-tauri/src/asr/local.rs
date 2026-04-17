@@ -1,7 +1,7 @@
-use std::path::Path;
 use std::error::Error;
+use std::path::Path;
 
-use super::provider::{ASRHealthInfo, ASRProvider, ASRWord, ASRTaskStatus, RawASRSegment};
+use super::provider::{ASRHealthInfo, ASRProvider, ASRTaskStatus, ASRWord, RawASRSegment};
 
 /// Local ASR provider using qwen3-asr-service (HTTP API on localhost)
 pub struct LocalASRProvider {
@@ -97,10 +97,7 @@ impl ASRProvider for LocalASRProvider {
         match status {
             "pending" => Ok(ASRTaskStatus::Pending),
             "processing" => {
-                let progress = json
-                    .get("progress")
-                    .and_then(|p| p.as_f64())
-                    .unwrap_or(0.0);
+                let progress = json.get("progress").and_then(|p| p.as_f64()).unwrap_or(0.0);
                 Ok(ASRTaskStatus::Processing { progress })
             }
             "completed" => {
@@ -193,7 +190,10 @@ impl ASRProvider for LocalASRProvider {
                 .and_then(|s| s.as_str())
                 .unwrap_or("unknown")
                 .to_string(),
-            device: json.get("device").and_then(|s| s.as_str()).map(|s| s.to_string()),
+            device: json
+                .get("device")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string()),
             model_size: json
                 .get("model_size")
                 .and_then(|s| s.as_str())
@@ -217,20 +217,17 @@ fn parse_segments(json: &serde_json::Value) -> Vec<RawASRSegment> {
                     let start = seg.get("start")?.as_f64()?;
                     let end = seg.get("end")?.as_f64()?;
                     let text = seg.get("text")?.as_str()?.to_string();
-                    let words = seg
-                        .get("words")
-                        .and_then(|w| w.as_array())
-                        .map(|warr| {
-                            warr.iter()
-                                .filter_map(|w| {
-                                    Some(ASRWord {
-                                        text: w.get("text")?.as_str()?.to_string(),
-                                        start: w.get("start")?.as_f64()?,
-                                        end: w.get("end")?.as_f64()?,
-                                    })
+                    let words = seg.get("words").and_then(|w| w.as_array()).map(|warr| {
+                        warr.iter()
+                            .filter_map(|w| {
+                                Some(ASRWord {
+                                    text: w.get("text")?.as_str()?.to_string(),
+                                    start: w.get("start")?.as_f64()?,
+                                    end: w.get("end")?.as_f64()?,
                                 })
-                                .collect()
-                        });
+                            })
+                            .collect()
+                    });
                     Some(RawASRSegment {
                         start,
                         end,

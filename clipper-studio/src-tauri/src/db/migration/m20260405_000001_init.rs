@@ -25,8 +25,9 @@ impl MigrationTrait for Migration {
                 auto_scan      BOOLEAN NOT NULL DEFAULT 1,
                 created_at     TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== streamers ==========
         db.execute_unprepared(
@@ -38,8 +39,9 @@ impl MigrationTrait for Migration {
                 avatar_url   TEXT,
                 adapter_meta TEXT,
                 UNIQUE(platform, room_id)
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== recording_sessions ==========
         db.execute_unprepared(
@@ -53,8 +55,9 @@ impl MigrationTrait for Migration {
                 file_count   INTEGER NOT NULL DEFAULT 0,
                 adapter_meta TEXT,
                 created_at   TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== videos ==========
         db.execute_unprepared(
@@ -79,21 +82,26 @@ impl MigrationTrait for Migration {
                 adapter_meta  TEXT,
                 created_at    TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         db.execute_unprepared(
-            "CREATE INDEX IF NOT EXISTS idx_videos_workspace ON videos(workspace_id)"
-        ).await?;
+            "CREATE INDEX IF NOT EXISTS idx_videos_workspace ON videos(workspace_id)",
+        )
+        .await?;
         db.execute_unprepared(
-            "CREATE INDEX IF NOT EXISTS idx_videos_streamer ON videos(streamer_id)"
-        ).await?;
+            "CREATE INDEX IF NOT EXISTS idx_videos_streamer ON videos(streamer_id)",
+        )
+        .await?;
         db.execute_unprepared(
-            "CREATE INDEX IF NOT EXISTS idx_videos_session ON videos(session_id)"
-        ).await?;
+            "CREATE INDEX IF NOT EXISTS idx_videos_session ON videos(session_id)",
+        )
+        .await?;
         db.execute_unprepared(
-            "CREATE INDEX IF NOT EXISTS idx_videos_recorded ON videos(recorded_at)"
-        ).await?;
+            "CREATE INDEX IF NOT EXISTS idx_videos_recorded ON videos(recorded_at)",
+        )
+        .await?;
 
         // ========== audio_envelopes ==========
         db.execute_unprepared(
@@ -102,8 +110,9 @@ impl MigrationTrait for Migration {
                 window_ms   INTEGER NOT NULL,
                 data        BLOB NOT NULL,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== clip_tasks ==========
         db.execute_unprepared(
@@ -119,8 +128,9 @@ impl MigrationTrait for Migration {
                 error_message   TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now')),
                 completed_at    TEXT
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== clip_outputs ==========
         db.execute_unprepared(
@@ -135,8 +145,9 @@ impl MigrationTrait for Migration {
                 include_danmaku BOOLEAN NOT NULL DEFAULT 0,
                 include_subtitle BOOLEAN NOT NULL DEFAULT 0,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== encoding_presets ==========
         db.execute_unprepared(
@@ -149,8 +160,9 @@ impl MigrationTrait for Migration {
                 is_builtin  BOOLEAN NOT NULL DEFAULT 0,
                 sort_order  INTEGER NOT NULL DEFAULT 0,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== app_settings ==========
         db.execute_unprepared(
@@ -168,8 +180,9 @@ impl MigrationTrait for Migration {
                 llm_default_model   TEXT,
                 default_output_format TEXT NOT NULL DEFAULT 'mp4',
                 updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== settings_kv ==========
         db.execute_unprepared(
@@ -177,8 +190,9 @@ impl MigrationTrait for Migration {
                 key         TEXT PRIMARY KEY,
                 value       TEXT NOT NULL,
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== tags ==========
         db.execute_unprepared(
@@ -186,8 +200,9 @@ impl MigrationTrait for Migration {
                 id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 name  TEXT NOT NULL UNIQUE,
                 color TEXT
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== video_tags ==========
         db.execute_unprepared(
@@ -195,8 +210,9 @@ impl MigrationTrait for Migration {
                 video_id INTEGER NOT NULL REFERENCES videos(id),
                 tag_id   INTEGER NOT NULL REFERENCES tags(id),
                 PRIMARY KEY (video_id, tag_id)
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         // ========== analytics_events ==========
         db.execute_unprepared(
@@ -205,17 +221,18 @@ impl MigrationTrait for Migration {
                 event       TEXT NOT NULL,
                 properties  TEXT,
                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-            )"
-        ).await?;
+            )",
+        )
+        .await?;
 
         db.execute_unprepared(
-            "CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event, created_at)"
-        ).await?;
+            "CREATE INDEX IF NOT EXISTS idx_analytics_event ON analytics_events(event, created_at)",
+        )
+        .await?;
 
         // ========== Insert default settings ==========
-        db.execute_unprepared(
-            "INSERT OR IGNORE INTO app_settings (id) VALUES (1)"
-        ).await?;
+        db.execute_unprepared("INSERT OR IGNORE INTO app_settings (id) VALUES (1)")
+            .await?;
 
         // ========== Insert builtin encoding presets ==========
         db.execute_unprepared(
@@ -235,13 +252,24 @@ impl MigrationTrait for Migration {
         let db = manager.get_connection();
 
         let tables = [
-            "analytics_events", "video_tags", "tags", "settings_kv", "app_settings",
-            "encoding_presets", "clip_outputs", "clip_tasks", "audio_envelopes",
-            "videos", "recording_sessions", "streamers", "workspaces",
+            "analytics_events",
+            "video_tags",
+            "tags",
+            "settings_kv",
+            "app_settings",
+            "encoding_presets",
+            "clip_outputs",
+            "clip_tasks",
+            "audio_envelopes",
+            "videos",
+            "recording_sessions",
+            "streamers",
+            "workspaces",
         ];
 
         for table in tables {
-            db.execute_unprepared(&format!("DROP TABLE IF EXISTS {}", table)).await?;
+            db.execute_unprepared(&format!("DROP TABLE IF EXISTS {}", table))
+                .await?;
         }
 
         Ok(())

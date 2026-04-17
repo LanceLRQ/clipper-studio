@@ -1,7 +1,7 @@
+use regex::Regex;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use serde::Serialize;
-use regex::Regex;
 
 /// Metadata extracted from a recording file name
 #[derive(Debug, Clone, Serialize)]
@@ -49,8 +49,7 @@ pub struct RecordingSession {
 
 /// Default file name regex for BililiveRecorder:
 /// `录制-{room_id}-{yyyyMMdd}-{HHmmss}-{ms}-{title}.{ext}`
-const BILIREC_FILE_REGEX: &str =
-    r"^录制-(\d+)-(\d{8})-(\d{6})-(\d{3})-(.+)\.(flv|mp4|ts)$";
+const BILIREC_FILE_REGEX: &str = r"^录制-(\d+)-(\d{8})-(\d{6})-(\d{3})-(.+)\.(flv|mp4|ts)$";
 
 /// Default directory regex: `{room_id}-{name}`
 const BILIREC_DIR_REGEX: &str = r"^(\d+)-(.+)$";
@@ -118,10 +117,7 @@ pub fn scan_bililive_recorder(dir: &Path) -> WorkspaceScanResult {
 
             // Parse directory name for streamer info
             let (room_id, streamer_name) = if let Some(caps) = dir_re.captures(&dir_name) {
-                (
-                    Some(caps[1].to_string()),
-                    Some(caps[2].to_string()),
-                )
+                (Some(caps[1].to_string()), Some(caps[2].to_string()))
             } else {
                 (None, None)
             };
@@ -195,8 +191,12 @@ fn scan_file(
         // Format: yyyy-MM-dd HH:mm:ss
         let recorded_at = format!(
             "{}-{}-{} {}:{}:{}",
-            &date[0..4], &date[4..6], &date[6..8],
-            &time[0..2], &time[2..4], &time[4..6],
+            &date[0..4],
+            &date[4..6],
+            &date[6..8],
+            &time[0..2],
+            &time[2..4],
+            &time[4..6],
         );
 
         (Some(rid), Some(recorded_at), Some(title))
@@ -259,19 +259,15 @@ pub fn group_into_sessions(
         let mut last_end_secs: Option<i64> = None;
 
         for file in &room_files {
-            let curr_start_secs = file
-                .recorded_at
-                .as_deref()
-                .and_then(parse_timestamp_secs);
+            let curr_start_secs = file.recorded_at.as_deref().and_then(parse_timestamp_secs);
 
-            let should_split = if let (Some(prev_end), Some(curr_start)) =
-                (last_end_secs, curr_start_secs)
-            {
-                // Gap = next file start - previous file end
-                (curr_start - prev_end) > gap_threshold_secs
-            } else {
-                !current_session.is_empty() && curr_start_secs.is_some()
-            };
+            let should_split =
+                if let (Some(prev_end), Some(curr_start)) = (last_end_secs, curr_start_secs) {
+                    // Gap = next file start - previous file end
+                    (curr_start - prev_end) > gap_threshold_secs
+                } else {
+                    !current_session.is_empty() && curr_start_secs.is_some()
+                };
 
             if should_split && !current_session.is_empty() {
                 sessions.push(build_session(&room_id, &current_session));
@@ -365,11 +361,7 @@ fn scan_dir_recursive(dir: &Path, results: &mut Vec<RecordingFileMeta>) {
 mod tests {
     use super::*;
 
-    fn make_meta(
-        room_id: &str,
-        recorded_at: &str,
-        duration_ms: Option<i64>,
-    ) -> RecordingFileMeta {
+    fn make_meta(room_id: &str, recorded_at: &str, duration_ms: Option<i64>) -> RecordingFileMeta {
         RecordingFileMeta {
             room_id: Some(room_id.to_string()),
             streamer_name: Some("test_streamer".to_string()),
@@ -389,13 +381,11 @@ mod tests {
     fn test_parse_timestamp_secs_valid() {
         let secs = parse_timestamp_secs("2026-04-05 20:30:00");
         assert!(secs.is_some());
-        let expected = chrono::NaiveDateTime::parse_from_str(
-            "2026-04-05 20:30:00",
-            "%Y-%m-%d %H:%M:%S",
-        )
-        .unwrap()
-        .and_utc()
-        .timestamp();
+        let expected =
+            chrono::NaiveDateTime::parse_from_str("2026-04-05 20:30:00", "%Y-%m-%d %H:%M:%S")
+                .unwrap()
+                .and_utc()
+                .timestamp();
         assert_eq!(secs.unwrap(), expected);
     }
 

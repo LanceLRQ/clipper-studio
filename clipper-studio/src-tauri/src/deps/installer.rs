@@ -17,7 +17,13 @@ pub struct InstallProgress {
 }
 
 /// Emit install progress event (public for use by DependencyManager)
-pub fn emit_progress_static(app_handle: &AppHandle, dep_id: &str, phase: &str, progress: f64, message: &str) {
+pub fn emit_progress_static(
+    app_handle: &AppHandle,
+    dep_id: &str,
+    phase: &str,
+    progress: f64,
+    message: &str,
+) {
     emit_progress(app_handle, dep_id, phase, progress, message);
 }
 
@@ -76,8 +82,8 @@ pub async fn download_file(
             .map_err(|e| format!("Failed to create download directory: {}", e))?;
     }
 
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| format!("Failed to create file: {}", e))?;
 
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
@@ -93,12 +99,7 @@ pub async fn download_file(
             .map(|total| downloaded as f64 / total as f64)
             .unwrap_or(0.0);
 
-        let msg = format!(
-            "{} — {} / {}",
-            label,
-            format_bytes(downloaded),
-            total_str
-        );
+        let msg = format!("{} — {} / {}", label, format_bytes(downloaded), total_str);
         emit_progress(app_handle, dep_id, "downloading", progress, &msg);
     }
 
@@ -174,8 +175,7 @@ fn extract_zip(
             );
 
             if let Some(parent) = out_path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("Create dir error: {}", e))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("Create dir error: {}", e))?;
             }
 
             let mut out_file = std::fs::File::create(&out_path)
@@ -248,8 +248,7 @@ fn extract_tar_gz(
 ) -> Result<(), String> {
     let file =
         std::fs::File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
-    let decoder =
-        flate2::read::GzDecoder::new(file);
+    let decoder = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(decoder);
 
     let entries = archive
@@ -401,7 +400,9 @@ pub fn detect_python3() -> Option<String> {
                     // Resolve the full path via `which`
                     if let Ok(which_out) = std::process::Command::new("which").arg(name).output() {
                         if which_out.status.success() {
-                            let path = String::from_utf8_lossy(&which_out.stdout).trim().to_string();
+                            let path = String::from_utf8_lossy(&which_out.stdout)
+                                .trim()
+                                .to_string();
                             if !path.is_empty() {
                                 tracing::info!("Detected Python3: {} ({})", path, ver_str.trim());
                                 return Some(path);
@@ -427,8 +428,18 @@ pub fn install_python_package(
     app_handle: &AppHandle,
 ) -> Result<(), String> {
     // Step 1: Create venv
-    emit_progress(app_handle, dep_id, "installing", 0.1, "正在创建 Python 虚拟环境...");
-    tracing::info!("Creating venv at {} with {}", venv_dir.display(), python3_path);
+    emit_progress(
+        app_handle,
+        dep_id,
+        "installing",
+        0.1,
+        "正在创建 Python 虚拟环境...",
+    );
+    tracing::info!(
+        "Creating venv at {} with {}",
+        venv_dir.display(),
+        python3_path
+    );
 
     let output = std::process::Command::new(python3_path)
         .args(["-m", "venv", &venv_dir.to_string_lossy()])
@@ -441,7 +452,13 @@ pub fn install_python_package(
     }
 
     // Step 2: pip install
-    emit_progress(app_handle, dep_id, "installing", 0.3, &format!("正在安装 {}...", pip_package));
+    emit_progress(
+        app_handle,
+        dep_id,
+        "installing",
+        0.3,
+        &format!("正在安装 {}...", pip_package),
+    );
 
     #[cfg(target_os = "windows")]
     let pip_path = venv_dir.join("Scripts").join("pip.exe");
@@ -452,7 +469,12 @@ pub fn install_python_package(
         return Err(format!("pip not found at {}", pip_path.display()));
     }
 
-    let mut pip_args = vec!["install".to_string(), pip_package.to_string(), "--progress-bar".to_string(), "off".to_string()];
+    let mut pip_args = vec![
+        "install".to_string(),
+        pip_package.to_string(),
+        "--progress-bar".to_string(),
+        "off".to_string(),
+    ];
     if let Some(proxy) = proxy_url {
         if !proxy.is_empty() {
             pip_args.push("--proxy".to_string());

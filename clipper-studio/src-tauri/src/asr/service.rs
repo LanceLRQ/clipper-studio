@@ -152,10 +152,7 @@ pub async fn submit_asr(
     let wav_path = convert_to_asr_wav(ffmpeg_path, Path::new(&file_path), None).await?;
 
     // Submit to ASR provider (use WAV file)
-    let remote_task_id = match provider
-        .submit(&wav_path, Some(lang))
-        .await
-    {
+    let remote_task_id = match provider.submit(&wav_path, Some(lang)).await {
         Ok(id) => {
             // Clean up temp WAV after successful submit
             let _ = tokio::fs::remove_file(&wav_path).await;
@@ -251,7 +248,9 @@ pub async fn poll_asr(
             )
             .await;
         }
-        ASRTaskStatus::Completed { segments: raw_segments } => {
+        ASRTaskStatus::Completed {
+            segments: raw_segments,
+        } => {
             // Read max_chars setting for subtitle splitting
             let max_chars = read_setting_from_db(db, "asr_max_chars")
                 .await
@@ -262,7 +261,9 @@ pub async fn poll_asr(
             let segments = splitter::split_segments(&raw_segments, max_chars);
 
             // Import segments into subtitle_segments
-            let language: String = task_row.try_get("", "language").unwrap_or("Chinese".to_string());
+            let language: String = task_row
+                .try_get("", "language")
+                .unwrap_or("Chinese".to_string());
             let count = import_segments(db, video_id, &language, &segments).await?;
 
             let _ = sea_orm::ConnectionTrait::execute_unprepared(
@@ -278,10 +279,7 @@ pub async fn poll_asr(
             // Update video has_subtitle flag
             let _ = sea_orm::ConnectionTrait::execute_unprepared(
                 db.conn(),
-                &format!(
-                    "UPDATE videos SET has_subtitle = 1 WHERE id = {}",
-                    video_id
-                ),
+                &format!("UPDATE videos SET has_subtitle = 1 WHERE id = {}", video_id),
             )
             .await;
 
@@ -486,10 +484,7 @@ pub fn parse_recorded_at_legacy_buggy_ms(ts: &str) -> Option<i64> {
 }
 
 /// List subtitle segments for a video
-pub async fn list_subtitles(
-    db: &Database,
-    video_id: i64,
-) -> Result<Vec<SubtitleSegment>, String> {
+pub async fn list_subtitles(db: &Database, video_id: i64) -> Result<Vec<SubtitleSegment>, String> {
     let rows = sea_orm::ConnectionTrait::query_all(
         db.conn(),
         sea_orm::Statement::from_string(

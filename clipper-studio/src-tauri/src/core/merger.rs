@@ -75,14 +75,9 @@ pub async fn merge_virtual(
 
     tracing::info!("FFmpeg virtual merge: {} {:?}", ffmpeg_path, args);
 
-    let result = run_ffmpeg_with_progress(
-        ffmpeg_path,
-        &args,
-        total_duration_secs,
-        cancel,
-        on_progress,
-    )
-    .await;
+    let result =
+        run_ffmpeg_with_progress(ffmpeg_path, &args, total_duration_secs, cancel, on_progress)
+            .await;
 
     // Cleanup
     let _ = std::fs::remove_file(&list_path);
@@ -171,10 +166,7 @@ pub async fn merge_physical(
 }
 
 /// Check if all input videos are compatible for virtual merge
-pub fn check_merge_compatibility(
-    ffprobe_path: &str,
-    inputs: &[PathBuf],
-) -> Result<bool, String> {
+pub fn check_merge_compatibility(ffprobe_path: &str, inputs: &[PathBuf]) -> Result<bool, String> {
     if inputs.len() < 2 {
         return Ok(true);
     }
@@ -286,12 +278,18 @@ async fn run_ffmpeg_with_progress(
 
     let stderr_output = stderr_task.await.unwrap_or_default();
 
-    let status = child.wait().await
+    let status = child
+        .wait()
+        .await
         .map_err(|e| format!("FFmpeg process error: {}", e))?;
 
     if !status.success() {
         let stderr_str = String::from_utf8_lossy(&stderr_output);
-        return Err(format!("FFmpeg exited with code: {} (stderr: {})", status, stderr_str.chars().take(500).collect::<String>()));
+        return Err(format!(
+            "FFmpeg exited with code: {} (stderr: {})",
+            status,
+            stderr_str.chars().take(500).collect::<String>()
+        ));
     }
 
     Ok(())

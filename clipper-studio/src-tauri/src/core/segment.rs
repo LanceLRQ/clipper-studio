@@ -19,9 +19,15 @@ pub struct SegmentParams {
     pub min_segment_ms: i64,
 }
 
-fn default_threshold() -> f32 { 0.05 }
-fn default_min_silence() -> i64 { 3000 }
-fn default_min_segment() -> i64 { 10000 }
+fn default_threshold() -> f32 {
+    0.05
+}
+fn default_min_silence() -> i64 {
+    3000
+}
+fn default_min_segment() -> i64 {
+    10000
+}
 
 impl Default for SegmentParams {
     fn default() -> Self {
@@ -157,10 +163,7 @@ mod tests {
     #[test]
     fn test_one_silence_gap() {
         // 3 loud, 3 silent, 3 loud  (each 1000ms)
-        let env = make_envelope(
-            vec![0.5, 0.6, 0.5, 0.01, 0.01, 0.01, 0.5, 0.6, 0.5],
-            1000,
-        );
+        let env = make_envelope(vec![0.5, 0.6, 0.5, 0.01, 0.01, 0.01, 0.5, 0.6, 0.5], 1000);
         let params = SegmentParams {
             silence_threshold: 0.05,
             min_silence_ms: 2000,

@@ -1,10 +1,10 @@
 use crate::utils::locks::RwLockExt;
 use serde::Serialize;
-use tauri::{Manager, State};
 use std::path::PathBuf;
+use tauri::{Manager, State};
 
-use crate::AppState;
 use crate::utils::ffmpeg;
+use crate::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct AppInfo {
@@ -39,7 +39,11 @@ pub async fn get_app_info(
         None
     };
 
-    let config_path = state.config_dir.join("config.toml").to_string_lossy().to_string();
+    let config_path = state
+        .config_dir
+        .join("config.toml")
+        .to_string_lossy()
+        .to_string();
 
     // Check if any workspaces exist (for welcome wizard logic)
     let has_workspaces = match sea_orm::ConnectionTrait::query_one(
@@ -274,18 +278,23 @@ pub async fn get_dashboard_stats(
     .await
     .map_err(|e| e.to_string())?;
 
-    let (video_count, total_duration_ms, total_storage_bytes, subtitle_video_count, danmaku_video_count) =
-        video_row
-            .map(|r| {
-                (
-                    r.try_get::<i64>("", "cnt").unwrap_or(0),
-                    r.try_get::<i64>("", "dur").unwrap_or(0),
-                    r.try_get::<i64>("", "sz").unwrap_or(0),
-                    r.try_get::<i64>("", "sub_cnt").unwrap_or(0),
-                    r.try_get::<i64>("", "dm_cnt").unwrap_or(0),
-                )
-            })
-            .unwrap_or((0, 0, 0, 0, 0));
+    let (
+        video_count,
+        total_duration_ms,
+        total_storage_bytes,
+        subtitle_video_count,
+        danmaku_video_count,
+    ) = video_row
+        .map(|r| {
+            (
+                r.try_get::<i64>("", "cnt").unwrap_or(0),
+                r.try_get::<i64>("", "dur").unwrap_or(0),
+                r.try_get::<i64>("", "sz").unwrap_or(0),
+                r.try_get::<i64>("", "sub_cnt").unwrap_or(0),
+                r.try_get::<i64>("", "dm_cnt").unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0, 0, 0, 0));
 
     // Streamer count: only streamers that have videos in this workspace
     let streamer_sql = match workspace_id {
@@ -313,7 +322,10 @@ pub async fn get_dashboard_stats(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT COUNT(*) as cnt FROM recording_sessions {}", sess_where),
+            format!(
+                "SELECT COUNT(*) as cnt FROM recording_sessions {}",
+                sess_where
+            ),
         ),
     )
     .await
@@ -323,9 +335,12 @@ pub async fn get_dashboard_stats(
 
     // Clip stats (JOIN videos for workspace filter)
     let clip_join = workspace_id
-        .map(|id| format!(
-            "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}", id
-        ))
+        .map(|id| {
+            format!(
+                "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}",
+                id
+            )
+        })
         .unwrap_or_default();
     let clip_row = sea_orm::ConnectionTrait::query_one(
         db,
@@ -354,15 +369,21 @@ pub async fn get_dashboard_stats(
         .unwrap_or((0, 0, 0));
 
     let clip_out_join = workspace_id
-        .map(|id| format!(
-            "INNER JOIN videos v ON co.video_id = v.id WHERE v.workspace_id = {}", id
-        ))
+        .map(|id| {
+            format!(
+                "INNER JOIN videos v ON co.video_id = v.id WHERE v.workspace_id = {}",
+                id
+            )
+        })
         .unwrap_or_default();
     let clip_output_bytes = sea_orm::ConnectionTrait::query_one(
         db,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT COALESCE(SUM(co.file_size),0) as sz FROM clip_outputs co {}", clip_out_join),
+            format!(
+                "SELECT COALESCE(SUM(co.file_size),0) as sz FROM clip_outputs co {}",
+                clip_out_join
+            ),
         ),
     )
     .await
@@ -372,9 +393,12 @@ pub async fn get_dashboard_stats(
 
     // Recent clips (last 10)
     let recent_join = workspace_id
-        .map(|id| format!(
-            "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}", id
-        ))
+        .map(|id| {
+            format!(
+                "INNER JOIN videos v ON t.video_id = v.id WHERE v.workspace_id = {}",
+                id
+            )
+        })
         .unwrap_or_default();
     let recent_rows = sea_orm::ConnectionTrait::query_all(
         db,

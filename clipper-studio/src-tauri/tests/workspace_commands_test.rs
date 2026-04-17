@@ -5,14 +5,17 @@ async fn setup_test_db() -> Database {
     let db = Database::connect(std::path::Path::new(":memory:"))
         .await
         .expect("failed to connect to in-memory SQLite");
-    db.run_migrations()
-        .await
-        .expect("failed to run migrations");
+    db.run_migrations().await.expect("failed to run migrations");
     db
 }
 
 /// Helper: insert a workspace directly
-async fn insert_workspace(conn: &sea_orm::DatabaseConnection, name: &str, path: &str, adapter_id: &str) -> i64 {
+async fn insert_workspace(
+    conn: &sea_orm::DatabaseConnection,
+    name: &str,
+    path: &str,
+    adapter_id: &str,
+) -> i64 {
     sea_orm::ConnectionTrait::execute_unprepared(
         conn,
         &format!(
@@ -179,7 +182,10 @@ async fn test_delete_workspace_cascades() {
 
     sea_orm::ConnectionTrait::execute_unprepared(
         conn,
-        &format!("DELETE FROM recording_sessions WHERE workspace_id = {}", ws_id),
+        &format!(
+            "DELETE FROM recording_sessions WHERE workspace_id = {}",
+            ws_id
+        ),
     )
     .await
     .expect("delete sessions should succeed");
@@ -311,10 +317,7 @@ async fn test_delete_nonexistent_workspace() {
     let conn = db.conn();
 
     // Deleting a non-existent workspace should not panic
-    sea_orm::ConnectionTrait::execute_unprepared(
-        conn,
-        "DELETE FROM workspaces WHERE id = 99999",
-    )
-    .await
-    .expect("delete nonexistent workspace should not error");
+    sea_orm::ConnectionTrait::execute_unprepared(conn, "DELETE FROM workspaces WHERE id = 99999")
+        .await
+        .expect("delete nonexistent workspace should not error");
 }

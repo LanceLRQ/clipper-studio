@@ -5,9 +5,7 @@ async fn setup_test_db() -> Database {
     let db = Database::connect(std::path::Path::new(":memory:"))
         .await
         .expect("failed to connect to in-memory SQLite");
-    db.run_migrations()
-        .await
-        .expect("failed to run migrations");
+    db.run_migrations().await.expect("failed to run migrations");
     db
 }
 
@@ -203,7 +201,10 @@ async fn test_list_videos_by_workspace() {
         conn,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT file_name FROM videos WHERE workspace_id = {} ORDER BY file_name", ws1),
+            format!(
+                "SELECT file_name FROM videos WHERE workspace_id = {} ORDER BY file_name",
+                ws1
+            ),
         ),
     )
     .await
@@ -256,7 +257,10 @@ async fn test_list_videos_pagination() {
         conn,
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT COUNT(*) as cnt FROM videos WHERE workspace_id = {}", ws_id),
+            format!(
+                "SELECT COUNT(*) as cnt FROM videos WHERE workspace_id = {}",
+                ws_id
+            ),
         ),
     )
     .await
@@ -313,12 +317,9 @@ async fn test_delete_nonexistent_video() {
     let conn = db.conn();
 
     // Deleting a non-existent video should not error
-    sea_orm::ConnectionTrait::execute_unprepared(
-        conn,
-        "DELETE FROM videos WHERE id = 99999",
-    )
-    .await
-    .expect("delete nonexistent video should not error");
+    sea_orm::ConnectionTrait::execute_unprepared(conn, "DELETE FROM videos WHERE id = 99999")
+        .await
+        .expect("delete nonexistent video should not error");
 }
 
 #[tokio::test]

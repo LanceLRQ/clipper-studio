@@ -44,11 +44,17 @@ impl PlatformCommand {
     /// Get the command for the current platform
     pub fn current(&self) -> Option<&str> {
         #[cfg(target_os = "windows")]
-        { self.windows.as_deref() }
+        {
+            self.windows.as_deref()
+        }
         #[cfg(target_os = "macos")]
-        { self.darwin.as_deref() }
+        {
+            self.darwin.as_deref()
+        }
         #[cfg(target_os = "linux")]
-        { self.linux.as_deref() }
+        {
+            self.linux.as_deref()
+        }
     }
 }
 
@@ -163,17 +169,13 @@ pub enum PluginStatus {
 pub fn load_manifest(plugin_dir: &Path) -> Result<PluginManifest, String> {
     let manifest_path = plugin_dir.join("plugin.json");
     if !manifest_path.exists() {
-        return Err(format!(
-            "plugin.json not found in {}",
-            plugin_dir.display()
-        ));
+        return Err(format!("plugin.json not found in {}", plugin_dir.display()));
     }
 
     let content = std::fs::read_to_string(&manifest_path)
         .map_err(|e| format!("Failed to read plugin.json: {}", e))?;
 
-    serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse plugin.json: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse plugin.json: {}", e))
 }
 
 #[cfg(test)]

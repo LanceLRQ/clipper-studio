@@ -40,10 +40,7 @@ async fn read_setting(state: &AppState, key: &str) -> Option<String> {
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!(
-                "SELECT value FROM settings_kv WHERE key = '{}'",
-                key
-            ),
+            format!("SELECT value FROM settings_kv WHERE key = '{}'", key),
         ),
     )
     .await
@@ -125,10 +122,7 @@ pub async fn submit_asr(
 
 /// Poll ASR task status (call periodically from frontend)
 #[tauri::command]
-pub async fn poll_asr(
-    state: State<'_, AppState>,
-    asr_task_id: i64,
-) -> Result<ASRTaskInfo, String> {
+pub async fn poll_asr(state: State<'_, AppState>, asr_task_id: i64) -> Result<ASRTaskInfo, String> {
     let provider = get_provider(&state).await?;
     service::poll_asr(&state.db, &provider, asr_task_id).await
 }
@@ -180,9 +174,7 @@ pub async fn search_subtitles_global(
 
 /// Check ASR engine health
 #[tauri::command]
-pub async fn check_asr_health(
-    state: State<'_, AppState>,
-) -> Result<ASRHealthInfo, String> {
+pub async fn check_asr_health(state: State<'_, AppState>) -> Result<ASRHealthInfo, String> {
     tracing::info!("[ASR] check_asr_health called");
     let provider = get_provider(&state).await?;
     let result = provider.health().await;
@@ -221,10 +213,7 @@ pub async fn update_subtitle(
 
 /// Delete a subtitle segment
 #[tauri::command]
-pub async fn delete_subtitle(
-    state: State<'_, AppState>,
-    segment_id: i64,
-) -> Result<(), String> {
+pub async fn delete_subtitle(state: State<'_, AppState>, segment_id: i64) -> Result<(), String> {
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!("DELETE FROM subtitle_segments WHERE id = {}", segment_id),
@@ -379,7 +368,11 @@ pub async fn split_subtitle(
         &format!(
             "INSERT INTO subtitle_segments (video_id, language, start_ms, end_ms, text, source) \
              VALUES ({}, '{}', {}, {}, '{}', 'manual')",
-            video_id, language, start_ms, split_at_ms, text1.replace('\'', "''"),
+            video_id,
+            language,
+            start_ms,
+            split_at_ms,
+            text1.replace('\'', "''"),
         ),
     )
     .await
@@ -403,7 +396,11 @@ pub async fn split_subtitle(
         &format!(
             "INSERT INTO subtitle_segments (video_id, language, start_ms, end_ms, text, source) \
              VALUES ({}, '{}', {}, {}, '{}', 'manual')",
-            video_id, language, split_at_ms, end_ms, text2.replace('\'', "''"),
+            video_id,
+            language,
+            split_at_ms,
+            end_ms,
+            text2.replace('\'', "''"),
         ),
     )
     .await
@@ -630,10 +627,7 @@ pub async fn start_asr_service(
 /// - Image tag contains "-cpu" and host is arm64 → force platform linux/amd64
 /// - Image tag contains "-arm64" → no flags
 /// - Otherwise (bare `latest` / no suffix, i.e. CUDA build) → `--gpus all`
-fn decide_docker_runtime_flags(
-    image: &str,
-    cap: &DockerCapability,
-) -> (bool, Option<String>) {
+fn decide_docker_runtime_flags(image: &str, cap: &DockerCapability) -> (bool, Option<String>) {
     let tag = image.rsplit(':').next().unwrap_or("");
     if tag.contains("-cpu") {
         let force = if cap.host_arch == "arm64" {
@@ -715,9 +709,7 @@ pub fn get_default_asr_docker_data_dir(state: State<'_, AppState>) -> Result<Str
 
 /// Open an external terminal to run the ASR setup script
 #[tauri::command]
-pub async fn open_asr_setup_terminal(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn open_asr_setup_terminal(state: State<'_, AppState>) -> Result<(), String> {
     let base_path = read_setting(&state, "asr_local_path")
         .await
         .ok_or("请先在设置中配置 ASR 服务路径")?;
@@ -729,9 +721,7 @@ pub async fn open_asr_setup_terminal(
 
 /// Get current ASR service status
 #[tauri::command]
-pub fn get_asr_service_status(
-    state: State<'_, AppState>,
-) -> Result<ASRServiceStatusInfo, String> {
+pub fn get_asr_service_status(state: State<'_, AppState>) -> Result<ASRServiceStatusInfo, String> {
     Ok(state.asr_service_manager.status_info())
 }
 
@@ -761,26 +751,18 @@ pub async fn submit_asr_queued(
             .unwrap_or_else(|| "Chinese".to_string()),
     };
 
-    state
-        .asr_task_queue
-        .enqueue(video_id, lang)
-        .await
+    state.asr_task_queue.enqueue(video_id, lang).await
 }
 
 /// Cancel an ASR task (queued or running)
 #[tauri::command]
-pub fn cancel_asr_task(
-    state: State<'_, AppState>,
-    asr_task_id: i64,
-) -> Result<bool, String> {
+pub fn cancel_asr_task(state: State<'_, AppState>, asr_task_id: i64) -> Result<bool, String> {
     state.asr_task_queue.cancel(asr_task_id)
 }
 
 /// Get current ASR queue snapshot (running + pending tasks)
 #[tauri::command]
-pub fn get_asr_queue_snapshot(
-    state: State<'_, AppState>,
-) -> Result<Vec<ASRQueueItem>, String> {
+pub fn get_asr_queue_snapshot(state: State<'_, AppState>) -> Result<Vec<ASRQueueItem>, String> {
     Ok(state.asr_task_queue.get_queue_snapshot())
 }
 
@@ -829,15 +811,13 @@ pub async fn repair_subtitle_timestamps(
 
     for row in &rows {
         let video_id: i64 = row.try_get("", "video_id").unwrap_or(0);
-        let recorded_at: Option<String> =
-            row.try_get::<Option<String>>("", "recorded_at").unwrap_or(None);
+        let recorded_at: Option<String> = row
+            .try_get::<Option<String>>("", "recorded_at")
+            .unwrap_or(None);
         let recorded_at = match recorded_at {
             Some(s) if !s.is_empty() => s,
             _ => {
-                tracing::warn!(
-                    "[repair] video_id={} 缺少 recorded_at，跳过",
-                    video_id
-                );
+                tracing::warn!("[repair] video_id={} 缺少 recorded_at，跳过", video_id);
                 continue;
             }
         };

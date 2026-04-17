@@ -15,9 +15,8 @@ impl MigrationTrait for Migration {
 
         // Add clip_output_dir column to workspaces table
         // NULL means use default logic (source file directory / clips/)
-        db.execute_unprepared(
-            "ALTER TABLE workspaces ADD COLUMN clip_output_dir TEXT"
-        ).await?;
+        db.execute_unprepared("ALTER TABLE workspaces ADD COLUMN clip_output_dir TEXT")
+            .await?;
 
         Ok(())
     }

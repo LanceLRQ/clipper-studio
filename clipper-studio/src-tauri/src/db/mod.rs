@@ -3,7 +3,7 @@ pub mod models;
 
 use std::path::Path;
 
-use sea_orm::{ConnectOptions, DatabaseConnection, Database as SeaDatabase};
+use sea_orm::{ConnectOptions, Database as SeaDatabase, DatabaseConnection};
 use sea_orm_migration::MigratorTrait;
 
 use crate::db::migration::Migrator;
@@ -25,18 +25,10 @@ impl Database {
         let conn = SeaDatabase::connect(opts).await?;
 
         // Enable WAL mode for concurrent read support
-        sea_orm::ConnectionTrait::execute_unprepared(
-            &conn,
-            "PRAGMA journal_mode=WAL;",
-        )
-        .await?;
+        sea_orm::ConnectionTrait::execute_unprepared(&conn, "PRAGMA journal_mode=WAL;").await?;
 
         // Enable foreign keys
-        sea_orm::ConnectionTrait::execute_unprepared(
-            &conn,
-            "PRAGMA foreign_keys=ON;",
-        )
-        .await?;
+        sea_orm::ConnectionTrait::execute_unprepared(&conn, "PRAGMA foreign_keys=ON;").await?;
 
         tracing::info!("SQLite connected: {}", db_path.display());
 

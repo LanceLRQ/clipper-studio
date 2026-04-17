@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::State;
 
-use crate::AppState;
 use crate::core::queue::{TaskProgressEvent, TaskStatus};
 use crate::core::storage;
 use crate::utils::ffmpeg;
+use crate::AppState;
 
 #[derive(Debug, Serialize)]
 pub struct WorkspaceInfo {
@@ -41,9 +41,7 @@ pub struct CreateWorkspaceRequest {
 
 /// List all workspaces
 #[tauri::command]
-pub async fn list_workspaces(
-    state: State<'_, AppState>,
-) -> Result<Vec<WorkspaceInfo>, String> {
+pub async fn list_workspaces(state: State<'_, AppState>) -> Result<Vec<WorkspaceInfo>, String> {
     let rows = sea_orm::ConnectionTrait::query_all(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -57,18 +55,19 @@ pub async fn list_workspaces(
 
     let workspaces = rows
         .iter()
-        .map(|row| {
-            
-            WorkspaceInfo {
-                id: row.try_get("", "id").unwrap_or(0),
-                name: row.try_get("", "name").unwrap_or_default(),
-                path: row.try_get("", "path").unwrap_or_default(),
-                adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
-                adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
-                auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
-                clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
-                created_at: row.try_get("", "created_at").unwrap_or_default(),
-            }
+        .map(|row| WorkspaceInfo {
+            id: row.try_get("", "id").unwrap_or(0),
+            name: row.try_get("", "name").unwrap_or_default(),
+            path: row.try_get("", "path").unwrap_or_default(),
+            adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
+            adapter_config: row
+                .try_get::<Option<String>>("", "adapter_config")
+                .unwrap_or(None),
+            auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
+            clip_output_dir: row
+                .try_get::<Option<String>>("", "clip_output_dir")
+                .unwrap_or(None),
+            created_at: row.try_get("", "created_at").unwrap_or_default(),
         })
         .collect();
 
@@ -85,7 +84,9 @@ pub async fn create_workspace(
     let path = std::path::Path::new(&req.path);
     if !path.exists() {
         // Try to create the directory for new workspaces
-        tokio::fs::create_dir_all(path).await.map_err(|e| format!("无法创建目录: {}", e))?;
+        tokio::fs::create_dir_all(path)
+            .await
+            .map_err(|e| format!("无法创建目录: {}", e))?;
     }
     if !path.is_dir() {
         return Err("指定路径不是一个目录".to_string());
@@ -124,15 +125,18 @@ pub async fn create_workspace(
     .map_err(|e| e.to_string())?
     .ok_or("创建后查询失败".to_string())?;
 
-    
     let workspace = WorkspaceInfo {
         id: row.try_get("", "id").unwrap_or(0),
         name: row.try_get("", "name").unwrap_or_default(),
         path: row.try_get("", "path").unwrap_or_default(),
         adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
-        adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
+        adapter_config: row
+            .try_get::<Option<String>>("", "adapter_config")
+            .unwrap_or(None),
         auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
-        clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
+        clip_output_dir: row
+            .try_get::<Option<String>>("", "clip_output_dir")
+            .unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
     };
 
@@ -156,7 +160,11 @@ pub async fn create_workspace(
             .watcher
             .watch(workspace.id, std::path::Path::new(&workspace.path))
         {
-            tracing::warn!("Failed to start watcher for workspace {}: {}", workspace.id, e);
+            tracing::warn!(
+                "Failed to start watcher for workspace {}: {}",
+                workspace.id,
+                e
+            );
         }
     }
 
@@ -166,10 +174,7 @@ pub async fn create_workspace(
 
 /// Delete a workspace (does not delete files on disk)
 #[tauri::command]
-pub async fn delete_workspace(
-    state: State<'_, AppState>,
-    workspace_id: i64,
-) -> Result<(), String> {
+pub async fn delete_workspace(state: State<'_, AppState>, workspace_id: i64) -> Result<(), String> {
     // Get workspace path before deletion (for config cleanup)
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
@@ -182,7 +187,6 @@ pub async fn delete_workspace(
     .map_err(|e| e.to_string())?;
 
     if let Some(row) = row {
-        
         let path: String = row.try_get("", "path").unwrap_or_default();
 
         // Remove related data
@@ -195,7 +199,10 @@ pub async fn delete_workspace(
 
         sea_orm::ConnectionTrait::execute_unprepared(
             state.db.conn(),
-            &format!("DELETE FROM recording_sessions WHERE workspace_id = {}", workspace_id),
+            &format!(
+                "DELETE FROM recording_sessions WHERE workspace_id = {}",
+                workspace_id
+            ),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -224,9 +231,7 @@ pub async fn delete_workspace(
 
 /// Get active workspace ID from settings_kv
 #[tauri::command]
-pub async fn get_active_workspace(
-    state: State<'_, AppState>,
-) -> Result<Option<i64>, String> {
+pub async fn get_active_workspace(state: State<'_, AppState>) -> Result<Option<i64>, String> {
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -239,7 +244,6 @@ pub async fn get_active_workspace(
 
     match row {
         Some(row) => {
-            
             let value: String = row.try_get("", "value").unwrap_or_default();
             Ok(value.parse::<i64>().ok())
         }
@@ -284,10 +288,7 @@ pub async fn set_active_workspace(
 /// 扫描 + FFprobe 探针阶段不触碰数据库；全部完成后才进入数据库写入阶段，
 /// 因此在探针阶段取消完全不会留下脏数据。
 #[tauri::command]
-pub async fn scan_workspace(
-    state: State<'_, AppState>,
-    workspace_id: i64,
-) -> Result<i64, String> {
+pub async fn scan_workspace(state: State<'_, AppState>, workspace_id: i64) -> Result<i64, String> {
     // 预检查：工作区存在 + 目录存在
     let ws_row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
@@ -312,7 +313,12 @@ pub async fn scan_workspace(
     // 生成 task_id（内存唯一即可，不入库）
     let task_id: i64 = chrono::Utc::now().timestamp_micros();
 
-    tracing::info!("Scan task {} submitted: {} (workspace {})", task_id, ws_path, workspace_id);
+    tracing::info!(
+        "Scan task {} submitted: {} (workspace {})",
+        task_id,
+        ws_path,
+        workspace_id
+    );
 
     let db = state.db.clone();
     let ffprobe_path = state.ffprobe_path.read_safe().clone();
@@ -385,8 +391,8 @@ async fn scan_workspace_handler(
     cancel_token: tokio_util::sync::CancellationToken,
     progress_tx: crate::core::queue::TaskProgressSender,
 ) -> Result<(), String> {
-    use std::collections::HashMap;
     use futures_util::stream::StreamExt;
+    use std::collections::HashMap;
 
     macro_rules! check_cancel {
         () => {
@@ -451,19 +457,21 @@ async fn scan_workspace_handler(
         if pending_total == 0 {
             // 所有文件都已有 duration_ms，直接跳过进度上报
         } else {
-            let mut stream = futures_util::stream::iter(pending.into_iter().map(
-                |(idx, path, file_name)| {
+            let mut stream =
+                futures_util::stream::iter(pending.into_iter().map(|(idx, path, file_name)| {
                     let probe_path = ffprobe_path.clone();
                     async move {
                         let p = path.clone();
-                        let res = tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &p))
-                            .await
-                            .unwrap_or_else(|e| Err(format!("spawn_blocking join error: {}", e)));
+                        let res =
+                            tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &p))
+                                .await
+                                .unwrap_or_else(|e| {
+                                    Err(format!("spawn_blocking join error: {}", e))
+                                });
                         (idx, path, file_name, res)
                     }
-                },
-            ))
-            .buffer_unordered(probe_concurrency);
+                }))
+                .buffer_unordered(probe_concurrency);
 
             let mut done: usize = 0;
             while let Some((idx, path, file_name, res)) = stream.next().await {
@@ -574,7 +582,10 @@ async fn scan_workspace_handler(
             db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
-                format!("SELECT id FROM streamers WHERE room_id = '{}'", session.room_id),
+                format!(
+                    "SELECT id FROM streamers WHERE room_id = '{}'",
+                    session.room_id
+                ),
             ),
         )
         .await
@@ -582,7 +593,9 @@ async fn scan_workspace_handler(
         .flatten()
         .and_then(|r| r.try_get("", "id").ok());
 
-        let sid_sql = streamer_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
+        let sid_sql = streamer_id
+            .map(|id| id.to_string())
+            .unwrap_or("NULL".to_string());
 
         let _ = sea_orm::ConnectionTrait::execute_unprepared(
             db.conn(),
@@ -609,7 +622,9 @@ async fn scan_workspace_handler(
         .flatten()
         .and_then(|r| r.try_get("", "id").ok());
 
-        let sess_id_sql = sess_id.map(|id| id.to_string()).unwrap_or("NULL".to_string());
+        let sess_id_sql = sess_id
+            .map(|id| id.to_string())
+            .unwrap_or("NULL".to_string());
 
         for file in &session.files {
             let fp = file.file_path.to_string_lossy();
@@ -630,7 +645,10 @@ async fn scan_workspace_handler(
             .and_then(|r| r.try_get("", "id").ok());
 
             if let Some(video_id) = existing {
-                let dur_sql = file.duration_ms.map(|d| d.to_string()).unwrap_or("NULL".to_string());
+                let dur_sql = file
+                    .duration_ms
+                    .map(|d| d.to_string())
+                    .unwrap_or("NULL".to_string());
                 let _ = sea_orm::ConnectionTrait::execute_unprepared(
                     db.conn(),
                     &format!(
@@ -653,7 +671,8 @@ async fn scan_workspace_handler(
                 } else if !ffprobe_path.is_empty() {
                     let probe_path = ffprobe_path.clone();
                     let fp = file.file_path.clone();
-                    match tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &fp)).await {
+                    match tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &fp)).await
+                    {
                         Ok(Ok(p)) => (p.width, p.height),
                         _ => (None, None),
                     }
@@ -685,7 +704,10 @@ async fn scan_workspace_handler(
                     has_danmaku as i32,
                 );
 
-                if sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql).await.is_ok() {
+                if sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql)
+                    .await
+                    .is_ok()
+                {
                     new_files += 1;
                 }
             }
@@ -759,10 +781,7 @@ async fn scan_workspace_handler(
 
 /// 取消正在执行的扫描任务
 #[tauri::command]
-pub async fn cancel_scan(
-    state: State<'_, AppState>,
-    task_id: i64,
-) -> Result<bool, String> {
+pub async fn cancel_scan(state: State<'_, AppState>, task_id: i64) -> Result<bool, String> {
     Ok(state.task_queue.cancel(task_id).await)
 }
 
@@ -841,9 +860,13 @@ pub async fn update_workspace(
         name: row.try_get("", "name").unwrap_or_default(),
         path: row.try_get("", "path").unwrap_or_default(),
         adapter_id: row.try_get("", "adapter_id").unwrap_or_default(),
-        adapter_config: row.try_get::<Option<String>>("", "adapter_config").unwrap_or(None),
+        adapter_config: row
+            .try_get::<Option<String>>("", "adapter_config")
+            .unwrap_or(None),
         auto_scan: row.try_get::<bool>("", "auto_scan").unwrap_or(true),
-        clip_output_dir: row.try_get::<Option<String>>("", "clip_output_dir").unwrap_or(None),
+        clip_output_dir: row
+            .try_get::<Option<String>>("", "clip_output_dir")
+            .unwrap_or(None),
         created_at: row.try_get("", "created_at").unwrap_or_default(),
     };
 
@@ -857,15 +880,26 @@ pub async fn update_workspace(
     // Update watcher based on auto_scan
     if workspace.auto_scan {
         if !state.watcher.is_watching(workspace.id) {
-            if let Err(e) = state.watcher.watch(workspace.id, std::path::Path::new(&workspace.path)) {
-                tracing::warn!("Failed to start watcher for workspace {}: {}", workspace.id, e);
+            if let Err(e) = state
+                .watcher
+                .watch(workspace.id, std::path::Path::new(&workspace.path))
+            {
+                tracing::warn!(
+                    "Failed to start watcher for workspace {}: {}",
+                    workspace.id,
+                    e
+                );
             }
         }
     } else {
         state.watcher.unwatch(workspace.id);
     }
 
-    tracing::info!("Workspace updated: {} (id={})", workspace.name, workspace.id);
+    tracing::info!(
+        "Workspace updated: {} (id={})",
+        workspace.name,
+        workspace.id
+    );
     Ok(workspace)
 }
 

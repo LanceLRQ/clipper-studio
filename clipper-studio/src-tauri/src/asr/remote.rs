@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::provider::{ASRHealthInfo, ASRProvider, ASRWord, ASRTaskStatus, RawASRSegment};
+use super::provider::{ASRHealthInfo, ASRProvider, ASRTaskStatus, ASRWord, RawASRSegment};
 
 /// Remote ASR provider (external HTTP API with optional API key)
 pub struct RemoteASRProvider {
@@ -76,7 +76,10 @@ impl ASRProvider for RemoteASRProvider {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
 
-        let resp = req.send().await.map_err(|e| format!("ASR query failed: {}", e))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("ASR query failed: {}", e))?;
 
         if !resp.status().is_success() {
             return Err(format!("ASR query HTTP {}", resp.status()));
@@ -105,10 +108,8 @@ impl ASRProvider for RemoteASRProvider {
                                 let start = seg.get("start")?.as_f64()?;
                                 let end = seg.get("end")?.as_f64()?;
                                 let text = seg.get("text")?.as_str()?.to_string();
-                                let words = seg
-                                    .get("words")
-                                    .and_then(|w| w.as_array())
-                                    .map(|warr| {
+                                let words =
+                                    seg.get("words").and_then(|w| w.as_array()).map(|warr| {
                                         warr.iter()
                                             .filter_map(|w| {
                                                 Some(ASRWord {
@@ -119,7 +120,12 @@ impl ASRProvider for RemoteASRProvider {
                                             })
                                             .collect()
                                     });
-                                Some(RawASRSegment { start, end, text, words })
+                                Some(RawASRSegment {
+                                    start,
+                                    end,
+                                    text,
+                                    words,
+                                })
                             })
                             .collect()
                     })
@@ -146,7 +152,10 @@ impl ASRProvider for RemoteASRProvider {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
 
-        let resp = req.send().await.map_err(|e| format!("ASR cancel failed: {}", e))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("ASR cancel failed: {}", e))?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -169,7 +178,10 @@ impl ASRProvider for RemoteASRProvider {
             req = req.header("Authorization", format!("Bearer {}", key));
         }
 
-        let resp = req.send().await.map_err(|e| format!("Health check failed: {}", e))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("Health check failed: {}", e))?;
 
         if !resp.status().is_success() {
             return Err("ASR service not healthy".to_string());
@@ -177,9 +189,19 @@ impl ASRProvider for RemoteASRProvider {
 
         let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         Ok(ASRHealthInfo {
-            status: json.get("status").and_then(|s| s.as_str()).unwrap_or("unknown").to_string(),
-            device: json.get("device").and_then(|s| s.as_str()).map(|s| s.to_string()),
-            model_size: json.get("model_size").and_then(|s| s.as_str()).map(|s| s.to_string()),
+            status: json
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("unknown")
+                .to_string(),
+            device: json
+                .get("device")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string()),
+            model_size: json
+                .get("model_size")
+                .and_then(|s| s.as_str())
+                .map(|s| s.to_string()),
         })
     }
 

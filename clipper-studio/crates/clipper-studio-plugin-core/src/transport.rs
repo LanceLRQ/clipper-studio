@@ -126,10 +126,7 @@ impl PluginTransport for StdioTransport {
                 .write_all(line.as_bytes())
                 .await
                 .map_err(|e| format!("Failed to write to plugin stdin: {}", e))?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| e.to_string())?;
+            stdin.write_all(b"\n").await.map_err(|e| e.to_string())?;
             // Close stdin to signal EOF
             drop(stdin);
         }
@@ -155,7 +152,10 @@ impl PluginTransport for StdioTransport {
         if response_line.trim().is_empty() {
             // No JSON response; check stderr
             if !status.success() {
-                return Err(format!("Plugin process exited with code {:?}", status.code()));
+                return Err(format!(
+                    "Plugin process exited with code {:?}",
+                    status.code()
+                ));
             }
             return Ok(Value::Null);
         }
