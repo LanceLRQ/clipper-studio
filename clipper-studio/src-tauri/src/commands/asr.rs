@@ -781,3 +781,118 @@ pub fn get_asr_queue_snapshot(
 ) -> Result<Vec<ASRQueueItem>, String> {
     Ok(state.asr_task_queue.get_queue_snapshot())
 }
+
+#[derive(Debug, serde::Serialize)]
+pub struct RepairSubtitleTimestampsResult {
+    /// 检查过的视频数
+    pub videos_checked: i64,
+    /// 确认受影响的视频数
+    pub videos_fixed: i64,
+    /// 被修正的字幕段数
+    pub segments_fixed: i64,
+}
+
+/// 修复 commit `7828c79` 之前错误历法算法（y*365+mo*30）污染的 `subtitle_segments` 时间戳。
+///
+/// 判定逻辑：逐视频比较 start_ms 的中位区间是否明显偏离 Unix ms（用 1e13 作阈值），
+/// 若是则用 `legacy_ms - unix_ms` 作为 delta 将该视频所有字幕段整体 shift 回 Unix ms。
+#[tauri::command]
+pub async fn repair_subtitle_timestamps(
+    state: State<'_, AppState>,
+) -> Result<RepairSubtitleTimestampsResult, String> {
+    use crate::asr::service::{parse_recorded_at_legacy_buggy_ms, parse_recorded_at_to_unix_ms};
+
+    // 超过此阈值（约对应 UTC 2286-11 以后）几乎可以认定不是合理 Unix ms，是旧算法遗留
+    const BAD_THRESHOLD_MS: i64 = 10_000_000_000_000;
+
+    // 找出存在"异常行"的所有 video_id，连带该视频的 recorded_at
+    let rows = sea_orm::ConnectionTrait::query_all(
+        state.db.conn(),
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            format!(
+                "SELECT DISTINCT s.video_id, v.recorded_at \
+                 FROM subtitle_segments s \
+                 JOIN videos v ON v.id = s.video_id \
+                 WHERE s.start_ms > {}",
+                BAD_THRESHOLD_MS
+            ),
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut videos_fixed = 0i64;
+    let mut segments_fixed = 0i64;
+
+    for row in &rows {
+        let video_id: i64 = row.try_get("", "video_id").unwrap_or(0);
+        let recorded_at: Option<String> =
+            row.try_get::<Option<String>>("", "recorded_at").unwrap_or(None);
+        let recorded_at = match recorded_at {
+            Some(s) if !s.is_empty() => s,
+            _ => {
+                tracing::warn!(
+                    "[repair] video_id={} 缺少 recorded_at，跳过",
+                    video_id
+                );
+                continue;
+            }
+        };
+
+        let legacy = match parse_recorded_at_legacy_buggy_ms(&recorded_at) {
+            Some(v) => v,
+            None => {
+                tracing::warn!(
+                    "[repair] 无法用旧算法解析 recorded_at={:?}，跳过 video_id={}",
+                    recorded_at,
+                    video_id
+                );
+                continue;
+            }
+        };
+        let unix = match parse_recorded_at_to_unix_ms(&recorded_at) {
+            Some(v) => v,
+            None => {
+                tracing::warn!(
+                    "[repair] 无法用 chrono 解析 recorded_at={:?}，跳过 video_id={}",
+                    recorded_at,
+                    video_id
+                );
+                continue;
+            }
+        };
+        let delta = legacy - unix; // legacy 偏大，减掉它回到 Unix ms
+
+        let affected = sea_orm::ConnectionTrait::execute_unprepared(
+            state.db.conn(),
+            &format!(
+                "UPDATE subtitle_segments \
+                 SET start_ms = start_ms - {}, end_ms = end_ms - {} \
+                 WHERE video_id = {} AND start_ms > {}",
+                delta, delta, video_id, BAD_THRESHOLD_MS
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let n = affected.rows_affected() as i64;
+        if n > 0 {
+            videos_fixed += 1;
+            segments_fixed += n;
+            tracing::info!(
+                "[repair] video_id={} recorded_at={} delta={} 修正 {} 段字幕",
+                video_id,
+                recorded_at,
+                delta,
+                n
+            );
+        }
+    }
+
+    Ok(RepairSubtitleTimestampsResult {
+        videos_checked: rows.len() as i64,
+        videos_fixed,
+        segments_fixed,
+    })
+}

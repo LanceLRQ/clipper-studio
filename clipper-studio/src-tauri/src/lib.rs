@@ -416,6 +416,7 @@ pub fn run() {
             commands::asr::submit_asr_queued,
             commands::asr::cancel_asr_task,
             commands::asr::get_asr_queue_snapshot,
+            commands::asr::repair_subtitle_timestamps,
             commands::asr::check_docker_capability,
             commands::asr::check_docker_image_pulled,
             commands::asr::open_docker_pull_terminal,

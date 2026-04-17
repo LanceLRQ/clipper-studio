@@ -476,6 +476,27 @@ pub fn parse_recorded_at_to_unix_ms(ts: &str) -> Option<i64> {
     Some(ndt.and_utc().timestamp_millis())
 }
 
+/// Legacy (buggy, commit `7828c79` 之前) 的历法换算：`y*365 + mo*30 + d` 作为天数。
+/// 只用于修复早期版本误存到 `subtitle_segments` 的时间戳。
+///
+/// 返回与该字符串在**旧错误算法**下得到的毫秒数；解析失败返回 None。
+pub fn parse_recorded_at_legacy_buggy_ms(ts: &str) -> Option<i64> {
+    // 期望格式 "YYYY-MM-DD HH:MM:SS"
+    let (date, time) = ts.split_once(' ')?;
+    let mut d_iter = date.split('-');
+    let y: i64 = d_iter.next()?.parse().ok()?;
+    let mo: i64 = d_iter.next()?.parse().ok()?;
+    let d: i64 = d_iter.next()?.parse().ok()?;
+    let mut t_iter = time.split(':');
+    let hh: i64 = t_iter.next()?.parse().ok()?;
+    let mm: i64 = t_iter.next()?.parse().ok()?;
+    let ss: i64 = t_iter.next()?.parse().ok()?;
+
+    let days = y * 365 + mo * 30 + d;
+    let secs = days * 86400 + hh * 3600 + mm * 60 + ss;
+    Some(secs * 1000)
+}
+
 /// List subtitle segments for a video
 pub async fn list_subtitles(
     db: &Database,
