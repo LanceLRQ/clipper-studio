@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use std::path::Path;
 
 use tauri::State;
@@ -72,7 +73,7 @@ pub async fn convert_danmaku_to_ass(
     video_id: i64,
     options: Option<DanmakuAssOptions>,
 ) -> Result<String, String> {
-    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
+    let danmaku_factory_path = state.danmaku_factory_path.read_safe().clone();
     if danmaku_factory_path.is_empty() {
         return Err("弹幕转换工具未安装。请在设置 - 依赖管理中安装，或在 config.toml 的 [tools] 中配置 danmaku_factory_path".to_string());
     }
@@ -128,5 +129,5 @@ pub async fn convert_danmaku_to_ass(
 /// Check DanmakuFactory availability
 #[tauri::command]
 pub fn check_danmaku_factory(state: State<'_, AppState>) -> Result<bool, String> {
-    Ok(!state.danmaku_factory_path.read().unwrap().is_empty())
+    Ok(!state.danmaku_factory_path.read_safe().is_empty())
 }

@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use serde::Serialize;
 use tauri::{Manager, State};
 use std::path::PathBuf;
@@ -29,8 +30,8 @@ pub async fn get_app_info(
         .map(|p: PathBuf| p.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
 
     let ffmpeg_version = if !ffmpeg_path.is_empty() {
         ffmpeg::get_version(&ffmpeg_path)
@@ -78,8 +79,8 @@ pub fn is_debug_mode(state: State<'_, AppState>) -> bool {
 /// Check FFmpeg/FFprobe availability and return status
 #[tauri::command]
 pub fn check_ffmpeg(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
 
     let ffmpeg_version = if !ffmpeg_path.is_empty() {
         ffmpeg::get_version(&ffmpeg_path)

@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::{Emitter, State};
@@ -219,8 +220,8 @@ pub async fn create_clip(
     let task_id: i64 = task_row.try_get("", "id").unwrap_or(0);
 
     // Submit to task queue
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
-    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
+    let danmaku_factory_path = state.danmaku_factory_path.read_safe().clone();
     let db = state.db.clone();
     let input_path = PathBuf::from(video_path.clone());
     let output = output_path.clone();
@@ -554,8 +555,8 @@ pub async fn retry_clip_task(
     .ok();
 
     // Re-enqueue to task queue
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
-    let danmaku_factory_path = state.danmaku_factory_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
+    let danmaku_factory_path = state.danmaku_factory_path.read_safe().clone();
     let db = state.db.clone();
     let input_path = PathBuf::from(video_path.clone());
     let output_clone = output.clone();
@@ -1116,7 +1117,7 @@ pub async fn create_batch_clips(
     let batch_title = build_batch_title(state.db.conn(), req.video_id).await;
 
     // Build batch subfolder: determine base output dir, then create subfolder
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
     let batch_output_dir = build_batch_output_dir(state.db.conn(), req.video_id, &ffprobe_path).await?;
     // Ensure the subfolder exists
     tokio::fs::create_dir_all(&batch_output_dir)
@@ -1310,7 +1311,7 @@ pub async fn check_video_burn_availability(
     let has_danmaku_xml = xml_path.exists();
 
     // Check DanmakuFactory availability
-    let has_danmaku_factory = !state.danmaku_factory_path.read().unwrap().is_empty();
+    let has_danmaku_factory = !state.danmaku_factory_path.read_safe().is_empty();
 
     Ok(BurnAvailability {
         has_danmaku_xml,

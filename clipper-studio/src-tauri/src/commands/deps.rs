@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use tauri::{AppHandle, State};
 
 use crate::deps::registry::{DependencyStatus, DepStatus};
@@ -96,7 +97,7 @@ pub async fn uninstall_dep(
 fn re_detect_tool_paths(dep_id: &str, state: &AppState) {
     use crate::utils::ffmpeg;
 
-    let config = state.config.read().unwrap();
+    let config = state.config.read_safe();
 
     match dep_id {
         "ffmpeg" => {

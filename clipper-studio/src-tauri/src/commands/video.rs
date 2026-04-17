@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -102,7 +103,7 @@ pub async fn import_video(
     let file_size = metadata.len() as i64;
 
     // FFprobe: extract metadata
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
     let probe_result = if !ffprobe_path.is_empty() {
         match ffmpeg::probe(&ffprobe_path, path) {
             Ok(result) => Some(result),
@@ -700,7 +701,7 @@ pub async fn extract_envelope(
     let path = std::path::Path::new(&file_path);
 
     // Extract envelope (500ms windows)
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
     let envelope = ffmpeg::extract_audio_envelope(&ffmpeg_path, path, 500).await?;
 
     // Serialize values to binary blob
@@ -784,7 +785,7 @@ pub async fn check_video_integrity(
     .ok_or("视频不存在".to_string())?;
 
     let file_path: String = row.try_get("", "file_path").unwrap_or_default();
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
     ffmpeg::check_integrity(&ffprobe_path, std::path::Path::new(&file_path))
 }
 
@@ -814,7 +815,7 @@ pub async fn remux_video(
         return Err("修复后的文件已存在".to_string());
     }
 
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
     ffmpeg::remux_to_mp4(&ffmpeg_path, input, &output).await?;
 
     let output_str = output.to_string_lossy().to_string();

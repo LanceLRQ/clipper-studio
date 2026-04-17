@@ -1,3 +1,4 @@
+use crate::utils::locks::{MutexExt, RwLockExt};
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -122,7 +123,7 @@ impl ASRTaskQueue {
         tauri::async_runtime::spawn(async move {
             // Phase 1: Recovery
             Self::recover_on_startup(&db, &inner, &app).await;
-            if !inner.lock().unwrap().pending.is_empty() {
+            if !inner.lock_safe().pending.is_empty() {
                 notify.notify_one();
             }
 
@@ -139,7 +140,7 @@ impl ASRTaskQueue {
     ) -> Result<i64, String> {
         // Duplicate check (quick, no await while holding lock)
         {
-            let inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock_safe();
             if inner.pending.iter().any(|e| e.video_id == video_id) {
                 return Err("该视频已有排队中的 ASR 任务".to_string());
             }
@@ -224,7 +225,7 @@ impl ASRTaskQueue {
 
         // Push to queue (quick lock, no await)
         {
-            let mut inner = self.inner.lock().unwrap();
+            let mut inner = self.inner.lock_safe();
             inner.pending.push_back(ASRQueueEntry {
                 asr_task_id: task_id,
                 video_id,
@@ -241,7 +242,7 @@ impl ASRTaskQueue {
 
     /// Cancel an ASR task (queued or running).
     pub fn cancel(&self, asr_task_id: i64) -> Result<bool, String> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_safe();
 
         // Check pending queue
         if let Some(pos) = inner.pending.iter().position(|e| e.asr_task_id == asr_task_id) {
@@ -278,12 +279,12 @@ impl ASRTaskQueue {
     /// Get a snapshot of the current queue state.
     /// Check if there are any active ASR tasks (running or queued). Synchronous.
     pub fn has_active_tasks(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock_safe();
         inner.running.is_some() || !inner.pending.is_empty()
     }
 
     pub fn get_queue_snapshot(&self) -> Vec<ASRQueueItem> {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock_safe();
         let mut items = Vec::new();
 
         // Running task
@@ -346,7 +347,7 @@ impl ASRTaskQueue {
         .await;
 
         if let Ok(rows) = rows {
-            let mut q = inner.lock().unwrap();
+            let mut q = inner.lock_safe();
             for row in &rows {
                 let task_id: i64 = row.try_get("", "id").unwrap_or(0);
                 let video_id: i64 = row.try_get("", "video_id").unwrap_or(0);
@@ -398,7 +399,7 @@ impl ASRTaskQueue {
 
             // Take next entry (quick lock, no await)
             let entry = {
-                let mut q = inner.lock().unwrap();
+                let mut q = inner.lock_safe();
                 q.pending.pop_front()
             };
 
@@ -413,7 +414,7 @@ impl ASRTaskQueue {
 
             // Check cancellation before starting (quick lock, then release)
             let was_cancelled = {
-                let mut q = inner.lock().unwrap();
+                let mut q = inner.lock_safe();
                 if q.cancelled_ids.remove(&task_id) {
                     true
                 } else {
@@ -437,7 +438,7 @@ impl ASRTaskQueue {
 
             // Clear running
             {
-                let mut q = inner.lock().unwrap();
+                let mut q = inner.lock_safe();
                 q.running = None;
                 q.cancelled_ids.remove(&task_id);
             }
@@ -461,7 +462,7 @@ impl ASRTaskQueue {
         Self::update_running(inner, "converting", 0.0);
         Self::emit_progress(app_handle, task_id, video_id, "converting", 0.0, Some("音频转换中..."), None, file_name);
 
-        let ffmpeg = ffmpeg_path.read().unwrap().clone();
+        let ffmpeg = ffmpeg_path.read_safe().clone();
         // Build an atomic cancel flag so WAV conversion can be interrupted
         let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag_clone = cancel_flag.clone();
@@ -649,7 +650,7 @@ impl ASRTaskQueue {
                     )
                     .await;
 
-                    let cur_progress = inner.lock().unwrap().running.as_ref().map(|r| r.4).unwrap_or(0.0);
+                    let cur_progress = inner.lock_safe().running.as_ref().map(|r| r.4).unwrap_or(0.0);
                     Self::emit_progress(app_handle, task_id, video_id, "processing", cur_progress,
                         Some(&format!("重试中（第 {} 次）...", retry_count)), None, file_name);
 
@@ -668,7 +669,7 @@ impl ASRTaskQueue {
 
     /// Update running task status/progress (quick lock, no await)
     fn update_running(inner: &std::sync::Mutex<QueueInner>, status: &str, progress: f64) {
-        if let Some(ref mut r) = inner.lock().unwrap().running {
+        if let Some(ref mut r) = inner.lock_safe().running {
             r.3 = status.to_string();
             r.4 = progress;
         }
@@ -676,7 +677,7 @@ impl ASRTaskQueue {
 
     /// Check if a task is cancelled (quick lock, no await)
     fn check_cancelled(inner: &std::sync::Mutex<QueueInner>, task_id: i64) -> bool {
-        inner.lock().unwrap().cancelled_ids.contains(&task_id)
+        inner.lock_safe().cancelled_ids.contains(&task_id)
     }
 
     /// Spawn a fire-and-forget DB update to mark a task as failed

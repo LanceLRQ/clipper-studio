@@ -215,43 +215,95 @@ pub async fn extract_audio_envelope(
         .spawn()
         .map_err(|e| format!("Failed to start FFmpeg: {}", e))?;
 
-    let mut stdout = child.stdout.take().unwrap();
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture FFmpeg stdout".to_string())?;
 
-    // Read all PCM data
-    let mut pcm_data = Vec::new();
+    // Stream PCM: compute RMS per window on-the-fly, keep only rms_values in memory.
+    // For a 3-hour video: previously ~346 MB pcm_data; now ~constant 64KB + ~86KB rms_values.
+    let samples_per_window = (sample_rate * window_ms / 1000) as usize;
+    let mut rms_values: Vec<f32> = Vec::new();
     let mut buf = vec![0u8; 65536];
+    // Carry-over for bytes that don't align to 4-byte boundary across reads
+    let mut leftover: [u8; 4] = [0; 4];
+    let mut leftover_len: usize = 0;
+    // Running window accumulator
+    let mut win_sum_sq: f64 = 0.0;
+    let mut win_count: usize = 0;
+    let mut max_rms: f32 = f32::MIN;
+    let mut any_sample = false;
+
+    let flush_window = |rms_values: &mut Vec<f32>, max_rms: &mut f32, sum_sq: f64, count: usize| {
+        if count == 0 {
+            return;
+        }
+        let rms = (sum_sq / count as f64).sqrt() as f32;
+        if rms > *max_rms {
+            *max_rms = rms;
+        }
+        rms_values.push(rms);
+    };
+
     loop {
         let n = stdout.read(&mut buf).await.map_err(|e| e.to_string())?;
         if n == 0 {
             break;
         }
-        pcm_data.extend_from_slice(&buf[..n]);
+        any_sample = true;
+
+        let mut idx = 0;
+        // First consume leftover to align
+        if leftover_len > 0 {
+            let need = 4 - leftover_len;
+            let take = need.min(n);
+            leftover[leftover_len..leftover_len + take].copy_from_slice(&buf[..take]);
+            leftover_len += take;
+            idx = take;
+            if leftover_len == 4 {
+                let s = f32::from_le_bytes(leftover);
+                win_sum_sq += (s as f64) * (s as f64);
+                win_count += 1;
+                leftover_len = 0;
+                if win_count == samples_per_window {
+                    flush_window(&mut rms_values, &mut max_rms, win_sum_sq, win_count);
+                    win_sum_sq = 0.0;
+                    win_count = 0;
+                }
+            }
+        }
+
+        // Consume aligned 4-byte samples
+        while idx + 4 <= n {
+            let s = f32::from_le_bytes([buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3]]);
+            win_sum_sq += (s as f64) * (s as f64);
+            win_count += 1;
+            idx += 4;
+            if win_count == samples_per_window {
+                flush_window(&mut rms_values, &mut max_rms, win_sum_sq, win_count);
+                win_sum_sq = 0.0;
+                win_count = 0;
+            }
+        }
+
+        // Stash remaining bytes for next read
+        let rem = n - idx;
+        if rem > 0 {
+            leftover[..rem].copy_from_slice(&buf[idx..n]);
+            leftover_len = rem;
+        }
     }
+
+    // Flush trailing partial window
+    flush_window(&mut rms_values, &mut max_rms, win_sum_sq, win_count);
 
     let _ = child.wait().await;
 
-    // Convert bytes to f32 samples
-    let samples: Vec<f32> = pcm_data
-        .chunks_exact(4)
-        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
-        .collect();
-
-    if samples.is_empty() {
+    if !any_sample || rms_values.is_empty() {
         return Err("No audio data extracted".to_string());
     }
 
-    // Compute RMS per window
-    let samples_per_window = (sample_rate * window_ms / 1000) as usize;
-    let mut rms_values: Vec<f32> = Vec::new();
-
-    for chunk in samples.chunks(samples_per_window) {
-        let sum_sq: f64 = chunk.iter().map(|&s| (s as f64) * (s as f64)).sum();
-        let rms = (sum_sq / chunk.len() as f64).sqrt() as f32;
-        rms_values.push(rms);
-    }
-
-    // Normalize to 0.0 ~ 1.0
-    let max_rms = rms_values.iter().cloned().fold(f32::MIN, f32::max);
+    // Normalize to 0.0 ~ 1.0 (max_rms tracked during streaming)
     if max_rms > 0.0 {
         for v in &mut rms_values {
             *v /= max_rms;

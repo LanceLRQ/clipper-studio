@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 pub mod checker;
 pub mod installer;
 pub mod registry;
@@ -76,7 +77,7 @@ impl DependencyManager {
         config_overrides: &ConfigOverrides,
         bin_dir: &Path,
     ) -> Vec<DependencyStatus> {
-        let reg = self.registry.read().unwrap();
+        let reg = self.registry.read_safe();
         DEPENDENCY_DEFS
             .iter()
             .map(|def| {
@@ -135,7 +136,7 @@ impl DependencyManager {
             );
         }
 
-        let reg = self.registry.read().unwrap();
+        let reg = self.registry.read_safe();
         let state = reg.get(dep_id);
         let custom_path = config_overrides.get(dep_id);
         let system = self.detect_system(def, &custom_path, bin_dir);
@@ -371,7 +372,7 @@ impl DependencyManager {
                 match checker::health_check(&dep_dir, def) {
                     Ok(version) => {
                         // Only update if not already correctly tracked
-                        let reg = self.registry.read().unwrap();
+                        let reg = self.registry.read_safe();
                         let needs_update = match reg.get(def.id) {
                             Some(s) => s.status != DepStatus::Installed,
                             None => true,
@@ -483,7 +484,7 @@ impl DependencyManager {
     // ==================== Internal ====================
 
     fn update_registry(&self, dep_id: &str, state: InstalledDepState) {
-        let mut reg = self.registry.write().unwrap();
+        let mut reg = self.registry.write_safe();
 
         // Preserve installed_at if not provided
         if state.installed_at.is_none() {

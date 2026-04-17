@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::State;
@@ -348,7 +349,7 @@ pub async fn scan_workspace(
     use futures_util::stream::StreamExt;
     use std::collections::HashMap;
     let mut files_with_duration = scan.files.clone();
-    let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let ffprobe_path = state.ffprobe_path.read_safe().clone();
     let mut probe_cache: HashMap<PathBuf, ffmpeg::ProbeResult> = HashMap::new();
 
     if !ffprobe_path.is_empty() {

@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -85,7 +86,7 @@ impl PluginRegistry {
     pub async fn unload_builtin(&self, plugin_id: &str) -> Result<(), String> {
         // Extract transport from lock before awaiting (lock must not be held across await)
         let transport: Option<Arc<Box<dyn PluginTransport>>> = {
-            let mut guard = self.instances.write().unwrap();
+            let mut guard = self.instances.write_safe();
             guard.remove(plugin_id)
         };
         // Now we can await without holding the lock
@@ -97,13 +98,13 @@ impl PluginRegistry {
 
     /// Get a loaded builtin plugin's transport
     pub fn get_transport(&self, plugin_id: &str) -> Option<Arc<Box<dyn PluginTransport>>> {
-        self.instances.read().unwrap().get(plugin_id).cloned()
+        self.instances.read_safe().get(plugin_id).cloned()
     }
 
     /// Shutdown all loaded builtin plugins (called on app exit)
     pub async fn shutdown_all(&self) {
         let instances: Vec<(String, Arc<Box<dyn PluginTransport>>)> = {
-            let mut guard = self.instances.write().unwrap();
+            let mut guard = self.instances.write_safe();
             guard.drain().collect()
         };
         for (id, trans) in instances {

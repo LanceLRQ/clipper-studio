@@ -1,3 +1,4 @@
+use crate::utils::locks::RwLockExt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -109,7 +110,7 @@ pub async fn submit_asr(
             .await
             .unwrap_or_else(|| "Chinese".to_string()),
     };
-    let ffmpeg_path = state.ffmpeg_path.read().unwrap().clone();
+    let ffmpeg_path = state.ffmpeg_path.read_safe().clone();
     service::submit_asr(
         &state.db,
         &provider,
