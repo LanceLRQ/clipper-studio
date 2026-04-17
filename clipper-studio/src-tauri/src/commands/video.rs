@@ -520,27 +520,55 @@ pub async fn list_sessions(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut sessions = Vec::new();
+    // 收集本页所有 session_id，后续用一次 IN 查询批量拉取所属视频，避免 N+1 查询
+    let session_ids: Vec<i64> = session_rows
+        .iter()
+        .map(|r| r.try_get::<i64>("", "id").unwrap_or(0))
+        .filter(|id| *id != 0)
+        .collect();
 
-    for srow in &session_rows {
-        let session_id: i64 = srow.try_get("", "id").unwrap_or(0);
+    // 批量查询所有 session 的视频：一次 IN 查询替代 N 次单 session 查询
+    let mut videos_by_session: std::collections::HashMap<i64, Vec<VideoInfo>> =
+        std::collections::HashMap::new();
 
-        let video_rows = sea_orm::ConnectionTrait::query_all(
+    if !session_ids.is_empty() {
+        let ids_list = session_ids
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let all_video_rows = sea_orm::ConnectionTrait::query_all(
             state.db.conn(),
             sea_orm::Statement::from_string(
                 sea_orm::DatabaseBackend::Sqlite,
                 format!(
                     "SELECT v.*, st.name as streamer_name FROM videos v \
                      LEFT JOIN streamers st ON v.streamer_id = st.id \
-                     WHERE v.session_id = {} ORDER BY v.recorded_at ASC",
-                    session_id
+                     WHERE v.session_id IN ({}) ORDER BY v.session_id, v.recorded_at ASC",
+                    ids_list
                 ),
             ),
         )
         .await
         .map_err(|e| e.to_string())?;
 
-        let videos: Vec<VideoInfo> = video_rows.iter().map(row_to_video_info).collect();
+        for vrow in &all_video_rows {
+            let sid: i64 = vrow.try_get("", "session_id").unwrap_or(0);
+            if sid == 0 {
+                continue;
+            }
+            videos_by_session
+                .entry(sid)
+                .or_default()
+                .push(row_to_video_info(vrow));
+        }
+    }
+
+    let mut sessions = Vec::with_capacity(session_rows.len());
+    for srow in &session_rows {
+        let session_id: i64 = srow.try_get("", "id").unwrap_or(0);
+        let videos = videos_by_session.remove(&session_id).unwrap_or_default();
 
         sessions.push(SessionInfo {
             id: session_id,
