@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde::Serialize;
 
+use crate::core::subtitle::SubtitleSegment;
 use crate::db::Database;
 
 use super::provider::{ASRProvider, ASRSegment, ASRTaskStatus};
@@ -12,19 +13,6 @@ use super::splitter;
 const MAX_AUTO_RETRIES: u32 = 2;
 /// Initial retry delay in seconds
 const INITIAL_RETRY_DELAY_SECS: u64 = 5;
-
-/// Subtitle segment (stored with absolute time)
-#[derive(Debug, Clone, Serialize)]
-pub struct SubtitleSegment {
-    pub id: i64,
-    pub video_id: i64,
-    pub language: String,
-    /// Absolute time (Unix milliseconds) or file-relative milliseconds if no recorded_at
-    pub start_ms: i64,
-    pub end_ms: i64,
-    pub text: String,
-    pub source: String,
-}
 
 /// ASR task info for frontend display
 #[derive(Debug, Clone, Serialize)]

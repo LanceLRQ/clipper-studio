@@ -12,7 +12,8 @@ use crate::asr::manager::{
 use crate::asr::provider::{ASRHealthInfo, ASRProvider};
 use crate::asr::queue::ASRQueueItem;
 use crate::asr::remote::RemoteASRProvider;
-use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult, SubtitleSegment};
+use crate::asr::service::{self, ASRTaskInfo, SubtitleSearchResult};
+use crate::core::subtitle::SubtitleSegment;
 use crate::AppState;
 
 /// Validate ASR remote URL scheme: only `http://` and `https://` are allowed.

@@ -1,11 +1,31 @@
-//! Subtitle ASS generation utilities
+//! Subtitle domain types and ASS/SRT generation utilities.
 //!
-//! Extracted from commands/asr.rs for reuse in the clip burning pipeline.
+//! `SubtitleSegment` lives here (a pure data type in `core`) so both the ASR
+//! subsystem and the clipping pipeline can share it without a cross-subsystem
+//! dependency into `asr`. ASS/SRT generation utilities were extracted from
+//! `commands/asr.rs` for reuse in the clip burning pipeline.
 
 use std::path::Path;
 
-use crate::asr::service::SubtitleSegment;
+use serde::Serialize;
+
 use crate::db::Database;
+
+/// Subtitle segment (stored with absolute time).
+///
+/// `start_ms` / `end_ms` are Unix milliseconds when the video has a recorded_at
+/// timestamp; otherwise they fall back to file-relative milliseconds.
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitleSegment {
+    pub id: i64,
+    pub video_id: i64,
+    pub language: String,
+    /// Absolute time (Unix milliseconds) or file-relative milliseconds if no recorded_at
+    pub start_ms: i64,
+    pub end_ms: i64,
+    pub text: String,
+    pub source: String,
+}
 
 /// Returns the default CJK font name for the current platform.
 pub fn default_cjk_font() -> &'static str {
