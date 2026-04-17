@@ -335,20 +335,44 @@ pub async fn scan_workspace(
         .await;
     }
 
-    // Step 3: Fill duration_ms via FFprobe before grouping (needed for accurate session merging)
+    // Step 3: Fill duration_ms via FFprobe before grouping (needed for accurate session merging).
+    // 并发执行以显著缩短大工作区扫描耗时；同时缓存 probe 结果供后续新增视频插入复用，避免重复 probe。
+    use futures_util::stream::StreamExt;
+    use std::collections::HashMap;
     let mut files_with_duration = scan.files.clone();
     let ffprobe_path = state.ffprobe_path.read().unwrap().clone();
+    let mut probe_cache: HashMap<PathBuf, ffmpeg::ProbeResult> = HashMap::new();
+
     if !ffprobe_path.is_empty() {
-        for file in &mut files_with_duration {
-            if file.duration_ms.is_none() {
+        let probe_concurrency = std::thread::available_parallelism()
+            .map(|n| n.get().clamp(2, 4))
+            .unwrap_or(4);
+        let pending: Vec<(usize, PathBuf)> = files_with_duration
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.duration_ms.is_none())
+            .map(|(i, f)| (i, f.file_path.clone()))
+            .collect();
+
+        let results: Vec<(usize, PathBuf, Result<ffmpeg::ProbeResult, String>)> =
+            futures_util::stream::iter(pending.into_iter().map(|(idx, path)| {
                 let probe_path = ffprobe_path.clone();
-                let file_path = file.file_path.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    ffmpeg::probe(&probe_path, &file_path)
-                }).await;
-                if let Ok(Ok(probe)) = result {
-                    file.duration_ms = probe.duration_ms;
+                async move {
+                    let p = path.clone();
+                    let res = tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &p))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("spawn_blocking join error: {}", e)));
+                    (idx, path, res)
                 }
+            }))
+            .buffer_unordered(probe_concurrency)
+            .collect()
+            .await;
+
+        for (idx, path, res) in results {
+            if let Ok(probe) = res {
+                files_with_duration[idx].duration_ms = probe.duration_ms;
+                probe_cache.insert(path, probe);
             }
         }
     } else {
@@ -437,15 +461,21 @@ pub async fn scan_workspace(
                 .await;
             } else {
                 // New video: probe and insert
-                let file_size = std::fs::metadata(&file.file_path)
+                let file_size = tokio::fs::metadata(&file.file_path)
+                    .await
                     .map(|m| m.len() as i64)
                     .unwrap_or(0);
 
                 let dur = file.duration_ms;
-                let (w, h) = if !ffprobe_path.is_empty() {
-                    match ffmpeg::probe(&ffprobe_path, &file.file_path) {
-                        Ok(p) => (p.width, p.height),
-                        Err(_) => (None, None),
+                // 优先使用 Step 3 的并发 probe 缓存；未命中时才现场同步 probe（极少数路径）。
+                let (w, h) = if let Some(cached) = probe_cache.get(&file.file_path) {
+                    (cached.width, cached.height)
+                } else if !ffprobe_path.is_empty() {
+                    let probe_path = ffprobe_path.clone();
+                    let fp = file.file_path.clone();
+                    match tokio::task::spawn_blocking(move || ffmpeg::probe(&probe_path, &fp)).await {
+                        Ok(Ok(p)) => (p.width, p.height),
+                        _ => (None, None),
                     }
                 } else {
                     (None, None)
