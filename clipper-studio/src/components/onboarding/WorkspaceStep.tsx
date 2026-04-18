@@ -13,10 +13,6 @@ import {
 import type { WorkspaceInfo } from "@/types/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
 
-/**
- * 把绝对路径归一化：去掉末尾分隔符、统一为正斜杠。
- * 这样可以简单通过 startsWith 判断父子关系。
- */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "");
 }
@@ -40,6 +36,27 @@ function detectPathOverlap(
     if (b.startsWith(a + "/")) return { kind: "parent", other: ws };
   }
   return null;
+}
+
+function overlapMessage(
+  overlap: PathOverlap,
+  variant: "short" | "long"
+): string {
+  const name = overlap.other.name;
+  switch (overlap.kind) {
+    case "same":
+      return variant === "long"
+        ? `与工作区「${name}」指向同一目录，无法创建。`
+        : `与工作区「${name}」指向同一目录`;
+    case "child":
+      return variant === "long"
+        ? `位于工作区「${name}」内部，扫描时重叠文件会被跳过。`
+        : `位于工作区「${name}」内部`;
+    case "parent":
+      return variant === "long"
+        ? `包含工作区「${name}」，扫描时重叠文件会被跳过。`
+        : `包含工作区「${name}」`;
+  }
 }
 
 export type WorkspaceStepMode = "choose" | "import" | "create";
@@ -119,13 +136,7 @@ export function WorkspaceStep({
     }
 
     if (overlap) {
-      const reason =
-        overlap.kind === "same"
-          ? `与工作区「${overlap.other.name}」指向同一目录`
-          : overlap.kind === "child"
-            ? `位于工作区「${overlap.other.name}」内部`
-            : `包含工作区「${overlap.other.name}」`;
-      setError(`${reason}，请换一个位置。`);
+      setError(`${overlapMessage(overlap, "short")}，请换一个位置。`);
       return;
     }
 
@@ -230,12 +241,7 @@ export function WorkspaceStep({
           </div>
           {overlap && (
             <p className="text-xs text-amber-600">
-              {overlap.kind === "same" &&
-                `与工作区「${overlap.other.name}」指向同一目录，无法创建。`}
-              {overlap.kind === "child" &&
-                `位于工作区「${overlap.other.name}」内部，扫描时重叠文件会被跳过。`}
-              {overlap.kind === "parent" &&
-                `包含工作区「${overlap.other.name}」，扫描时重叠文件会被跳过。`}
+              {overlapMessage(overlap, "long")}
             </p>
           )}
         </div>
