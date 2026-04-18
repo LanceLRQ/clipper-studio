@@ -11,17 +11,20 @@ import {
 import type { WorkspaceInfo } from "@/types/workspace";
 import { listWorkspaces } from "@/services/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
+import { AddWorkspaceDialog } from "@/components/workspace/add-workspace-dialog";
 
 export function WorkspaceSwitcher() {
   const navigate = useNavigate();
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [addOpen, setAddOpen] = useState(false);
   const activeId = useWorkspaceStore((s) => s.activeId);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
 
+  const loadWorkspaces = () =>
+    listWorkspaces().then(setWorkspaces).catch(console.error);
+
   useEffect(() => {
-    listWorkspaces()
-      .then(setWorkspaces)
-      .catch(console.error);
+    loadWorkspaces();
   }, []);
 
   const isSmbWorkspace = (ws: WorkspaceInfo) => {
@@ -73,9 +76,7 @@ export function WorkspaceSwitcher() {
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem
-          onClick={() => navigate({ to: "/welcome" })}
-        >
+        <DropdownMenuItem onClick={() => setAddOpen(true)}>
           <PlusIcon className="h-4 w-4 mr-1" />
           添加工作区
         </DropdownMenuItem>
@@ -97,6 +98,14 @@ export function WorkspaceSwitcher() {
           工作区设置
         </DropdownMenuItem>
       </DropdownMenuContent>
+      <AddWorkspaceDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onCreated={() => {
+          loadWorkspaces();
+          navigate({ to: "/dashboard/videos" });
+        }}
+      />
     </DropdownMenu>
   );
 }

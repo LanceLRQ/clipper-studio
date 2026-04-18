@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Check, Wand2 } from "lucide-react";
 import { getSettings, setSetting } from "@/services/settings";
 import { DepsSection } from "@/components/onboarding/DepsStep";
+import { AddWorkspaceDialog } from "@/components/workspace/add-workspace-dialog";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import {
   THEME_PRESETS,
@@ -178,6 +179,7 @@ function WorkspaceListSection({
   const navigate = useNavigate();
   const activeId = useWorkspaceStore((s) => s.activeId);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const [addOpen, setAddOpen] = useState(false);
 
   const handleDelete = async (ws: WorkspaceInfo) => {
     if (
@@ -211,7 +213,7 @@ function WorkspaceListSection({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => navigate({ to: "/welcome" })}
+          onClick={() => setAddOpen(true)}
         >
           + 添加工作区
         </Button>
@@ -272,6 +274,11 @@ function WorkspaceListSection({
           </div>
         ))}
       </div>
+      <AddWorkspaceDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onCreated={onReload}
+      />
     </section>
   );
 }
