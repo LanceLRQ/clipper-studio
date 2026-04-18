@@ -18,14 +18,16 @@ export function WorkspaceSwitcher() {
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const activeId = useWorkspaceStore((s) => s.activeId);
+  const wsVersion = useWorkspaceStore((s) => s.version);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const notifyChanged = useWorkspaceStore((s) => s.notifyChanged);
 
   const loadWorkspaces = () =>
     listWorkspaces().then(setWorkspaces).catch(console.error);
 
   useEffect(() => {
     loadWorkspaces();
-  }, []);
+  }, [wsVersion]);
 
   const isSmbWorkspace = (ws: WorkspaceInfo) => {
     try {
@@ -102,7 +104,7 @@ export function WorkspaceSwitcher() {
         open={addOpen}
         onOpenChange={setAddOpen}
         onCreated={() => {
-          loadWorkspaces();
+          notifyChanged();
           navigate({ to: "/dashboard/videos" });
         }}
       />

@@ -202,6 +202,7 @@ function WorkspaceListSection({
   const navigate = useNavigate();
   const activeId = useWorkspaceStore((s) => s.activeId);
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const notifyWorkspaceChanged = useWorkspaceStore((s) => s.notifyChanged);
   const [addOpen, setAddOpen] = useState(false);
 
   const handleDelete = async (ws: WorkspaceInfo) => {
@@ -222,6 +223,8 @@ function WorkspaceListSection({
           navigate({ to: "/welcome", replace: true });
           return;
         }
+      } else {
+        notifyWorkspaceChanged();
       }
       onReload();
     } catch (e) {
@@ -306,7 +309,10 @@ function WorkspaceListSection({
       <AddWorkspaceDialog
         open={addOpen}
         onOpenChange={setAddOpen}
-        onCreated={onReload}
+        onCreated={() => {
+          notifyWorkspaceChanged();
+          onReload();
+        }}
       />
     </section>
   );

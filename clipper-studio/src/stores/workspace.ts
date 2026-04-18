@@ -20,6 +20,8 @@ interface WorkspaceState {
   switchWorkspace: (id: number) => Promise<void>;
   /** Re-check path accessibility for current workspace */
   recheckPath: () => Promise<void>;
+  /** 工作区列表发生变化（增删改）时调用，促使订阅者重新拉取 */
+  notifyChanged: () => void;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -64,5 +66,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     if (id == null) return;
     const accessible = await checkWorkspacePath(id).catch(() => true);
     set({ pathAccessible: accessible });
+  },
+
+  notifyChanged() {
+    set((s) => ({ version: s.version + 1 }));
   },
 }));

@@ -57,9 +57,18 @@ const BILIREC_DIR_REGEX: &str = r"^(\d+)-(.+)$";
 /// Video file extensions to scan
 pub const VIDEO_EXTENSIONS: &[&str] = &["flv", "mp4", "ts", "mkv", "avi", "mov", "webm"];
 
-/// Detect if a directory is a BililiveRecorder workspace
+/// Detect if a directory (or any descendant) is a BililiveRecorder workspace
 pub fn detect_bililive_recorder(dir: &Path) -> bool {
-    // Check 1: config.json with BililiveRecorder signature
+    let dir_re = Regex::new(BILIREC_DIR_REGEX).unwrap();
+    let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
+    detect_bililive_walk(dir, &dir_re, &file_re, 0)
+}
+
+fn detect_bililive_walk(dir: &Path, dir_re: &Regex, file_re: &Regex, depth: usize) -> bool {
+    if depth > 4 {
+        return false;
+    }
+
     let config_path = dir.join("config.json");
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
@@ -69,33 +78,37 @@ pub fn detect_bililive_recorder(dir: &Path) -> bool {
         }
     }
 
-    // Check 2: subdirectories matching {room_id}-{name} pattern with recording files
-    let dir_re = Regex::new(BILIREC_DIR_REGEX).unwrap();
-    let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
 
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                let dir_name = entry.file_name().to_string_lossy().to_string();
-                if dir_re.is_match(&dir_name) {
-                    // Check if any file inside matches recording pattern
-                    if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
-                        for sub in sub_entries.flatten() {
-                            let fname = sub.file_name().to_string_lossy().to_string();
-                            if file_re.is_match(&fname) {
-                                return true;
-                            }
-                        }
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let entry_path = entry.path();
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        if dir_re.is_match(&dir_name) {
+            if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
+                for sub in sub_entries.flatten() {
+                    let fname = sub.file_name().to_string_lossy().to_string();
+                    if file_re.is_match(&fname) {
+                        return true;
                     }
                 }
             }
+        }
+        if detect_bililive_walk(&entry_path, dir_re, file_re, depth + 1) {
+            return true;
         }
     }
 
     false
 }
 
-/// Scan a BililiveRecorder workspace directory
+/// Scan a BililiveRecorder workspace directory. Walks the tree so users can
+/// point at a parent folder that contains one or more recorder workdirs.
 pub fn scan_bililive_recorder(dir: &Path) -> WorkspaceScanResult {
     let dir_re = Regex::new(BILIREC_DIR_REGEX).unwrap();
     let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
@@ -103,53 +116,76 @@ pub fn scan_bililive_recorder(dir: &Path) -> WorkspaceScanResult {
     let mut files: Vec<RecordingFileMeta> = Vec::new();
     let mut streamer_dirs: Vec<StreamerDir> = Vec::new();
 
-    // Scan subdirectories
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            if !entry_path.is_dir() {
-                // Also scan root-level video files (flat layout)
-                scan_file(&entry_path, &file_re, None, None, &mut files);
-                continue;
-            }
-
-            let dir_name = entry.file_name().to_string_lossy().to_string();
-
-            // Parse directory name for streamer info
-            let (room_id, streamer_name) = if let Some(caps) = dir_re.captures(&dir_name) {
-                (Some(caps[1].to_string()), Some(caps[2].to_string()))
-            } else {
-                (None, None)
-            };
-
-            if let (Some(ref rid), Some(ref name)) = (&room_id, &streamer_name) {
-                streamer_dirs.push(StreamerDir {
-                    room_id: rid.clone(),
-                    name: name.clone(),
-                    dir_path: entry_path.clone(),
-                });
-            }
-
-            // Scan files in subdirectory
-            if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
-                for sub in sub_entries.flatten() {
-                    scan_file(
-                        &sub.path(),
-                        &file_re,
-                        room_id.as_deref(),
-                        streamer_name.as_deref(),
-                        &mut files,
-                    );
-                }
-            }
-        }
-    }
+    walk_bililive(
+        dir,
+        &dir_re,
+        &file_re,
+        None,
+        None,
+        &mut files,
+        &mut streamer_dirs,
+    );
 
     WorkspaceScanResult {
         adapter_id: "bililive-recorder".to_string(),
         root_dir: dir.to_path_buf(),
         files,
         streamer_dirs,
+    }
+}
+
+fn walk_bililive(
+    dir: &Path,
+    dir_re: &Regex,
+    file_re: &Regex,
+    inherited_room_id: Option<String>,
+    inherited_streamer_name: Option<String>,
+    files: &mut Vec<RecordingFileMeta>,
+    streamer_dirs: &mut Vec<StreamerDir>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            scan_file(
+                &entry_path,
+                file_re,
+                inherited_room_id.as_deref(),
+                inherited_streamer_name.as_deref(),
+                files,
+            );
+            continue;
+        }
+
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let matched = dir_re.captures(&dir_name).map(|caps| {
+            (caps[1].to_string(), caps[2].to_string())
+        });
+
+        let (room_id, streamer_name) = if let Some((rid, name)) = matched {
+            streamer_dirs.push(StreamerDir {
+                room_id: rid.clone(),
+                name: name.clone(),
+                dir_path: entry_path.clone(),
+            });
+            (Some(rid), Some(name))
+        } else {
+            (inherited_room_id.clone(), inherited_streamer_name.clone())
+        };
+
+        walk_bililive(
+            &entry_path,
+            dir_re,
+            file_re,
+            room_id,
+            streamer_name,
+            files,
+            streamer_dirs,
+        );
     }
 }
 

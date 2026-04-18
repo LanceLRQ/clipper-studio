@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,37 @@ import {
   detectWorkspaceAdapter,
   listWorkspaces,
 } from "@/services/workspace";
+import type { WorkspaceInfo } from "@/types/workspace";
 import { useWorkspaceStore } from "@/stores/workspace";
+
+/**
+ * 把绝对路径归一化：去掉末尾分隔符、统一为正斜杠。
+ * 这样可以简单通过 startsWith 判断父子关系。
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+type PathOverlap =
+  | { kind: "same"; other: WorkspaceInfo }
+  | { kind: "child"; other: WorkspaceInfo }
+  | { kind: "parent"; other: WorkspaceInfo };
+
+function detectPathOverlap(
+  picked: string,
+  workspaces: WorkspaceInfo[]
+): PathOverlap | null {
+  const a = normalizePath(picked);
+  if (!a) return null;
+  for (const ws of workspaces) {
+    const b = normalizePath(ws.path);
+    if (!b) continue;
+    if (a === b) return { kind: "same", other: ws };
+    if (a.startsWith(b + "/")) return { kind: "child", other: ws };
+    if (b.startsWith(a + "/")) return { kind: "parent", other: ws };
+  }
+  return null;
+}
 
 export type WorkspaceStepMode = "choose" | "import" | "create";
 
@@ -48,17 +78,26 @@ export function WorkspaceStep({
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const [name, setName] = useState(initialName || "");
   const [path, setPath] = useState(initialPath || "");
-  const [adapterChoice, setAdapterChoice] = useState<AdapterChoice>(
-    mode === "import" ? "auto" : "generic"
-  );
+  const [adapterChoice, setAdapterChoice] = useState<AdapterChoice>("auto");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [existingWorkspaces, setExistingWorkspaces] = useState<WorkspaceInfo[]>(
+    []
+  );
 
   useEffect(() => {
     listWorkspaces()
-      .then((ws) => onHasExistingChange?.(ws.length > 0))
+      .then((ws) => {
+        setExistingWorkspaces(ws);
+        onHasExistingChange?.(ws.length > 0);
+      })
       .catch(() => {});
   }, [onHasExistingChange]);
+
+  const overlap = useMemo(
+    () => (path.trim() ? detectPathOverlap(path.trim(), existingWorkspaces) : null),
+    [path, existingWorkspaces]
+  );
 
   const handlePickFolder = async () => {
     const selected = await open({ directory: true, multiple: false });
@@ -78,6 +117,18 @@ export function WorkspaceStep({
       setError("请选择文件夹");
       return;
     }
+
+    if (overlap) {
+      const reason =
+        overlap.kind === "same"
+          ? `与工作区「${overlap.other.name}」指向同一目录`
+          : overlap.kind === "child"
+            ? `位于工作区「${overlap.other.name}」内部`
+            : `包含工作区「${overlap.other.name}」`;
+      setError(`${reason}，请换一个位置。`);
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -177,6 +228,16 @@ export function WorkspaceStep({
               浏览
             </Button>
           </div>
+          {overlap && (
+            <p className="text-xs text-amber-600">
+              {overlap.kind === "same" &&
+                `与工作区「${overlap.other.name}」指向同一目录，无法创建。`}
+              {overlap.kind === "child" &&
+                `位于工作区「${overlap.other.name}」内部，扫描时重叠文件会被跳过。`}
+              {overlap.kind === "parent" &&
+                `包含工作区「${overlap.other.name}」，扫描时重叠文件会被跳过。`}
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -214,7 +275,7 @@ export function WorkspaceStep({
           size="lg"
           className="mt-6 w-full"
           onClick={handleCreate}
-          disabled={loading || !path || !name}
+          disabled={loading || !path || !name || !!overlap}
         >
           {loading ? "创建中..." : "创建并继续"}
         </Button>

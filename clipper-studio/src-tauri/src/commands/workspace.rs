@@ -688,7 +688,37 @@ async fn scan_workspace_handler(
                     .duration_ms
                     .map(|d| d.to_string())
                     .unwrap_or("NULL".to_string());
-                // 若旧视频属于其它工作区（例如旧工作区未清理），迁移到当前工作区以避免 UNIQUE(file_path) 冲突
+
+                // 视频已属于其它工作区：如果那个工作区还活着且自己的根目录能覆盖到当前文件，
+                // 就认为亲爱的有意让两个工作区重叠，这里跳过以免偷走对方的数据。
+                if let Some(other_ws) = existing_ws {
+                    if other_ws != workspace_id {
+                        let other_path: Option<String> = sea_orm::ConnectionTrait::query_one(
+                            db.conn(),
+                            sea_orm::Statement::from_string(
+                                sea_orm::DatabaseBackend::Sqlite,
+                                format!(
+                                    "SELECT path FROM workspaces WHERE id = {}",
+                                    other_ws
+                                ),
+                            ),
+                        )
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|r| r.try_get::<String>("", "path").ok());
+
+                        if let Some(other_path) = other_path {
+                            let other = Path::new(&other_path);
+                            if file.file_path.starts_with(other) {
+                                // 属于另一个仍然有效的工作区，保持现状
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // 其余情况（同工作区或旧工作区已失联）：正常更新，必要时迁移 workspace_id
                 let ws_clause = if existing_ws != Some(workspace_id) {
                     format!(", workspace_id = {}", workspace_id)
                 } else {

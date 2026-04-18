@@ -13,7 +13,7 @@ import {
   deleteVideo,
 } from "@/services/video";
 import { useWorkspaceStore } from "@/stores/workspace";
-import { scanWorkspace, getAppInfo } from "@/services/workspace";
+import { scanWorkspace, getAppInfo, listWorkspaces } from "@/services/workspace";
 import type { ScanResult } from "@/services/workspace";
 import { ScanProgressCard } from "@/components/workspace/scan-progress-card";
 import { mergeVideos } from "@/services/media";
@@ -73,6 +73,28 @@ function VideosPage() {
   const wsPathAccessible = useWorkspaceStore((s) => s.pathAccessible);
   const wsRecheckPath = useWorkspaceStore((s) => s.recheckPath);
   const [ffprobeAvailable, setFfprobeAvailable] = useState(true);
+  const [adapterId, setAdapterId] = useState<string | null>(null);
+  const isGenericAdapter = adapterId === "generic";
+
+  useEffect(() => {
+    if (activeWs == null) {
+      setAdapterId(null);
+      return;
+    }
+    listWorkspaces()
+      .then((wss) => {
+        const ws = wss.find((w) => w.id === activeWs);
+        setAdapterId(ws?.adapter_id ?? null);
+      })
+      .catch(() => setAdapterId(null));
+  }, [activeWs, wsVersion]);
+
+  // Generic 适配器没有主播概念，强制走扁平列表
+  useEffect(() => {
+    if (isGenericAdapter && view === "cards") {
+      updateSearch({ view: "flat", page: 1 });
+    }
+  }, [isGenericAdapter, view, updateSearch]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -317,22 +339,26 @@ function VideosPage() {
         </div>
         <div className="flex gap-2">
           {/* View mode toggle */}
-          <div className="flex rounded-md border">
-            {(
-              [
-                { key: "cards", label: "主播" },
-                { key: "flat", label: "列表" },
-              ] as const
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                className={`px-3 py-1 text-sm ${view === key ? "bg-accent" : ""}`}
-                onClick={() => updateSearch({ view: key, page: 1, search: undefined })}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {!isGenericAdapter && (
+            <div className="flex rounded-md border">
+              {(
+                [
+                  { key: "cards", label: "主播" },
+                  { key: "flat", label: "列表" },
+                ] as const
+              ).map(({ key, label }) => (
+                <button
+                  key={key}
+                  className={`px-3 py-1 text-sm ${view === key ? "bg-accent" : ""}`}
+                  onClick={() =>
+                    updateSearch({ view: key, page: 1, search: undefined })
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <Button
             variant="outline"
             onClick={handleScan}
