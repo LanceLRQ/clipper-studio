@@ -43,6 +43,7 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
   const [clipOutputDir, setClipOutputDir] = useState(
     workspace.clip_output_dir ?? ""
   );
+  const [adapterId, setAdapterId] = useState(workspace.adapter_id);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -50,6 +51,7 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
     setName(workspace.name);
     setAutoScan(workspace.auto_scan);
     setClipOutputDir(workspace.clip_output_dir ?? "");
+    setAdapterId(workspace.adapter_id);
   }, [workspace]);
 
   const handlePickDir = async () => {
@@ -60,6 +62,15 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
   };
 
   const handleSave = async () => {
+    const adapterChanged = adapterId !== workspace.adapter_id;
+    if (adapterChanged) {
+      const confirmed = await ask(
+        "更换适配器后，下次扫描将按新适配器重新解析目录结构。\n\n这可能影响：\n- 主播 / 录制场次的识别方式\n- 弹幕、封面等元信息的来源\n- 自动扫描时新增视频的归类\n\n已导入的视频本身不会被删除，但可能出现重复或命名不一致。确认继续？",
+        { title: "更换适配器", kind: "warning" }
+      );
+      if (!confirmed) return;
+    }
+
     setSaving(true);
     setSaved(false);
     try {
@@ -68,6 +79,7 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
         name: name.trim(),
         auto_scan: autoScan,
         clip_output_dir: clipOutputDir.trim(),
+        adapter_id: adapterId,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -108,8 +120,19 @@ function WorkspaceSettingsTab({ workspace }: { workspace: WorkspaceInfo }) {
 
         <div className="space-y-1">
           <Label className="text-sm">适配器类型</Label>
-          <p className="text-sm text-muted-foreground">
-            {ADAPTER_LABELS[workspace.adapter_id] ?? workspace.adapter_id}
+          <select
+            value={adapterId}
+            onChange={(e) => setAdapterId(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm"
+          >
+            {Object.entries(ADAPTER_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            决定扫描如何解析目录结构（主播、场次、弹幕等）。更换后建议重新扫描。
           </p>
         </div>
 
@@ -267,6 +290,12 @@ function WorkspaceListSection({
                 size="sm"
                 className="text-red-500 hover:text-red-600"
                 onClick={() => handleDelete(ws)}
+                disabled={allWorkspaces.length <= 1}
+                title={
+                  allWorkspaces.length <= 1
+                    ? "至少保留一个工作区"
+                    : undefined
+                }
               >
                 删除
               </Button>

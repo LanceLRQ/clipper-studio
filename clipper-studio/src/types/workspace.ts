@@ -29,6 +29,7 @@ export interface UpdateWorkspaceRequest {
   name?: string;
   auto_scan?: boolean;
   clip_output_dir?: string;
+  adapter_id?: string;
 }
 
 export interface AppInfo {

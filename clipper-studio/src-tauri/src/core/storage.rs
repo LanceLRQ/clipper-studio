@@ -324,6 +324,11 @@ pub fn detect_adapter(dir: &Path) -> &'static str {
 /// Scan a directory with auto-detected adapter
 pub fn scan_workspace(dir: &Path) -> WorkspaceScanResult {
     let adapter = detect_adapter(dir);
+    scan_with_adapter(dir, adapter)
+}
+
+/// Scan a directory using the given adapter. Falls back to generic for unknown ids.
+pub fn scan_with_adapter(dir: &Path, adapter: &str) -> WorkspaceScanResult {
     match adapter {
         "bililive-recorder" => scan_bililive_recorder(dir),
         _ => scan_generic(dir),

@@ -26,6 +26,7 @@ pub struct UpdateWorkspaceRequest {
     pub name: Option<String>,
     pub auto_scan: Option<bool>,
     pub clip_output_dir: Option<String>,
+    pub adapter_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -294,7 +295,10 @@ pub async fn scan_workspace(state: State<'_, AppState>, workspace_id: i64) -> Re
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
-            format!("SELECT path FROM workspaces WHERE id = {}", workspace_id),
+            format!(
+                "SELECT path, adapter_id FROM workspaces WHERE id = {}",
+                workspace_id
+            ),
         ),
     )
     .await
@@ -302,6 +306,7 @@ pub async fn scan_workspace(state: State<'_, AppState>, workspace_id: i64) -> Re
     .ok_or("工作区不存在".to_string())?;
 
     let ws_path: String = ws_row.try_get("", "path").unwrap_or_default();
+    let ws_adapter: String = ws_row.try_get("", "adapter_id").unwrap_or_default();
     let dir_buf = PathBuf::from(&ws_path);
     if !dir_buf.exists() {
         return Err(format!(
@@ -330,6 +335,7 @@ pub async fn scan_workspace(state: State<'_, AppState>, workspace_id: i64) -> Re
                 task_id,
                 workspace_id,
                 dir_buf,
+                ws_adapter,
                 ffprobe_path,
                 db,
                 cancel_token,
@@ -386,6 +392,7 @@ async fn scan_workspace_handler(
     task_id: i64,
     workspace_id: i64,
     dir_buf: PathBuf,
+    adapter_id: String,
     ffprobe_path: String,
     db: crate::db::Database,
     cancel_token: tokio_util::sync::CancellationToken,
@@ -418,9 +425,16 @@ async fn scan_workspace_handler(
     );
     check_cancel!();
     let scan_dir = dir_buf.clone();
-    let scan = tokio::task::spawn_blocking(move || storage::scan_workspace(&scan_dir))
-        .await
-        .map_err(|e| format!("扫描目录失败: {}", e))?;
+    let adapter_for_scan = if adapter_id.trim().is_empty() {
+        storage::detect_adapter(&dir_buf).to_string()
+    } else {
+        adapter_id.clone()
+    };
+    let scan = tokio::task::spawn_blocking(move || {
+        storage::scan_with_adapter(&scan_dir, &adapter_for_scan)
+    })
+    .await
+    .map_err(|e| format!("扫描目录失败: {}", e))?;
     check_cancel!();
 
     let total_files_found = scan.files.len();
@@ -552,6 +566,18 @@ async fn scan_workspace_handler(
     .await
     .map_err(|e| e.to_string())?;
 
+    // 防止 FK 失败：清空任何仍指向本工作区 session 的 videos.session_id（例如跨工作区残留）
+    sea_orm::ConnectionTrait::execute_unprepared(
+        db.conn(),
+        &format!(
+            "UPDATE videos SET session_id = NULL \
+             WHERE session_id IN (SELECT id FROM recording_sessions WHERE workspace_id = {})",
+            workspace_id
+        ),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
     sea_orm::ConnectionTrait::execute_unprepared(
         db.conn(),
         &format!(
@@ -560,7 +586,7 @@ async fn scan_workspace_handler(
         ),
     )
     .await
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| format!("清理旧录制场次失败: {}", e))?;
 
     // Import streamers
     for sd in &scan.streamer_dirs {
@@ -597,18 +623,25 @@ async fn scan_workspace_handler(
             .map(|id| id.to_string())
             .unwrap_or("NULL".to_string());
 
-        let _ = sea_orm::ConnectionTrait::execute_unprepared(
+        let started_at_sql = if session.started_at.is_empty() {
+            "NULL".to_string()
+        } else {
+            format!("'{}'", session.started_at.replace('\'', "''"))
+        };
+
+        sea_orm::ConnectionTrait::execute_unprepared(
             db.conn(),
             &format!(
                 "INSERT INTO recording_sessions (workspace_id, streamer_id, title, started_at, file_count) \
-                 VALUES ({}, {}, '{}', '{}', {})",
+                 VALUES ({}, {}, '{}', {}, {})",
                 workspace_id, sid_sql,
                 session.title.replace('\'', "''"),
-                session.started_at,
+                started_at_sql,
                 session.files.len(),
             ),
         )
-        .await;
+        .await
+        .map_err(|e| format!("写入录制场次失败: {}", e))?;
 
         let sess_id: Option<i64> = sea_orm::ConnectionTrait::query_one(
             db.conn(),
@@ -622,6 +655,7 @@ async fn scan_workspace_handler(
         .flatten()
         .and_then(|r| r.try_get("", "id").ok());
 
+        // 没拿到 session id 时放弃关联，避免 FK 失败
         let sess_id_sql = sess_id
             .map(|id| id.to_string())
             .unwrap_or("NULL".to_string());
@@ -629,12 +663,12 @@ async fn scan_workspace_handler(
         for file in &session.files {
             let fp = file.file_path.to_string_lossy();
 
-            let existing: Option<i64> = sea_orm::ConnectionTrait::query_one(
+            let existing: Option<(i64, Option<i64>)> = sea_orm::ConnectionTrait::query_one(
                 db.conn(),
                 sea_orm::Statement::from_string(
                     sea_orm::DatabaseBackend::Sqlite,
                     format!(
-                        "SELECT id FROM videos WHERE file_path = '{}'",
+                        "SELECT id, workspace_id FROM videos WHERE file_path = '{}'",
                         fp.replace('\'', "''")
                     ),
                 ),
@@ -642,23 +676,38 @@ async fn scan_workspace_handler(
             .await
             .ok()
             .flatten()
-            .and_then(|r| r.try_get("", "id").ok());
+            .map(|r| {
+                (
+                    r.try_get::<i64>("", "id").unwrap_or(0),
+                    r.try_get::<Option<i64>>("", "workspace_id").unwrap_or(None),
+                )
+            });
 
-            if let Some(video_id) = existing {
+            if let Some((video_id, existing_ws)) = existing {
                 let dur_sql = file
                     .duration_ms
                     .map(|d| d.to_string())
                     .unwrap_or("NULL".to_string());
-                let _ = sea_orm::ConnectionTrait::execute_unprepared(
+                // 若旧视频属于其它工作区（例如旧工作区未清理），迁移到当前工作区以避免 UNIQUE(file_path) 冲突
+                let ws_clause = if existing_ws != Some(workspace_id) {
+                    format!(", workspace_id = {}", workspace_id)
+                } else {
+                    String::new()
+                };
+                sea_orm::ConnectionTrait::execute_unprepared(
                     db.conn(),
                     &format!(
-                        "UPDATE videos SET session_id = {}, streamer_id = {}, file_missing = 0, \
+                        "UPDATE videos SET session_id = {}, streamer_id = {}, file_missing = 0{}, \
                          duration_ms = CASE WHEN duration_ms IS NULL OR duration_ms = 0 THEN {} ELSE duration_ms END \
                          WHERE id = {}",
-                        sess_id_sql, sid_sql, dur_sql, video_id
+                        sess_id_sql, sid_sql, ws_clause, dur_sql, video_id
                     ),
                 )
-                .await;
+                .await
+                .map_err(|e| format!("更新视频记录失败: {}", e))?;
+                if existing_ws != Some(workspace_id) {
+                    new_files += 1;
+                }
             } else {
                 let file_size = tokio::fs::metadata(&file.file_path)
                     .await
@@ -704,11 +753,17 @@ async fn scan_workspace_handler(
                     has_danmaku as i32,
                 );
 
-                if sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql)
-                    .await
-                    .is_ok()
-                {
-                    new_files += 1;
+                match sea_orm::ConnectionTrait::execute_unprepared(db.conn(), &sql).await {
+                    Ok(_) => {
+                        new_files += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to insert video {}: {}",
+                            file.file_path.display(),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -803,6 +858,20 @@ pub async fn update_workspace(
 
     if let Some(auto_scan) = req.auto_scan {
         set_clauses.push(format!("auto_scan = {}", auto_scan as i32));
+    }
+
+    if let Some(ref adapter_id) = req.adapter_id {
+        let trimmed = adapter_id.trim();
+        if trimmed.is_empty() {
+            return Err("适配器类型不能为空".to_string());
+        }
+        if !matches!(trimmed, "bililive-recorder" | "generic") {
+            return Err(format!("未知的适配器类型: {}", trimmed));
+        }
+        set_clauses.push(format!(
+            "adapter_id = '{}'",
+            trimmed.replace('\'', "''")
+        ));
     }
 
     // clip_output_dir: Some("") or Some(path) both accepted; empty string stored as NULL

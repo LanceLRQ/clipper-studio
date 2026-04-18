@@ -20,7 +20,13 @@ export function WizardStepper({ steps, current }: WizardStepperProps) {
           idx < current ? "done" : idx === current ? "active" : "todo";
         const isLast = idx === steps.length - 1;
         return (
-          <li key={step.key} className="flex flex-1 items-start gap-3">
+          <li
+            key={step.key}
+            className={cn(
+              "flex items-start gap-3",
+              !isLast && "flex-1"
+            )}
+          >
             <div className="flex flex-col items-center">
               <div
                 className={cn(

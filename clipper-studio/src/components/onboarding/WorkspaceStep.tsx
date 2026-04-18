@@ -14,6 +14,18 @@ import { useWorkspaceStore } from "@/stores/workspace";
 
 export type WorkspaceStepMode = "choose" | "import" | "create";
 
+type AdapterChoice = "auto" | "bililive-recorder" | "generic";
+
+const ADAPTER_OPTIONS: { value: AdapterChoice; label: string; hint: string }[] = [
+  { value: "auto", label: "自动检测", hint: "根据目录结构自动识别" },
+  {
+    value: "bililive-recorder",
+    label: "录播姬 (BililiveRecorder)",
+    hint: "解析 flv.xml、info.json 等元信息",
+  },
+  { value: "generic", label: "通用目录", hint: "仅按文件名递归导入视频" },
+];
+
 interface WorkspaceStepProps {
   mode: WorkspaceStepMode;
   onModeChange: (mode: WorkspaceStepMode) => void;
@@ -36,6 +48,9 @@ export function WorkspaceStep({
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
   const [name, setName] = useState(initialName || "");
   const [path, setPath] = useState(initialPath || "");
+  const [adapterChoice, setAdapterChoice] = useState<AdapterChoice>(
+    mode === "import" ? "auto" : "generic"
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -66,7 +81,10 @@ export function WorkspaceStep({
     setLoading(true);
     setError("");
     try {
-      const adapterId = await detectWorkspaceAdapter(path.trim());
+      const adapterId =
+        adapterChoice === "auto"
+          ? await detectWorkspaceAdapter(path.trim())
+          : adapterChoice;
       const ws = await createWorkspace({
         name: name.trim(),
         path: path.trim(),
@@ -120,7 +138,7 @@ export function WorkspaceStep({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-md space-y-6">
       <div className="flex items-center gap-2">
         <Button
           variant="ghost"
@@ -171,10 +189,30 @@ export function WorkspaceStep({
           />
         </div>
 
+        <div className="space-y-2">
+          <Label htmlFor="adapter">适配器类型</Label>
+          <select
+            id="adapter"
+            value={adapterChoice}
+            onChange={(e) => setAdapterChoice(e.target.value as AdapterChoice)}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm"
+          >
+            {ADAPTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            {ADAPTER_OPTIONS.find((o) => o.value === adapterChoice)?.hint}
+          </p>
+        </div>
+
         {error && <div className="text-sm text-red-500">{error}</div>}
 
         <Button
-          className="w-full"
+          size="lg"
+          className="mt-6 w-full"
           onClick={handleCreate}
           disabled={loading || !path || !name}
         >
