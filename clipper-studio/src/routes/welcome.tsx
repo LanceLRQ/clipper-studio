@@ -1,19 +1,22 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useCallback, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { setSetting } from "@/services/settings";
+import { WizardStepper } from "@/components/onboarding/WizardStepper";
 import {
-  createWorkspace,
-  scanWorkspace,
-  detectWorkspaceAdapter,
-  listWorkspaces,
-} from "@/services/workspace";
-import { useWorkspaceStore } from "@/stores/workspace";
+  WorkspaceStep,
+  type WorkspaceStepMode,
+} from "@/components/onboarding/WorkspaceStep";
+import { DepsSection } from "@/components/onboarding/DepsStep";
+import { AsrStep } from "@/components/onboarding/AsrStep";
 
-type WizardStep = "choose" | "import" | "create";
+type WizardStep =
+  | "choose"
+  | "import"
+  | "create"
+  | "deps"
+  | "asr";
 
 interface WelcomeSearch {
   name?: string;
@@ -21,195 +24,190 @@ interface WelcomeSearch {
   step?: WizardStep;
   /** JSON-encoded adapter_config (e.g. SMB mount info) */
   adapter_config?: string;
+  /** 入口来源，例如 "settings" 表示从设置页再次进入 */
+  from?: string;
+}
+
+const STEP_ITEMS = [
+  { key: "workspace", title: "创建工作区", description: "导入或新建" },
+  { key: "deps", title: "安装依赖", description: "ffmpeg 等工具" },
+  { key: "asr", title: "配置语音识别", description: "可选" },
+];
+
+function stepToIndex(step: WizardStep): number {
+  if (step === "deps") return 1;
+  if (step === "asr") return 2;
+  return 0;
 }
 
 function WelcomePage() {
   const navigate = useNavigate();
-  const { name: qName, path: qPath, step: qStep, adapter_config: qAdapterConfig } = Route.useSearch();
-  const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace);
+  const {
+    name: qName,
+    path: qPath,
+    step: qStep,
+    adapter_config: qAdapterConfig,
+    from: qFrom,
+  } = Route.useSearch();
   const [hasExisting, setHasExisting] = useState(false);
   const [step, setStep] = useState<WizardStep>(qStep || "choose");
-  const [name, setName] = useState(qName || "");
-  const [path, setPath] = useState(qPath || "");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [mode, setMode] = useState<WorkspaceStepMode>(
+    qStep === "import" || qStep === "create" ? qStep : "choose"
+  );
 
-  // Check if workspaces already exist (adding vs first-time)
-  useEffect(() => {
-    listWorkspaces()
-      .then((ws) => setHasExisting(ws.length > 0))
-      .catch(() => {});
+  const handleWorkspaceModeChange = useCallback((m: WorkspaceStepMode) => {
+    setMode(m);
+    setStep(m === "choose" ? "choose" : m);
   }, []);
 
-  const handlePickFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (selected) {
-      setPath(selected as string);
-      // Auto-generate name from folder name
-      const folderName = (selected as string).split(/[/\\]/).pop() ?? "";
-      if (!name) {
-        setName(folderName);
-      }
-    }
-  };
+  const handleWorkspaceCreated = useCallback(() => {
+    setStep("deps");
+  }, []);
 
-  const handleCreate = async () => {
-    if (!name.trim()) {
-      setError("请输入工作区名称");
-      return;
-    }
-    if (!path.trim()) {
-      setError("请选择文件夹");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
+  const finishOnboarding = useCallback(async () => {
     try {
-      // Auto-detect adapter type
-      const adapterId = await detectWorkspaceAdapter(path.trim());
-      const ws = await createWorkspace({
-        name: name.trim(),
-        path: path.trim(),
-        adapter_id: adapterId,
-        adapter_config: qAdapterConfig || undefined,
-      });
-
-      // Activate the newly created workspace
-      await switchWorkspace(ws.id);
-
-      // Auto-scan after creation (for "import" mode)
-      if (step === "import") {
-        try {
-          const result = await scanWorkspace(ws.id);
-          console.log("Scan result:", result);
-        } catch (scanErr) {
-          console.warn("Scan failed (non-fatal):", scanErr);
-        }
-      }
-
-      navigate({ to: "/dashboard/videos" });
+      await setSetting("onboarding_completed", "true");
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
+      console.warn("Failed to mark onboarding complete:", e);
     }
+    navigate({ to: "/dashboard/videos" });
+  }, [navigate]);
+
+  const handleSkipWorkspace = () => setStep("deps");
+
+  const handleSkipDeps = async () => {
+    try {
+      await setSetting("onboarding_deps_skipped", "true");
+    } catch (e) {
+      console.warn(e);
+    }
+    setStep("asr");
   };
 
-  const handleGoBack = () => {
-    navigate({ to: "/dashboard", replace: true });
+  const handleSkipAsr = async () => {
+    try {
+      await setSetting("asr_mode", "disabled");
+    } catch (e) {
+      console.warn(e);
+    }
+    finishOnboarding();
   };
+
+  const handleAsrSaved = () => {
+    finishOnboarding();
+  };
+
+  const handleBackToWorkspace = () => {
+    setStep("choose");
+    setMode("choose");
+  };
+
+  const handleBackToDeps = () => setStep("deps");
+
+  const onWorkspaceStep = step === "choose" || step === "import" || step === "create";
+  const stepIndex = onWorkspaceStep ? 0 : stepToIndex(step);
+
+  const fromSettings = qFrom === "settings";
 
   return (
-    <div className="relative flex h-screen items-center justify-center">
-      {hasExisting && (
+    <div className="relative flex h-screen justify-center">
+      {fromSettings && (
         <Button
           variant="ghost"
           size="sm"
           className="absolute top-4 left-4"
-          onClick={handleGoBack}
+          onClick={() => navigate({ to: "/dashboard/settings" })}
         >
           <ArrowLeft className="mr-1 h-4 w-4" />
-          返回
+          返回设置
         </Button>
       )}
-      <div className="mx-auto max-w-lg space-y-8 p-8">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold">
-            {hasExisting ? "添加工作区" : "欢迎使用 ClipperStudio"}
-          </h1>
-          {!hasExisting && (
-            <p className="text-muted-foreground">
+      <div className="mx-auto flex h-full w-full max-w-4xl flex-col p-6">
+        <div className="shrink-0 space-y-6">
+          <div className="space-y-2 text-center">
+            <h1 className="text-3xl font-bold">
+              {hasExisting && onWorkspaceStep
+                ? "添加工作区"
+                : "欢迎使用 ClipperStudio"}
+            </h1>
+            <p className="text-muted-foreground text-sm">
               面向录播切片创作者的开源视频工作台
             </p>
+          </div>
+
+          <WizardStepper steps={STEP_ITEMS} current={stepIndex} />
+
+          {onWorkspaceStep && hasExisting && (
+            <div className="flex justify-center">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleSkipWorkspace}
+              >
+                已有工作区，跳过 →
+              </Button>
+            </div>
           )}
         </div>
 
-        {step === "choose" && (
-          <div className="space-y-4">
-            <p className="text-center text-sm text-muted-foreground">
-              选择一种方式开始：
-            </p>
-            <div className="grid gap-4">
-              <button
-                onClick={() => setStep("import")}
-                className="rounded-lg border-2 border-dashed p-6 text-left hover:border-primary hover:bg-accent transition-colors"
-              >
-                <div className="text-lg font-medium">导入已有录播目录</div>
-                <div className="text-sm text-muted-foreground mt-1">
-                  选择 BililiveRecorder 等录制工具的工作目录，自动识别并导入视频
-                </div>
-              </button>
-              <button
-                onClick={() => setStep("create")}
-                className="rounded-lg border-2 border-dashed p-6 text-left hover:border-primary hover:bg-accent transition-colors"
-              >
-                <div className="text-lg font-medium">创建全新工作区</div>
-                <div className="text-sm text-muted-foreground mt-1">
-                  选择一个空文件夹作为新的工作区，手动导入视频文件
-                </div>
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
+          {onWorkspaceStep && (
+            <WorkspaceStep
+              mode={mode}
+              onModeChange={handleWorkspaceModeChange}
+              initialName={qName}
+              initialPath={qPath}
+              adapterConfig={qAdapterConfig}
+              onHasExistingChange={setHasExisting}
+              onCreated={handleWorkspaceCreated}
+            />
+          )}
 
-        {(step === "import" || step === "create") && (
-          <div className="space-y-6">
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={() => { setStep("choose"); setError(""); }}>
-                <ArrowLeft className="mr-1 h-4 w-4" />
-                返回
-              </Button>
-              <h2 className="text-lg font-medium">
-                {step === "import" ? "导入已有录播目录" : "创建全新工作区"}
-              </h2>
-            </div>
+          {step === "deps" && (
+            <DepsSection
+              intro={
+                <p className="text-sm text-muted-foreground">
+                  ClipperStudio 需要以下工具。你可以一键下载安装，或点击「自定义路径」指向已安装的可执行文件，也可以暂时跳过。
+                </p>
+              }
+            />
+          )}
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="path">
-                  {step === "import" ? "选择录播目录" : "选择文件夹"}
-                </Label>
+          {step === "asr" && <AsrStep onSaved={handleAsrSaved} />}
+        </div>
+
+        {(step === "deps" || step === "asr") && (
+          <div className="shrink-0 border-t bg-background/95 pt-4 backdrop-blur">
+            {step === "deps" && (
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleBackToWorkspace}
+                >
+                  <ArrowLeft className="mr-1 h-4 w-4" />
+                  上一步
+                </Button>
                 <div className="flex gap-2">
-                  <Input
-                    id="path"
-                    value={path}
-                    onChange={(e) => setPath(e.target.value)}
-                    placeholder={
-                      step === "import"
-                        ? "BililiveRecorder 工作目录路径"
-                        : "新工作区的文件夹路径"
-                    }
-                    readOnly
-                  />
-                  <Button variant="outline" onClick={handlePickFolder}>
-                    浏览
+                  <Button variant="ghost" onClick={handleSkipDeps}>
+                    稍后再装
                   </Button>
+                  <Button onClick={() => setStep("asr")}>下一步</Button>
                 </div>
               </div>
+            )}
 
-              <div className="space-y-2">
-                <Label htmlFor="name">工作区名称</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="例如：Bilibili录播、抖音录播..."
-                />
+            {step === "asr" && (
+              <div className="flex items-center justify-between">
+                <Button variant="ghost" size="sm" onClick={handleBackToDeps}>
+                  <ArrowLeft className="mr-1 h-4 w-4" />
+                  上一步
+                </Button>
+                <Button variant="ghost" onClick={handleSkipAsr}>
+                  稍后再配置
+                </Button>
               </div>
-
-              {error && (
-                <div className="text-sm text-red-500">{error}</div>
-              )}
-
-              <Button
-                className="w-full"
-                onClick={handleCreate}
-                disabled={loading || !path || !name}
-              >
-                {loading ? "创建中..." : "开始使用"}
-              </Button>
-            </div>
+            )}
           </div>
         )}
       </div>
@@ -222,9 +220,10 @@ export const Route = createFileRoute("/welcome")({
   validateSearch: (search: Record<string, unknown>): WelcomeSearch => ({
     name: (search.name as string) || undefined,
     path: (search.path as string) || undefined,
-    step: (["import", "create"].includes(search.step as string)
+    step: (["import", "create", "deps", "asr"].includes(search.step as string)
       ? (search.step as WizardStep)
       : undefined),
     adapter_config: (search.adapter_config as string) || undefined,
+    from: (search.from as string) || undefined,
   }),
 });
