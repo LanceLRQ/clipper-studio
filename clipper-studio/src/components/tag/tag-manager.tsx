@@ -23,7 +23,7 @@ export function TagManager() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<TagInfo | null>(null);
   const [formName, setFormName] = useState("");
-  const [formColor, setFormColor] = useState(TAG_COLORS[0].value);
+  const [formColor, setFormColor] = useState<string>(TAG_COLORS[0].value);
   const [saving, setSaving] = useState(false);
 
   const loadTags = useCallback(async () => {

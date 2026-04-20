@@ -161,7 +161,7 @@ export function WorkspaceStep({
           console.warn("Scan failed (non-fatal):", scanErr);
         }
       }
-      onCreated(ws.id);
+      onCreated(String(ws.id));
     } catch (e) {
       setError(String(e));
     } finally {

@@ -607,11 +607,11 @@ function TasksPage() {
                       {task.error_message}
                       {getErrorHint(task.error_message) && (
                         <Tooltip>
-                          <TooltipTrigger asChild>
-                            <button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help">
-                              <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
-                              <span className="underline">出现问题?</span>
-                            </button>
+                          <TooltipTrigger
+                            render={<button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help" />}
+                          >
+                            <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
+                            <span className="underline">出现问题?</span>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap text-left">
                             {getErrorHint(task.error_message)}
@@ -880,11 +880,11 @@ function TasksPage() {
                               {task.error_message}
                               {getErrorHint(task.error_message) && (
                                 <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help">
-                                      <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
-                                      <span className="underline">出现问题?</span>
-                                    </button>
+                                  <TooltipTrigger
+                                    render={<button type="button" className="ml-1 inline-flex items-center text-yellow-600 hover:text-yellow-700 cursor-help" />}
+                                  >
+                                    <CircleHelpIcon className="w-3.5 h-3.5 mr-0.5" />
+                                    <span className="underline">出现问题?</span>
                                   </TooltipTrigger>
                                   <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap text-left">
                                     {getErrorHint(task.error_message)}

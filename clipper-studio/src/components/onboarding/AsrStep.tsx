@@ -242,8 +242,8 @@ export function AsrStep({ onSaved }: AsrStepProps) {
         <div className="rounded-lg border p-4 space-y-3">
           <div className="text-sm space-y-1">
             <div>
-              第一次使用请先下载 asr-service 整合包，解压后在下方选择{" "}
-              <code className="text-xs">asr-service</code> 目录：
+              第一次使用请先下载 qwen3-asr-service 整合包，解压后选择其目录
+              （选择根目录或 <code className="text-xs">asr-service</code> 子目录均可）：
             </div>
             <div className="flex flex-wrap gap-2 pt-1">
               <Button
@@ -266,12 +266,12 @@ export function AsrStep({ onSaved }: AsrStepProps) {
           </div>
 
           <div className="space-y-2">
-            <Label>asr-service 目录</Label>
+            <Label>qwen3-asr-service 目录</Label>
             <div className="flex gap-2">
               <Input
                 value={localPath}
                 readOnly
-                placeholder="请选择解压后的 asr-service 目录"
+                placeholder="选择 qwen3-asr-service 解压目录"
                 className="text-sm h-8 font-mono flex-1"
               />
               <Button variant="outline" size="sm" onClick={handlePickAsrDir}>

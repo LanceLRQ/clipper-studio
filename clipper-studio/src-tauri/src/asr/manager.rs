@@ -127,8 +127,26 @@ impl ASRServiceManager {
         }
     }
 
-    /// Validate that a given directory contains a valid qwen3-asr-service installation
-    pub fn validate_path(base_dir: &Path) -> ASRPathValidation {
+    /// Validate that a given directory contains a valid qwen3-asr-service installation.
+    ///
+    /// Accepts either the repo root (containing `asr-service/`) or the `asr-service/`
+    /// subdirectory itself. If the user selected the subdirectory, it is normalized to
+    /// the parent so that downstream code (start scripts, etc.) works uniformly.
+    pub fn validate_path(raw_dir: &Path) -> ASRPathValidation {
+        // Auto-detect: if the selected dir looks like the `asr-service` subdirectory
+        // (contains `app/main.py` directly), treat its parent as the base_dir.
+        let base_dir = if raw_dir.join("app").join("main.py").exists()
+            && raw_dir.parent().is_some()
+        {
+            tracing::info!(
+                "[ASR] validate_path: detected asr-service subdirectory, normalizing to parent: {}",
+                raw_dir.parent().unwrap().display()
+            );
+            raw_dir.parent().unwrap()
+        } else {
+            raw_dir
+        };
+
         let asr_dir = base_dir.join("asr-service");
         let main_path = asr_dir.join("app").join("main.py");
         let has_main = main_path.exists();

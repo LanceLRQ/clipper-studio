@@ -375,7 +375,7 @@ export function StorageManager() {
             {check?.platform === "windows" ? "映射盘符" : "本地挂载路径"}
           </Label>
           {check?.platform === "windows" ? (
-            <Select value={mountPoint} onValueChange={setMountPoint}>
+            <Select value={mountPoint} onValueChange={(v) => { if (v !== null) setMountPoint(v); }}>
               <SelectTrigger className="h-8 text-sm font-mono w-40">
                 <SelectValue placeholder="自动分配" />
               </SelectTrigger>

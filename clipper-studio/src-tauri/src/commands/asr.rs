@@ -583,8 +583,20 @@ pub async fn start_asr_service(
         if base_path.is_empty() {
             return Err("请先在设置中配置 ASR 服务路径".to_string());
         }
+        // Normalize: if user selected the `asr-service` subdirectory, use its parent
+        let mut base_dir = std::path::PathBuf::from(&base_path);
+        if base_dir.join("app").join("main.py").exists() {
+            if let Some(parent) = base_dir.parent() {
+                tracing::info!(
+                    "[ASR] Normalizing base_dir from {} to {} (detected asr-service subdirectory)",
+                    base_dir.display(),
+                    parent.display()
+                );
+                base_dir = parent.to_path_buf();
+            }
+        }
         ASRLaunchMode::Native {
-            base_dir: std::path::PathBuf::from(base_path),
+            base_dir,
         }
     };
 

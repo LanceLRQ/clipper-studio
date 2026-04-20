@@ -623,12 +623,11 @@ function ASRSettingsContent() {
                     onClick={handleStopService}
                     disabled={
                       serviceActionLoading ||
-                      serviceStatus?.status === "stopping" ||
                       activeTaskCount > 0
                     }
                     title={activeTaskCount > 0 ? `有 ${activeTaskCount} 个识别任务进行中，无法停止服务` : undefined}
                   >
-                    {serviceStatus?.status === "stopping" ? "停止中..." : "停止服务"}
+                    停止服务
                   </Button>
                 </>
               ) : (
@@ -735,7 +734,7 @@ function ASRSettingsContent() {
                 <Input
                   value={asrLocalPath}
                   onChange={(e) => handlePathChange(e.target.value)}
-                  placeholder="选择 qwen3-asr-service 所在目录"
+                  placeholder="选择 qwen3-asr-service 解压目录（根目录或 asr-service 子目录均可）"
                   className="text-sm h-8 font-mono flex-1"
                 />
                 <Button variant="outline" size="sm" onClick={handlePickAsrDir}>
@@ -902,8 +901,8 @@ function ASRSettingsContent() {
                 </div>
                 <div className="space-y-1">
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Label className="text-xs cursor-help border-b border-dashed border-muted-foreground">VAD 合并阈值 (秒)</Label>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                      VAD 合并阈值 (秒)
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-72">
                       设定语音段落的最长窗口（5~30秒）。若无法启用字级对齐，可尝试缩短该值以获取合适长度的字幕
@@ -922,8 +921,8 @@ function ASRSettingsContent() {
                     <option value="false">否</option>
                   </select>
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Label className="text-xs cursor-help border-b border-dashed border-muted-foreground">启用字级对齐</Label>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                      启用字级对齐
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-64">
                       关闭后，字幕按字数自动拆分功能将会失效
@@ -937,8 +936,8 @@ function ASRSettingsContent() {
                     <option value="false">否</option>
                   </select>
                   <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Label className="text-xs cursor-help border-b border-dashed border-muted-foreground">启用标点恢复</Label>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                      启用标点恢复
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-64">
                       仅在 ASR 识别结果无标点时尝试开启，否则可能产生反作用

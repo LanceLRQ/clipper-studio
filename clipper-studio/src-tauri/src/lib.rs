@@ -276,6 +276,7 @@ pub fn run() {
             });
 
             // 根据 --debug 参数控制 webview devtools 的开关
+            #[cfg(feature = "devtools")]
             if let Some(main_window) = app.get_webview_window("main") {
                 if debug_mode {
                     tracing::info!("Debug mode enabled: opening webview devtools");
