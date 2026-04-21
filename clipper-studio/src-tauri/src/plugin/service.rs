@@ -232,7 +232,9 @@ impl ServiceManager {
                 } else {
                     tracing::error!(
                         "[{}] Restart limit exceeded ({} in {}s), giving up",
-                        self.plugin_id, rs.count, RESTART_WINDOW_SECS
+                        self.plugin_id,
+                        rs.count,
+                        RESTART_WINDOW_SECS
                     );
                     false
                 }
@@ -246,11 +248,7 @@ impl ServiceManager {
         }
 
         // Retrieve stored startup config
-        let config = self
-            .startup_config
-            .lock()
-            .ok()
-            .and_then(|mut g| g.take());
+        let config = self.startup_config.lock().ok().and_then(|mut g| g.take());
 
         if let Some((startup, working_dir)) = config {
             tracing::warn!(
@@ -272,7 +270,10 @@ impl ServiceManager {
                 }
             }
         } else {
-            tracing::warn!("[{}] No startup config stored, cannot auto-restart", self.plugin_id);
+            tracing::warn!(
+                "[{}] No startup config stored, cannot auto-restart",
+                self.plugin_id
+            );
             false
         }
     }

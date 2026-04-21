@@ -17,8 +17,7 @@ use std::path::Path;
 
 /// BtbN/FFmpeg-Builds 发布页路径前缀。
 #[allow(dead_code)]
-const FFMPEG_BTBN_RELEASE_BASE: &str =
-    "https://github.com/BtbN/FFmpeg-Builds/releases/download";
+const FFMPEG_BTBN_RELEASE_BASE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/download";
 
 /// DanmakuFactory 发布版本（显式固定）。
 /// 用作文档锚点 — 若修改此值必须同步更新 sources 中对应 URL。

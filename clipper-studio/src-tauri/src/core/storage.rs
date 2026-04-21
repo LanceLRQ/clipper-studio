@@ -423,14 +423,7 @@ fn scan_dir_recursive_inner(
             continue;
         }
         if meta.is_dir() {
-            scan_dir_recursive_inner(
-                &path,
-                results,
-                file_re,
-                depth + 1,
-                max_depth,
-                max_results,
-            );
+            scan_dir_recursive_inner(&path, results, file_re, depth + 1, max_depth, max_results);
         } else if meta.is_file() {
             scan_file(&path, file_re, None, None, results);
         }

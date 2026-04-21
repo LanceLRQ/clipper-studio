@@ -336,7 +336,8 @@ fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
 
 /// Cache for hardware encoder test-encode results (key: "ffmpeg_path:encoder")
 fn encoders_verified() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
-    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
+    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        OnceLock::new();
     MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -358,11 +359,16 @@ fn encoder_really_available(ffmpeg_path: &str, encoder: &str) -> bool {
     let result = std::process::Command::new(ffmpeg_path)
         .args([
             "-hide_banner",
-            "-f", "lavfi",
-            "-i", "color=c=black:s=64x64:d=0.1",
-            "-c:v", encoder,
-            "-frames:v", "1",
-            "-f", "null",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-c:v",
+            encoder,
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
             "-",
         ])
         .output()
@@ -370,7 +376,10 @@ fn encoder_really_available(ffmpeg_path: &str, encoder: &str) -> bool {
         .unwrap_or(false);
 
     if !result {
-        tracing::info!("Encoder {} listed but hardware unavailable, falling back", encoder);
+        tracing::info!(
+            "Encoder {} listed but hardware unavailable, falling back",
+            encoder
+        );
     }
 
     if let Ok(mut guard) = encoders_verified().lock() {

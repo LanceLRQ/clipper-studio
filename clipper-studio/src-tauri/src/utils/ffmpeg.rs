@@ -519,7 +519,10 @@ pub async fn burn_subtitle_with_progress(
     // Platform font directories for libass (COMPAT-12)
     for font_dir in get_system_font_dirs() {
         if font_dir.exists() {
-            args.extend(["-fontsdir".to_string(), font_dir.to_string_lossy().to_string()]);
+            args.extend([
+                "-fontsdir".to_string(),
+                font_dir.to_string_lossy().to_string(),
+            ]);
         }
     }
 

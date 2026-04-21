@@ -1385,8 +1385,7 @@ async fn prepare_burn_options(
                         let tmp_files = create_random_tmp(&tmp_dir, &prefix, "_danmaku.xml")
                             .zip(create_random_tmp(&tmp_dir, &prefix, "_danmaku.ass"));
                         if let Some((tmp_xml, tmp_ass)) = tmp_files {
-                            if crate::core::danmaku::write_bilibili_xml(&filtered, &tmp_xml)
-                                .is_ok()
+                            if crate::core::danmaku::write_bilibili_xml(&filtered, &tmp_xml).is_ok()
                             {
                                 let options = crate::core::danmaku::DanmakuAssOptions::default();
                                 match crate::core::danmaku::convert_to_ass(
@@ -1405,10 +1404,7 @@ async fn prepare_burn_options(
                                         );
                                     }
                                     Err(e) => {
-                                        tracing::warn!(
-                                            "DanmakuFactory conversion failed: {}",
-                                            e
-                                        );
+                                        tracing::warn!("DanmakuFactory conversion failed: {}", e);
                                         // 转换失败时清理预创建的空 ASS 占位
                                         let _ = std::fs::remove_file(&tmp_ass);
                                     }
@@ -1440,11 +1436,9 @@ async fn prepare_burn_options(
     // Generate subtitle ASS
     if include_subtitle {
         // SEC-FS-05：随机名独占临时文件
-        if let Some(tmp_ass) = create_random_tmp(
-            &tmp_dir,
-            &format!("clipper_{}_", task_id),
-            "_subtitle.ass",
-        ) {
+        if let Some(tmp_ass) =
+            create_random_tmp(&tmp_dir, &format!("clipper_{}_", task_id), "_subtitle.ass")
+        {
             match crate::core::subtitle::export_ass_for_clip(
                 db, video_id, start_ms, end_ms, &tmp_ass,
             )

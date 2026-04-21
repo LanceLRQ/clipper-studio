@@ -56,9 +56,8 @@ impl WorkspaceWatcher {
 
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let mut debouncer =
-            new_debouncer(Duration::from_millis(WATCHER_DEBOUNCE_MS), None, tx)
-                .map_err(|e| format!("Failed to create watcher: {}", e))?;
+        let mut debouncer = new_debouncer(Duration::from_millis(WATCHER_DEBOUNCE_MS), None, tx)
+            .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
         debouncer
             .watch(path, RecursiveMode::Recursive)
