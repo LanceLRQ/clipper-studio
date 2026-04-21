@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { getAppInfo } from "@/services/workspace";
 import { getSettings } from "@/services/settings";
-import { getASRServiceStatus, checkASRHealth, type ASRServiceStatusInfo } from "@/services/asr";
+import { getASRServiceStatus, type ASRServiceStatusInfo } from "@/services/asr";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useASRQueueStore, useASRActiveCount, useASRRunningTask } from "@/stores/asr-queue";
+import { useASRHealth } from "@/stores/asr-health";
 import bannerImg from "@/assets/banner.png";
 import bannerDarkImg from "@/assets/banner-dark.png";
 import { listPlugins } from "@/services/plugin";
@@ -76,7 +77,8 @@ function ASRStatusIndicator() {
   const navigate = useNavigate();
   const [localStatus, setLocalStatus] = useState<ASRServiceStatusInfo | null>(null);
   const [asrMode, setAsrMode] = useState<string>("local");
-  const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
+  // P5-PERF-25：通过共享 store 订阅远程健康状态，避免多处独立 30s 轮询
+  const remoteHealthy = useASRHealth(asrMode === "remote");
 
   // ASR queue state
   const activeCount = useASRActiveCount();
@@ -86,16 +88,6 @@ function ASRStatusIndicator() {
     getSettings(["asr_mode"]).then((s) => {
       const mode = s.asr_mode || "local";
       setAsrMode(mode);
-
-      // For remote mode, check health immediately on mode change
-      if (mode === "remote") {
-        setRemoteHealthy(null);
-        checkASRHealth()
-          .then((h) => setRemoteHealthy(h.status === "ready"))
-          .catch(() => setRemoteHealthy(false));
-      } else {
-        setRemoteHealthy(null);
-      }
     }).catch(console.error);
   }, []);
 
@@ -119,17 +111,6 @@ function ASRStatusIndicator() {
     }).then((fn) => { if (cancelled) { fn(); } else { unlistenFn = fn; } });
     return () => { cancelled = true; unlistenFn?.(); };
   }, []);
-
-  // Periodically check remote health (every 30s)
-  useEffect(() => {
-    if (asrMode !== "remote") return;
-    const interval = setInterval(() => {
-      checkASRHealth()
-        .then((h) => setRemoteHealthy(h.status === "ready"))
-        .catch(() => setRemoteHealthy(false));
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [asrMode]);
 
   // Determine display state based on mode
   let dotColor: string;

@@ -111,18 +111,35 @@ function VideoDetailPage() {
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
 
-    const onMouseMove = (ev: MouseEvent) => {
+    // rAF 节流：避免每次 mousemove 都触发 getBoundingClientRect + setState
+    // 导致 reflow，合并到每帧一次
+    let rafId: number | null = null;
+    let pendingClientX = 0;
+
+    const flush = () => {
+      rafId = null;
       if (!isDragging.current || !containerRef.current) return;
       const containerRect = containerRef.current.getBoundingClientRect();
       const maxWidth = containerRect.width * 0.5;
       const minWidth = 260;
-      // Width = distance from right edge of container to mouse position
-      const newWidth = containerRect.right - ev.clientX;
+      const newWidth = containerRect.right - pendingClientX;
       setRightPanelWidth(Math.max(minWidth, Math.min(maxWidth, newWidth)));
+    };
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!isDragging.current) return;
+      pendingClientX = ev.clientX;
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flush);
+      }
     };
 
     const onMouseUp = () => {
       isDragging.current = false;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
       document.removeEventListener("mousemove", onMouseMove);

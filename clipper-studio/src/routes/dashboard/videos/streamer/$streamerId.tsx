@@ -117,15 +117,29 @@ function StreamerVideosPage() {
     saveExpanded(streamerId, expandedSessions);
   }, [streamerId, expandedSessions]);
 
-  // Save scroll position continuously
+  // Save scroll position with debounce：
+  // sessionStorage.setItem 每次调用约 0.1ms 但同步阻塞 JS 线程，
+  // 持续滚动时每帧写入会在慢设备上产生可见卡顿。500ms 停下时写入即可。
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const handleScroll = () => {
-      saveScrollPos(streamerId, el.scrollTop);
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => {
+        saveScrollPos(streamerId, el.scrollTop);
+        timer = null;
+      }, 500);
     };
     el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      if (timer !== null) {
+        clearTimeout(timer);
+        // 离开时立即落盘最新位置，避免 unmount 丢失最后一次滚动
+        saveScrollPos(streamerId, el.scrollTop);
+      }
+    };
   }, [streamerId]);
 
   const updateSearch = useCallback(

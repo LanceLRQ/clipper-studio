@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import type { SubtitleSegment, ASRServiceStatusInfo } from "@/services/asr";
 import {
   listSubtitles,
-  checkASRHealth,
   getASRServiceStatus,
   exportSubtitlesSrt,
   exportSubtitlesAss,
@@ -16,6 +15,7 @@ import {
 } from "@/services/asr";
 import { getSettings } from "@/services/settings";
 import { useASRQueueStore, useASRTaskForVideo } from "@/stores/asr-queue";
+import { useASRHealth } from "@/stores/asr-health";
 
 interface SubtitlePanelProps {
   videoId: number;
@@ -67,7 +67,8 @@ export function SubtitlePanel({
   // ASR service availability
   const [asrMode, setAsrMode] = useState<string>("local");
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
-  const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
+  // P5-PERF-25：通过共享 store 订阅远程健康状态
+  const remoteHealthy = useASRHealth(asrMode === "remote");
 
   // ASR queue store
   const queueTask = useASRTaskForVideo(videoId);
@@ -98,23 +99,6 @@ export function SubtitlePanel({
 
     getASRServiceStatus().then(setServiceStatus).catch(console.error);
   }, []);
-
-  // Periodically check remote ASR health when in remote mode
-  useEffect(() => {
-    if (asrMode !== "remote") {
-      setRemoteHealthy(null);
-      return;
-    }
-    let cancelled = false;
-    const check = () => {
-      checkASRHealth()
-        .then((h) => { if (!cancelled) setRemoteHealthy(h.status === "ready"); })
-        .catch(() => { if (!cancelled) setRemoteHealthy(false); });
-    };
-    check();
-    const interval = setInterval(check, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [asrMode]);
 
   // Listen for real-time service status changes
   useEffect(() => {
