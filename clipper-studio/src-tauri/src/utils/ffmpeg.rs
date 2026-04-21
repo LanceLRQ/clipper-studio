@@ -516,19 +516,19 @@ pub async fn burn_subtitle_with_progress(
     let mut args: Vec<String> = Vec::new();
     args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
 
-    // Platform font directories for libass (COMPAT-12)
+    // 统一使用 ass= 滤镜，确保跨平台渲染行为一致
+    // COMPAT-12：将字体目录作为滤镜参数传入（fontsdir=dir:fontsdir=dir）
+    let mut vf = format!("ass={}", ass_escaped);
     for font_dir in get_system_font_dirs() {
         if font_dir.exists() {
-            args.extend([
-                "-fontsdir".to_string(),
-                font_dir.to_string_lossy().to_string(),
-            ]);
+            let dir_escaped = font_dir
+                .to_string_lossy()
+                .replace('\\', "/")
+                .replace(':', "\\:");
+            vf = format!("{}:fontsdir={}", vf, dir_escaped);
         }
     }
-
-    // 统一使用 ass= 滤镜，确保跨平台渲染行为一致
-    // escape_ass_path 已处理反斜杠和冒号转义
-    args.extend(["-vf".to_string(), format!("ass={}", ass_escaped)]);
+    args.extend(["-vf".to_string(), vf]);
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
