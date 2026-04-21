@@ -1,0 +1,110 @@
+[package]
+name = "clipper-studio"
+version = "0.1.0"
+description = "A local-first desktop video workbench for live stream clip creators"
+authors = ["LanceLRQ"]
+license = "GPL-3.0"
+repository = "https://github.com/LanceLRQ/clipper-studio"
+default-run = "clipper-studio"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "clipper_studio_lib"
+crate-type = ["lib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+
+# Workspace shared
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+
+# Database - sea-orm for modeling/migration, rusqlite for raw SQL
+sea-orm = { version = "1", features = [
+    "sqlx-sqlite",
+    "runtime-tokio-rustls",
+    "macros",
+] }
+sea-orm-migration = { version = "1", features = [] }
+
+# Logging
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# File hashing
+blake3 = "1"
+
+# Async utilities
+tokio-util = "0.7"
+
+# Local media server (for video playback with Range support)
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+mime = "0.3"
+urlencoding = "2"
+base64 = "0.22"
+
+# Configuration
+toml = "0.8"
+
+# Date/time handling
+chrono = "0.4"
+
+# Regex (for filename pattern parsing)
+regex = "1"
+
+# Hex encoding (for BLOB data)
+hex = "0.4"
+
+# XML parsing (for danmaku)
+quick-xml = "0.37"
+
+# Disk space queries
+fs2 = "0.4"
+
+# Archive extraction (dependency manager)
+zip = "2"
+flate2 = "1"
+tar = "0.4"
+futures-util = "0.3"
+
+# File system monitoring
+notify = "7"
+notify-debouncer-full = "0.4"
+
+# Plugin core (workspace crate)
+clipper-studio-plugin-core = { path = "../crates/clipper-studio-plugin-core" }
+
+# Builtin plugins
+clipper-studio-plugin-recorder = { path = "../crates/clipper-studio-plugin-recorder", optional = true }
+clipper-studio-plugin-storage = { path = "../crates/clipper-studio-plugin-storage", optional = true }
+
+# Process management (Unix process group kill)
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = ["builtin-plugins"]
+builtin-plugins = ["dep:clipper-studio-plugin-recorder", "dep:clipper-studio-plugin-storage"]
+devtools = ["tauri/devtools"]
+
+# tempfile 用于生成随机名独占临时文件（SEC-FS-05），同时兼作 dev-dependency
+[dependencies.tempfile]
+version = "3"
+
+[dev-dependencies]
+# （tempfile 已在 [dependencies] 中声明）

@@ -1,0 +1,52 @@
+{
+    "$schema": "https://raw.githubusercontent.com/nicegoodthings/tauri-schema/refs/heads/main/tauri.conf.json",
+    "productName": "ClipperStudio",
+    "version": "0.1.0",
+    "identifier": "com.clipper-studio.app",
+    "build": {
+        "beforeDevCommand": "pnpm dev",
+        "beforeBuildCommand": "pnpm build",
+        "devUrl": "http://localhost:5173",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "ClipperStudio",
+                "width": 1280,
+                "height": 800,
+                "minWidth": 960,
+                "minHeight": 600,
+                "center": true
+            }
+        ],
+        "security": {
+            "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' ipc: http://ipc.localhost; img-src 'self' blob: data: http://127.0.0.1:*; media-src 'self' blob: http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*",
+            "assetProtocol": {
+                "enable": false,
+                "scope": []
+            }
+        },
+        "trayIcon": {
+            "iconPath": "icons/icon.png",
+            "iconAsTemplate": true
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "icon": [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ]
+    },
+    "plugins": {
+        "shell": {
+            "open": true
+        }
+    }
+}

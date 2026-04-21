@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>clipper-studio-init</title>
+    <script>
+      (function () {
+        var t = localStorage.getItem("clipper-theme");
+        var isDark =
+          t === "dark" ||
+          ((!t || t === "system") &&
+            matchMedia("(prefers-color-scheme:dark)").matches);
+        if (isDark) document.documentElement.classList.add("dark");
+
+        // 应用配色方案 CSS 变量（防闪烁）
+        var c = localStorage.getItem("clipper-theme-color") || "slate";
+        var presets = {
+          slate: {
+            light: { bg: "oklch(1 0 0)", fg: "oklch(0.129 0.042 264.695)" },
+            dark: { bg: "oklch(0.129 0.042 264.695)", fg: "oklch(0.984 0.003 247.858)" },
+          },
+          zinc: {
+            light: { bg: "oklch(1 0 0)", fg: "oklch(0.141 0.005 285.823)" },
+            dark: { bg: "oklch(0.141 0.005 285.823)", fg: "oklch(0.985 0.002 247.839)" },
+          },
+          stone: {
+            light: { bg: "oklch(1 0 0)", fg: "oklch(0.147 0.004 49.25)" },
+            dark: { bg: "oklch(0.147 0.004 49.25)", fg: "oklch(0.985 0.001 106.423)" },
+          },
+          gray: {
+            light: { bg: "oklch(1 0 0)", fg: "oklch(0.13 0.028 261.692)" },
+            dark: { bg: "oklch(0.13 0.028 261.692)", fg: "oklch(0.985 0.002 247.839)" },
+          },
+          neutral: {
+            light: { bg: "oklch(1 0 0)", fg: "oklch(0.145 0 0)" },
+            dark: { bg: "oklch(0.145 0 0)", fg: "oklch(0.985 0 0)" },
+          },
+        };
+        var p = presets[c] || presets.slate;
+        var v = isDark ? p.dark : p.light;
+        var s = document.documentElement.style;
+        s.setProperty("--background", v.bg);
+        s.setProperty("--foreground", v.fg);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,558 @@
+use regex::Regex;
+use serde::Serialize;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// Metadata extracted from a recording file name
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordingFileMeta {
+    pub room_id: Option<String>,
+    pub streamer_name: Option<String>,
+    pub stream_title: Option<String>,
+    pub recorded_at: Option<String>,
+    /// Duration in milliseconds (from FFprobe, filled after scan)
+    pub duration_ms: Option<i64>,
+    pub file_path: PathBuf,
+    pub file_name: String,
+    pub extension: String,
+    /// Associated files (danmaku xml, log txt, etc.)
+    pub associated_files: Vec<PathBuf>,
+}
+
+/// Result of scanning a workspace directory
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkspaceScanResult {
+    pub adapter_id: String,
+    pub root_dir: PathBuf,
+    pub files: Vec<RecordingFileMeta>,
+    pub streamer_dirs: Vec<StreamerDir>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StreamerDir {
+    pub room_id: String,
+    pub name: String,
+    pub dir_path: PathBuf,
+}
+
+/// A grouped recording session (multiple files from one live stream)
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordingSession {
+    pub room_id: String,
+    pub streamer_name: String,
+    pub title: String,
+    pub started_at: String,
+    pub files: Vec<RecordingFileMeta>,
+}
+
+// ======================== BililiveRecorder Adapter ========================
+
+/// Default file name regex for BililiveRecorder:
+/// `录制-{room_id}-{yyyyMMdd}-{HHmmss}-{ms}-{title}.{ext}`
+const BILIREC_FILE_REGEX: &str = r"^录制-(\d+)-(\d{8})-(\d{6})-(\d{3})-(.+)\.(flv|mp4|ts)$";
+
+/// Default directory regex: `{room_id}-{name}`
+const BILIREC_DIR_REGEX: &str = r"^(\d+)-(.+)$";
+
+/// Video file extensions to scan
+pub const VIDEO_EXTENSIONS: &[&str] = &["flv", "mp4", "ts", "mkv", "avi", "mov", "webm"];
+
+/// Detect if a directory (or any descendant) is a BililiveRecorder workspace
+pub fn detect_bililive_recorder(dir: &Path) -> bool {
+    let dir_re = Regex::new(BILIREC_DIR_REGEX).unwrap();
+    let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
+    detect_bililive_walk(dir, &dir_re, &file_re, 0)
+}
+
+fn detect_bililive_walk(dir: &Path, dir_re: &Regex, file_re: &Regex, depth: usize) -> bool {
+    if depth > 4 {
+        return false;
+    }
+
+    let config_path = dir.join("config.json");
+    if config_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&config_path) {
+            if content.contains("roomId") || content.contains("RecordMode") {
+                return true;
+            }
+        }
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let entry_path = entry.path();
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        if dir_re.is_match(&dir_name) {
+            if let Ok(sub_entries) = std::fs::read_dir(&entry_path) {
+                for sub in sub_entries.flatten() {
+                    let fname = sub.file_name().to_string_lossy().to_string();
+                    if file_re.is_match(&fname) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if detect_bililive_walk(&entry_path, dir_re, file_re, depth + 1) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Scan a BililiveRecorder workspace directory. Walks the tree so users can
+/// point at a parent folder that contains one or more recorder workdirs.
+pub fn scan_bililive_recorder(dir: &Path) -> WorkspaceScanResult {
+    let dir_re = Regex::new(BILIREC_DIR_REGEX).unwrap();
+    let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
+
+    let mut files: Vec<RecordingFileMeta> = Vec::new();
+    let mut streamer_dirs: Vec<StreamerDir> = Vec::new();
+
+    walk_bililive(
+        dir,
+        &dir_re,
+        &file_re,
+        None,
+        None,
+        &mut files,
+        &mut streamer_dirs,
+    );
+
+    WorkspaceScanResult {
+        adapter_id: "bililive-recorder".to_string(),
+        root_dir: dir.to_path_buf(),
+        files,
+        streamer_dirs,
+    }
+}
+
+fn walk_bililive(
+    dir: &Path,
+    dir_re: &Regex,
+    file_re: &Regex,
+    inherited_room_id: Option<String>,
+    inherited_streamer_name: Option<String>,
+    files: &mut Vec<RecordingFileMeta>,
+    streamer_dirs: &mut Vec<StreamerDir>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if !entry_path.is_dir() {
+            scan_file(
+                &entry_path,
+                file_re,
+                inherited_room_id.as_deref(),
+                inherited_streamer_name.as_deref(),
+                files,
+            );
+            continue;
+        }
+
+        let dir_name = entry.file_name().to_string_lossy().to_string();
+        let matched = dir_re
+            .captures(&dir_name)
+            .map(|caps| (caps[1].to_string(), caps[2].to_string()));
+
+        let (room_id, streamer_name) = if let Some((rid, name)) = matched {
+            streamer_dirs.push(StreamerDir {
+                room_id: rid.clone(),
+                name: name.clone(),
+                dir_path: entry_path.clone(),
+            });
+            (Some(rid), Some(name))
+        } else {
+            (inherited_room_id.clone(), inherited_streamer_name.clone())
+        };
+
+        walk_bililive(
+            &entry_path,
+            dir_re,
+            file_re,
+            room_id,
+            streamer_name,
+            files,
+            streamer_dirs,
+        );
+    }
+}
+
+/// Parse a single file and add to results if it's a video
+fn scan_file(
+    path: &Path,
+    file_re: &Regex,
+    dir_room_id: Option<&str>,
+    dir_streamer_name: Option<&str>,
+    results: &mut Vec<RecordingFileMeta>,
+) {
+    if !path.is_file() {
+        return;
+    }
+
+    let file_name = match path.file_name() {
+        Some(n) => n.to_string_lossy().to_string(),
+        None => return,
+    };
+
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if !VIDEO_EXTENSIONS.contains(&ext.as_str()) {
+        return;
+    }
+
+    // Try to parse BililiveRecorder filename pattern
+    let (room_id, recorded_at, title) = if let Some(caps) = file_re.captures(&file_name) {
+        let rid = caps[1].to_string();
+        let date = &caps[2]; // yyyyMMdd
+        let time = &caps[3]; // HHmmss
+        let _ms = &caps[4];
+        let title = caps[5].to_string();
+
+        // Format: yyyy-MM-dd HH:mm:ss
+        let recorded_at = format!(
+            "{}-{}-{} {}:{}:{}",
+            &date[0..4],
+            &date[4..6],
+            &date[6..8],
+            &time[0..2],
+            &time[2..4],
+            &time[4..6],
+        );
+
+        (Some(rid), Some(recorded_at), Some(title))
+    } else {
+        (None, None, None)
+    };
+
+    // Find associated files (same stem, different extension)
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut associated = Vec::new();
+    for assoc_ext in &["xml", "txt", "srt", "ass"] {
+        let assoc_path = parent.join(format!("{}.{}", stem, assoc_ext));
+        if assoc_path.exists() {
+            associated.push(assoc_path);
+        }
+    }
+
+    results.push(RecordingFileMeta {
+        room_id: room_id.or_else(|| dir_room_id.map(|s| s.to_string())),
+        streamer_name: dir_streamer_name.map(|s| s.to_string()),
+        stream_title: title,
+        recorded_at,
+        duration_ms: None, // Filled later by FFprobe
+        file_path: path.to_path_buf(),
+        file_name,
+        extension: ext,
+        associated_files: associated,
+    });
+}
+
+/// Group scanned files into recording sessions.
+///
+/// Grouping rule: same room_id + adjacent files within gap_threshold (default 1 hour)
+/// → same session.
+pub fn group_into_sessions(
+    files: &[RecordingFileMeta],
+    gap_threshold_secs: i64,
+) -> Vec<RecordingSession> {
+    // Group by room_id first
+    let mut by_room: HashMap<String, Vec<&RecordingFileMeta>> = HashMap::new();
+    for f in files {
+        let key = f.room_id.clone().unwrap_or_else(|| "unknown".to_string());
+        by_room.entry(key).or_default().push(f);
+    }
+
+    let mut sessions = Vec::new();
+
+    for (room_id, mut room_files) in by_room {
+        // Sort by recorded_at
+        room_files.sort_by(|a, b| {
+            a.recorded_at
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.recorded_at.as_deref().unwrap_or(""))
+        });
+
+        let mut current_session: Vec<&RecordingFileMeta> = Vec::new();
+        // End time of the last file in the current session (start + duration)
+        let mut last_end_secs: Option<i64> = None;
+
+        for file in &room_files {
+            let curr_start_secs = file.recorded_at.as_deref().and_then(parse_timestamp_secs);
+
+            let should_split =
+                if let (Some(prev_end), Some(curr_start)) = (last_end_secs, curr_start_secs) {
+                    // Gap = next file start - previous file end
+                    (curr_start - prev_end) > gap_threshold_secs
+                } else {
+                    !current_session.is_empty() && curr_start_secs.is_some()
+                };
+
+            if should_split && !current_session.is_empty() {
+                sessions.push(build_session(&room_id, &current_session));
+                current_session.clear();
+            }
+
+            current_session.push(file);
+
+            // Calculate end time: start + duration
+            last_end_secs = match (curr_start_secs, file.duration_ms) {
+                (Some(start), Some(dur)) => Some(start + dur / 1000),
+                (Some(start), None) => Some(start), // No duration info, use start as fallback
+                _ => last_end_secs,
+            };
+        }
+
+        if !current_session.is_empty() {
+            sessions.push(build_session(&room_id, &current_session));
+        }
+    }
+
+    // Sort sessions by start time (most recent first)
+    sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    sessions
+}
+
+fn build_session(room_id: &str, files: &[&RecordingFileMeta]) -> RecordingSession {
+    let first = files[0];
+    RecordingSession {
+        room_id: room_id.to_string(),
+        streamer_name: first.streamer_name.clone().unwrap_or_default(),
+        title: first.stream_title.clone().unwrap_or_default(),
+        started_at: first.recorded_at.clone().unwrap_or_default(),
+        files: files.iter().map(|f| (*f).clone()).collect(),
+    }
+}
+
+/// Parse "yyyy-MM-dd HH:mm:ss" to Unix seconds (UTC)
+fn parse_timestamp_secs(s: &str) -> Option<i64> {
+    use chrono::NaiveDateTime;
+    let ndt = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").ok()?;
+    Some(ndt.and_utc().timestamp())
+}
+
+/// Detect adapter type for a directory
+pub fn detect_adapter(dir: &Path) -> &'static str {
+    if detect_bililive_recorder(dir) {
+        "bililive-recorder"
+    } else {
+        "generic"
+    }
+}
+
+/// Scan a directory with auto-detected adapter
+pub fn scan_workspace(dir: &Path) -> WorkspaceScanResult {
+    let adapter = detect_adapter(dir);
+    scan_with_adapter(dir, adapter)
+}
+
+/// Scan a directory using the given adapter. Falls back to generic for unknown ids.
+pub fn scan_with_adapter(dir: &Path, adapter: &str) -> WorkspaceScanResult {
+    match adapter {
+        "bililive-recorder" => scan_bililive_recorder(dir),
+        _ => scan_generic(dir),
+    }
+}
+
+/// Generic scan: just find all video files recursively
+fn scan_generic(dir: &Path) -> WorkspaceScanResult {
+    let mut files = Vec::new();
+    scan_dir_recursive(dir, &mut files);
+
+    WorkspaceScanResult {
+        adapter_id: "generic".to_string(),
+        root_dir: dir.to_path_buf(),
+        files,
+        streamer_dirs: Vec::new(),
+    }
+}
+
+/// 递归扫描目录查找视频文件。
+///
+/// 安全约束（SEC-FS-04）：跳过符号链接目录，避免扫描逃出工作区。
+/// 性能约束（P5-PERF-34）：限制递归深度与结果数量，防止循环链接导致死循环。
+fn scan_dir_recursive(dir: &Path, results: &mut Vec<RecordingFileMeta>) {
+    const MAX_DEPTH: usize = 16;
+    const MAX_RESULTS: usize = 100_000;
+    let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
+    scan_dir_recursive_inner(dir, results, &file_re, 0, MAX_DEPTH, MAX_RESULTS);
+}
+
+fn scan_dir_recursive_inner(
+    dir: &Path,
+    results: &mut Vec<RecordingFileMeta>,
+    file_re: &Regex,
+    depth: usize,
+    max_depth: usize,
+    max_results: usize,
+) {
+    if depth > max_depth || results.len() >= max_results {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if results.len() >= max_results {
+            return;
+        }
+        let path = entry.path();
+        // symlink_metadata 不跟随符号链接；跳过符号链接目录避免递归到工作区外
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            scan_dir_recursive_inner(&path, results, file_re, depth + 1, max_depth, max_results);
+        } else if meta.is_file() {
+            scan_file(&path, file_re, None, None, results);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_meta(room_id: &str, recorded_at: &str, duration_ms: Option<i64>) -> RecordingFileMeta {
+        RecordingFileMeta {
+            room_id: Some(room_id.to_string()),
+            streamer_name: Some("test_streamer".to_string()),
+            stream_title: Some("test_title".to_string()),
+            recorded_at: Some(recorded_at.to_string()),
+            duration_ms,
+            file_path: PathBuf::from(format!("/test/{}.flv", recorded_at)),
+            file_name: format!("{}.flv", recorded_at),
+            extension: "flv".to_string(),
+            associated_files: vec![],
+        }
+    }
+
+    // ===== parse_timestamp_secs =====
+
+    #[test]
+    fn test_parse_timestamp_secs_valid() {
+        let secs = parse_timestamp_secs("2026-04-05 20:30:00");
+        assert!(secs.is_some());
+        let expected =
+            chrono::NaiveDateTime::parse_from_str("2026-04-05 20:30:00", "%Y-%m-%d %H:%M:%S")
+                .unwrap()
+                .and_utc()
+                .timestamp();
+        assert_eq!(secs.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_parse_timestamp_secs_invalid() {
+        assert!(parse_timestamp_secs("").is_none());
+        assert!(parse_timestamp_secs("invalid").is_none());
+        assert!(parse_timestamp_secs("2026-04-05").is_none()); // missing time part
+    }
+
+    // ===== group_into_sessions =====
+
+    #[test]
+    fn test_group_empty() {
+        let sessions = group_into_sessions(&[], 3600);
+        assert!(sessions.is_empty());
+    }
+
+    #[test]
+    fn test_group_single_file() {
+        let files = vec![make_meta("12345", "2026-04-05 20:00:00", Some(3600000))];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 1);
+        assert_eq!(sessions[0].room_id, "12345");
+    }
+
+    #[test]
+    fn test_group_same_session() {
+        // Two files 30min apart, both within 1h threshold
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)), // 20:00-20:30
+            make_meta("12345", "2026-04-05 20:30:00", Some(1800000)), // 20:30-21:00
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_split_by_large_gap() {
+        // Two files 2h apart, exceeding 1h threshold
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)), // 20:00-20:30
+            make_meta("12345", "2026-04-05 22:00:00", Some(1800000)), // 22:00-22:30
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].files.len(), 1);
+        assert_eq!(sessions[1].files.len(), 1);
+    }
+
+    #[test]
+    fn test_group_different_rooms() {
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", Some(3600000)),
+            make_meta("67890", "2026-04-05 20:00:00", Some(3600000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        assert_eq!(sessions.len(), 2);
+    }
+
+    #[test]
+    fn test_group_no_duration_fallback() {
+        // Files without duration info — gap = start - start (not start - end)
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:00:00", None),
+            make_meta("12345", "2026-04-05 20:10:00", None),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        // 10min gap < 1h → same session
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_unordered_input() {
+        // Input files in reverse order
+        let files = vec![
+            make_meta("12345", "2026-04-05 20:30:00", Some(1800000)),
+            make_meta("12345", "2026-04-05 20:00:00", Some(1800000)),
+        ];
+        let sessions = group_into_sessions(&files, 3600);
+        // Should be sorted and grouped into one session
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].files.len(), 2);
+    }
+
+    #[test]
+    fn test_group_no_room_id() {
+        let mut file = make_meta("12345", "2026-04-05 20:00:00", None);
+        file.room_id = None;
+        let sessions = group_into_sessions(&[file], 3600);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].room_id, "unknown");
+    }
+}

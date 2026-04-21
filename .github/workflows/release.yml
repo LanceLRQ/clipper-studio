@@ -1,0 +1,144 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: win-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundle_glob: |
+              clipper-studio/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+              clipper-studio/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          - platform: mac-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundle_glob: |
+              clipper-studio/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          - platform: mac-x64
+            runner: macos-13
+            target: x86_64-apple-darwin
+            bundle_glob: |
+              clipper-studio/src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          - platform: linux-x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bundle_glob: |
+              clipper-studio/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+              clipper-studio/src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux webkit deps
+        if: matrix.platform == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: clipper-studio/pnpm-lock.yaml
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: clipper-studio/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - name: Install frontend deps
+        working-directory: clipper-studio
+        run: pnpm install --frozen-lockfile
+
+      - name: Tauri build
+        working-directory: clipper-studio
+        run: pnpm tauri build --features builtin-plugins --target ${{ matrix.target }}
+
+      - name: Upload bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipper-studio-${{ matrix.platform }}
+          path: ${{ matrix.bundle_glob }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Create Draft Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p ./dist
+          find ./artifacts -type f \
+            \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" \
+               -o -name "*.AppImage" -o -name "*.deb" \) \
+            -exec cp {} ./dist/ \;
+          ls -lh ./dist
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: ./dist/*
+          body: |
+            ## ClipperStudio ${{ github.ref_name }}
+
+            本版本未做代码签名/公证，安装方式如下：
+
+            ### macOS
+            双击 `.dmg` 安装后若提示「已损坏」或「无法打开」：
+            ```bash
+            xattr -cr /Applications/ClipperStudio.app
+            ```
+            或首次打开时右键点击 App 图标选择「打开」。
+
+            ### Windows
+            双击 `.msi` 或 `.exe` 安装即可。SmartScreen 提示「无法验证发布者」时选择「仍要运行」。
+
+            ### Linux
+            - AppImage：`chmod +x *.AppImage && ./*.AppImage`
+            - deb：`sudo dpkg -i *.deb`
+
+            ### 首次启动
+            FFmpeg 与 DanmakuFactory 不随安装包分发，首次启动后请进入
+            **设置 > 依赖管理** 下载所需工具。

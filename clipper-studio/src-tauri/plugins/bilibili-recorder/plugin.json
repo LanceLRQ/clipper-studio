@@ -1,0 +1,42 @@
+{
+  "id": "recorder.bilibili",
+  "name": "BilibiliRecorder",
+  "type": "recorder",
+  "version": "1.0.0",
+  "api_version": 1,
+  "transport": "http",
+  "managed": false,
+  "description": "对接 BilibiliRecorder 录播姬，获取房间列表、同步录制文件、接收 Webhook 通知",
+  "config_schema": {
+    "api_url": {
+      "type": "string",
+      "default": "http://127.0.0.1:2007",
+      "description": "录播姬 HTTP API 地址"
+    },
+    "api_key": {
+      "type": "string",
+      "default": "",
+      "description": "录播姬 API 密钥（可选）"
+    },
+    "basic_user": {
+      "type": "string",
+      "default": "",
+      "description": "HTTP Basic 认证用户名（留空关闭）"
+    },
+    "basic_pass": {
+      "type": "string",
+      "default": "",
+      "description": "HTTP Basic 认证密码"
+    },
+    "webhook_secret": {
+      "type": "string",
+      "default": "",
+      "description": "Webhook 回调密钥，用于验证回调来源"
+    },
+    "auto_sync": {
+      "type": "boolean",
+      "default": false,
+      "description": "是否自动同步新录制文件到工作区"
+    }
+  }
+}
