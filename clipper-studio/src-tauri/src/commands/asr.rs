@@ -100,6 +100,7 @@ pub async fn submit_asr(
     language: Option<String>,
     force: Option<bool>,
 ) -> Result<i64, String> {
+    crate::utils::validation::validate_id(video_id, "video_id")?;
     let provider = get_provider(&state).await?;
     // Use frontend-provided language, or fall back to settings, or default "Chinese"
     let lang = match language {
@@ -123,6 +124,7 @@ pub async fn submit_asr(
 /// Poll ASR task status (call periodically from frontend)
 #[tauri::command]
 pub async fn poll_asr(state: State<'_, AppState>, asr_task_id: i64) -> Result<ASRTaskInfo, String> {
+    crate::utils::validation::validate_id(asr_task_id, "asr_task_id")?;
     let provider = get_provider(&state).await?;
     service::poll_asr(&state.db, &provider, asr_task_id).await
 }

@@ -347,6 +347,7 @@ pub async fn list_videos(
 /// Get a single video by ID
 #[tauri::command]
 pub async fn get_video(state: State<'_, AppState>, video_id: i64) -> Result<VideoInfo, String> {
+    crate::utils::validation::validate_id(video_id, "video_id")?;
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -369,6 +370,7 @@ pub async fn get_video(state: State<'_, AppState>, video_id: i64) -> Result<Vide
 /// Delete a video record (does not delete file on disk)
 #[tauri::command]
 pub async fn delete_video(state: State<'_, AppState>, video_id: i64) -> Result<(), String> {
+    crate::utils::validation::validate_id(video_id, "video_id")?;
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!("DELETE FROM videos WHERE id = {}", video_id),

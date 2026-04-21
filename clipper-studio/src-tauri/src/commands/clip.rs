@@ -71,6 +71,10 @@ pub async fn create_clip(
     app_handle: tauri::AppHandle,
     req: CreateClipRequest,
 ) -> Result<ClipTaskInfo, String> {
+    // 输入校验（SEC-INPUT-02 / SEC-INPUT-03）
+    crate::utils::validation::validate_id(req.video_id, "video_id")?;
+    crate::utils::validation::validate_optional_name(req.title.as_deref(), "切片标题")?;
+
     // Get video info with streamer name
     let video_row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
@@ -406,6 +410,7 @@ pub async fn create_clip(
 /// Cancel a clip task
 #[tauri::command]
 pub async fn cancel_clip(state: State<'_, AppState>, task_id: i64) -> Result<bool, String> {
+    crate::utils::validation::validate_id(task_id, "task_id")?;
     let cancelled = state.task_queue.cancel(task_id).await;
     if cancelled {
         let _ = update_task_status(&state.db, task_id, "cancelled", None).await;
@@ -426,6 +431,7 @@ pub async fn retry_clip_task(
     app_handle: tauri::AppHandle,
     task_id: i64,
 ) -> Result<ClipTaskInfo, String> {
+    crate::utils::validation::validate_id(task_id, "task_id")?;
     retry_task_internal(&*state, &app_handle, task_id).await
 }
 
@@ -1658,6 +1664,7 @@ pub async fn delete_clip_task(
     task_id: i64,
     delete_files: Option<bool>,
 ) -> Result<(), String> {
+    crate::utils::validation::validate_id(task_id, "task_id")?;
     // Check task status
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),

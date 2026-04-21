@@ -211,6 +211,33 @@ pub async fn execute_clip(
     Ok(())
 }
 
+/// 根据视频编码器类型，将 CRF 质量值转换为对应编码器的正确参数并追加到 `args`。
+///
+/// 背景（P4-COMPAT-18）：硬件编码器（VideoToolbox / NVENC / QSV / AMF）不支持
+/// `-crf`，各自使用不同的质量控制参数。若所有编码器都无条件使用 `-crf`，
+/// 硬件编码路径下参数会被忽略甚至导致报错，产出视频质量不可控。
+///
+/// - `videotoolbox` — 无等价参数，跳过（使用默认质量）
+/// - `nvenc`        — `-cq <val> -b:v 0`（0 比特率强制恒定质量模式）
+/// - `qsv`          — `-global_quality <val>`
+/// - `amf`          — `-q:v <val>`
+/// - 软件编码器    — `-crf <val>`
+pub fn apply_quality_args(video_codec: &str, crf: Option<u32>, args: &mut Vec<String>) {
+    let Some(crf_val) = crf else { return };
+    if video_codec.contains("videotoolbox") {
+        tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
+    } else if video_codec.contains("nvenc") {
+        args.extend(["-cq".to_string(), crf_val.to_string()]);
+        args.extend(["-b:v".to_string(), "0".to_string()]);
+    } else if video_codec.contains("qsv") {
+        args.extend(["-global_quality".to_string(), crf_val.to_string()]);
+    } else if video_codec.contains("amf") {
+        args.extend(["-q:v".to_string(), crf_val.to_string()]);
+    } else {
+        args.extend(["-crf".to_string(), crf_val.to_string()]);
+    }
+}
+
 /// Detect available encoders and select the best video codec.
 /// Priority: hardware (NVENC/VideoToolbox/QSV) > software (libx264)
 pub fn resolve_video_codec(ffmpeg_path: &str, codec_hint: &str) -> String {

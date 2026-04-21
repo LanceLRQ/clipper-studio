@@ -139,11 +139,11 @@ pub async fn merge_physical(
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
-    args.extend(["-c:v".to_string(), video_codec]);
+    args.extend(["-c:v".to_string(), video_codec.clone()]);
 
-    if let Some(crf_val) = crf {
-        args.extend(["-crf".to_string(), crf_val.to_string()]);
-    }
+    // Quality setting：通过 apply_quality_args 统一硬件/软件编码器质量参数
+    // （P4-COMPAT-18：原先无条件 -crf 在硬件编码器下会被忽略或报错）
+    crate::core::clipper::apply_quality_args(&video_codec, crf, &mut args);
 
     args.extend(["-c:a".to_string(), "aac".to_string()]);
     args.extend([

@@ -81,6 +81,11 @@ pub async fn create_workspace(
     state: State<'_, AppState>,
     req: CreateWorkspaceRequest,
 ) -> Result<WorkspaceInfo, String> {
+    // 输入校验（SEC-INPUT-02）
+    crate::utils::validation::validate_name(&req.name, "工作区名称")?;
+    crate::utils::validation::validate_url_length(&req.path, "工作区路径")?;
+    crate::utils::validation::validate_name(&req.adapter_id, "适配器类型")?;
+
     // Validate path exists
     let path = std::path::Path::new(&req.path);
     if !path.exists() {
@@ -883,9 +888,7 @@ pub async fn update_workspace(
     let mut set_clauses: Vec<String> = Vec::new();
 
     if let Some(ref name) = req.name {
-        if name.trim().is_empty() {
-            return Err("工作区名称不能为空".to_string());
-        }
+        crate::utils::validation::validate_name(name, "工作区名称")?;
         set_clauses.push(format!("name = '{}'", name.replace('\'', "''")));
     }
 

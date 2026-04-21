@@ -535,26 +535,8 @@ pub async fn burn_subtitle_with_progress(
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
     args.extend(["-c:v".to_string(), video_codec.clone()]);
 
-    // Quality setting: hardware encoders need special handling, software encoders use -crf
-    if let Some(crf_val) = crf {
-        if video_codec.contains("videotoolbox") {
-            // VideoToolbox does not support -crf or -cq; use default quality
-            tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
-        } else if video_codec.contains("nvenc") {
-            // NVENC: -cq is the CRF-equivalent constant quality mode;
-            // -b:v 0 forces CQ mode (otherwise encoder falls back to bitrate-limited VBR)
-            args.extend(["-cq".to_string(), crf_val.to_string()]);
-            args.extend(["-b:v".to_string(), "0".to_string()]);
-        } else if video_codec.contains("qsv") {
-            // QSV: -global_quality is the CRF-like quality control
-            args.extend(["-global_quality".to_string(), crf_val.to_string()]);
-        } else if video_codec.contains("amf") {
-            // AMF: -q:v works as quality level
-            args.extend(["-q:v".to_string(), crf_val.to_string()]);
-        } else {
-            args.extend(["-crf".to_string(), crf_val.to_string()]);
-        }
-    }
+    // Quality setting：统一通过 apply_quality_args 处理硬件/软件编码器差异
+    crate::core::clipper::apply_quality_args(&video_codec, crf, &mut args);
 
     // Audio: copy (no re-encoding needed)
     args.extend(["-c:a".to_string(), "copy".to_string()]);

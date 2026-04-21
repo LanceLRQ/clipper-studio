@@ -539,6 +539,7 @@ pub async fn delete_media_task(
     task_id: i64,
     delete_files: Option<bool>,
 ) -> Result<(), String> {
+    crate::utils::validation::validate_id(task_id, "task_id")?;
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
