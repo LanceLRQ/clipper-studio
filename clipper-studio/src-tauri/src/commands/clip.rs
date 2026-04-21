@@ -1717,6 +1717,7 @@ pub async fn delete_clip_task(
     state: State<'_, AppState>,
     task_id: i64,
     delete_files: Option<bool>,
+    force: Option<bool>,
 ) -> Result<(), String> {
     crate::utils::validation::validate_id(task_id, "task_id")?;
     // Check task status
@@ -1732,8 +1733,17 @@ pub async fn delete_clip_task(
     .ok_or("任务不存在".to_string())?;
 
     let status: String = row.try_get("", "status").unwrap_or_default();
+
     if status == "pending" || status == "processing" {
-        return Err("请先取消该任务".to_string());
+        if force.unwrap_or(false) {
+            // Auto-cancel then proceed to delete
+            let _ = state.task_queue.cancel(task_id).await;
+            let _ = update_task_status(&state.db, task_id, "cancelled", None).await;
+            // Brief wait for status to propagate
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        } else {
+            return Err("请先取消该任务，或使用 force=true 自动取消后删除".to_string());
+        }
     }
 
     // Optionally delete output files from disk

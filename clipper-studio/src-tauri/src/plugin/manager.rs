@@ -166,6 +166,30 @@ impl PluginManager {
                     .ok_or("No executable defined for current platform")?;
 
                 let full_path = meta.dir.join(exec_path);
+
+                // Validate executable exists
+                if !full_path.exists() {
+                    return Err(format!(
+                        "Plugin executable not found: {}",
+                        full_path.display()
+                    ));
+                }
+
+                // Check executable permission on Unix
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = std::fs::metadata(&full_path) {
+                        let mode = metadata.permissions().mode();
+                        if mode & 0o111 == 0 {
+                            return Err(format!(
+                                "Plugin executable lacks execute permission: {}",
+                                full_path.display()
+                            ));
+                        }
+                    }
+                }
+
                 Box::new(StdioTransport::new(full_path, meta.dir.clone()))
             }
             Transport::Builtin => {

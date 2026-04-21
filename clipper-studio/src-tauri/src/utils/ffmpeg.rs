@@ -574,8 +574,7 @@ pub async fn burn_subtitle_with_progress(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                crate::core::clipper::graceful_kill_child(&mut child).await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {

@@ -11,6 +11,30 @@ use crate::utils::ffmpeg;
 /// FFmpeg 进度事件节流间隔（ms）——避免 30fps 进度 spam 导致前端重渲染卡顿
 pub(crate) const PROGRESS_EMIT_INTERVAL_MS: u64 = 200;
 
+/// Graceful FFmpeg shutdown: send SIGTERM first, wait 3s, then SIGKILL.
+///
+/// On Unix, tokio's `kill()` sends SIGKILL immediately which prevents
+/// FFmpeg from finalizing output (potentially leaving corrupt files).
+/// Sending SIGTERM first gives FFmpeg a chance to write MP4 moov atom.
+pub(crate) async fn graceful_kill_child(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        // Send SIGTERM via PID
+        if let Some(id) = child.id() {
+            unsafe {
+                libc::kill(id as i32, libc::SIGTERM);
+            }
+        }
+        // Wait up to 3s for graceful exit
+        match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
+            Ok(Ok(_)) => return,
+            _ => {} // Timed out or error, fall through to SIGKILL
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
 /// 按 ffmpeg 可执行路径缓存 `-encoders` 输出，避免 clip 时重复启动子进程
 /// key: ffmpeg_path, value: encoder 名称集合（stdout 文本）
 fn encoders_cache() -> &'static Mutex<HashMap<String, String>> {
@@ -141,8 +165,7 @@ pub async fn execute_clip(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                graceful_kill_child(&mut child).await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
