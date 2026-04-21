@@ -162,9 +162,9 @@ fn walk_bililive(
         }
 
         let dir_name = entry.file_name().to_string_lossy().to_string();
-        let matched = dir_re.captures(&dir_name).map(|caps| {
-            (caps[1].to_string(), caps[2].to_string())
-        });
+        let matched = dir_re
+            .captures(&dir_name)
+            .map(|caps| (caps[1].to_string(), caps[2].to_string()));
 
         let (room_id, streamer_name) = if let Some((rid, name)) = matched {
             streamer_dirs.push(StreamerDir {

@@ -595,9 +595,7 @@ pub async fn start_asr_service(
                 base_dir = parent.to_path_buf();
             }
         }
-        ASRLaunchMode::Native {
-            base_dir,
-        }
+        ASRLaunchMode::Native { base_dir }
     };
 
     let config = ASRStartConfig {

@@ -900,10 +900,7 @@ pub async fn update_workspace(
         if !matches!(trimmed, "bililive-recorder" | "generic") {
             return Err(format!("未知的适配器类型: {}", trimmed));
         }
-        set_clauses.push(format!(
-            "adapter_id = '{}'",
-            trimmed.replace('\'', "''")
-        ));
+        set_clauses.push(format!("adapter_id = '{}'", trimmed.replace('\'', "''")));
     }
 
     // clip_output_dir: Some("") or Some(path) both accepted; empty string stored as NULL
