@@ -677,7 +677,7 @@ fn get_system_font_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from("/usr/share/fonts"));
         dirs.push(PathBuf::from("/usr/local/share/fonts"));
         if let Some(home) = std::env::var_os("HOME") {
-            dirs.push(PathBuf::from(home).join(".local/share/fonts"));
+            dirs.push(PathBuf::from(&home).join(".local/share/fonts"));
             dirs.push(PathBuf::from(home).join(".fonts"));
         }
     }
