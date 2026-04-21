@@ -399,28 +399,42 @@ function TasksPage() {
     });
   };
 
-  /** Compute aggregate status for a batch */
-  const getBatchStatus = (batchTasks: ClipTaskInfo[]): string => {
-    const statuses = batchTasks.map(
-      (t) => liveProgress[t.id]?.status ?? t.status,
-    );
-    if (statuses.some((s) => s === "processing")) return "processing";
-    if (statuses.some((s) => s === "pending")) return "pending";
-    if (statuses.some((s) => s === "failed")) return "failed";
-    if (statuses.every((s) => s === "completed")) return "completed";
-    if (statuses.every((s) => s === "cancelled")) return "cancelled";
-    return "completed";
-  };
+  /**
+   * 预计算各 batch 的聚合状态/进度/完成数映射表。
+   * 仅在 groups 或 liveProgress 变化时重算，避免渲染时对每个 batch
+   * 反复调用 getBatchStatus/getBatchProgress 造成 O(n*m) 重复计算。
+   */
+  const batchAggregates = useMemo(() => {
+    const map = new Map<
+      string,
+      { status: string; progress: number; completedCount: number }
+    >();
+    for (const group of groups) {
+      if (!group.isBatch) continue;
+      const statuses = group.tasks.map(
+        (t) => liveProgress[t.id]?.status ?? t.status,
+      );
+      let status: string = "completed";
+      if (statuses.some((s) => s === "processing")) status = "processing";
+      else if (statuses.some((s) => s === "pending")) status = "pending";
+      else if (statuses.some((s) => s === "failed")) status = "failed";
+      else if (statuses.every((s) => s === "cancelled")) status = "cancelled";
 
-  /** Compute aggregate progress for a batch */
-  const getBatchProgress = (batchTasks: ClipTaskInfo[]): number => {
-    if (batchTasks.length === 0) return 0;
-    const total = batchTasks.reduce(
-      (sum, t) => sum + (liveProgress[t.id]?.progress ?? t.progress),
-      0,
-    );
-    return total / batchTasks.length;
-  };
+      const progress =
+        group.tasks.length === 0
+          ? 0
+          : group.tasks.reduce(
+              (sum, t) =>
+                sum + (liveProgress[t.id]?.progress ?? t.progress),
+              0,
+            ) / group.tasks.length;
+
+      const completedCount = statuses.filter((s) => s === "completed").length;
+
+      map.set(group.key, { status, progress, completedCount });
+    }
+    return map;
+  }, [groups, liveProgress]);
 
   return (
     <div className="flex flex-col h-full">
@@ -624,16 +638,14 @@ function TasksPage() {
               );
             }
 
-            // Batch group
-            const batchStatus = getBatchStatus(group.tasks);
-            const batchProgress = getBatchProgress(group.tasks);
+            // Batch group（使用 useMemo 预计算的聚合映射）
+            const agg = batchAggregates.get(group.key);
+            const batchStatus = agg?.status ?? "pending";
+            const batchProgress = agg?.progress ?? 0;
+            const completedCount = agg?.completedCount ?? 0;
             const batchLabel =
               statusLabels[batchStatus] ?? statusLabels.pending;
             const isCollapsed = collapsedGroups.has(group.key);
-            const completedCount = group.tasks.filter(
-              (t) =>
-                (liveProgress[t.id]?.status ?? t.status) === "completed",
-            ).length;
 
             return (
               <div

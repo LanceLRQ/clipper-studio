@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -179,12 +179,19 @@ export function SubtitlePanel({
     (s) => s.start_ms <= currentAbsoluteMs && s.end_ms > currentAbsoluteMs
   );
 
-  // Filter by search
-  const displaySegments = searchQuery
-    ? segments.filter((s) =>
-        s.text.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : segments;
+  // 搜索防抖：避免每次按键对 1000+ 条字幕做 O(n) lower-case 全量扫描
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Filter by (debounced) search，useMemo 缓存过滤结果避免 currentTime 更新时重算
+  const displaySegments = useMemo(() => {
+    if (!debouncedQuery) return segments;
+    const needle = debouncedQuery.toLowerCase();
+    return segments.filter((s) => s.text.toLowerCase().includes(needle));
+  }, [segments, debouncedQuery]);
 
   // Virtualized row rendering (P5-PERF-09): avoid mounting thousands of DOM nodes
   const rowVirtualizer = useVirtualizer({
@@ -198,10 +205,10 @@ export function SubtitlePanel({
   // rows mounted. Only triggers when activeIndex or search toggle changes, not
   // on every currentTime tick.
   useEffect(() => {
-    if (searchQuery) return;
+    if (debouncedQuery) return;
     if (activeIndex < 0) return;
     rowVirtualizer.scrollToIndex(activeIndex, { align: "auto", behavior: "smooth" });
-  }, [activeIndex, searchQuery, rowVirtualizer]);
+  }, [activeIndex, debouncedQuery, rowVirtualizer]);
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -382,7 +389,7 @@ export function SubtitlePanel({
               const seg = displaySegments[virtualRow.index];
               if (!seg) return null;
               const isActive =
-                !searchQuery && segments.indexOf(seg) === activeIndex;
+                !debouncedQuery && segments.indexOf(seg) === activeIndex;
               const startSecs = toRelativeSecs(seg.start_ms);
               const endSecs = toRelativeSecs(seg.end_ms);
 

@@ -298,6 +298,19 @@ function StreamerVideosPage() {
     });
   };
 
+  // 稳定化 VideoRow 回调引用：防止 memo 失效导致整页字幕/会话重渲染
+  const handleRowNavigate = useCallback(
+    (video: { id: number }) => navigateToVideo(video.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const handleRowDelete = useCallback(
+    (video: { id: number; file_name: string }, e: React.MouseEvent) =>
+      handleDelete(video.id, video.file_name, e),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const streamerName =
     sid === -1 ? "未关联主播" : streamerInfo?.name ?? "加载中...";
 
@@ -478,16 +491,8 @@ function StreamerVideosPage() {
                                 key={video.id}
                                 video={video}
                                 compact
-                                onNavigate={() =>
-                                  navigateToVideo(video.id)
-                                }
-                                onDelete={(e) =>
-                                  handleDelete(
-                                    video.id,
-                                    video.file_name,
-                                    e
-                                  )
-                                }
+                                onNavigate={handleRowNavigate}
+                                onDelete={handleRowDelete}
                                 selected={selectedVideoIds.has(video.id)}
                                 onToggleSelect={toggleVideoSelect}
                               />

@@ -275,6 +275,20 @@ function VideosPage() {
     });
   };
 
+  // 稳定化 VideoRow 回调引用：避免每次父组件重渲染都生成新闭包导致 memo 失效
+  const handleRowNavigate = useCallback(
+    (video: { id: number }) => navigateToVideo(video.id),
+    // navigate 来自 TanStack Router，是稳定引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+  const handleRowDelete = useCallback(
+    (video: { id: number; file_name: string }, e: React.MouseEvent) =>
+      handleDelete(video.id, video.file_name, e),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const handleScan = async () => {
     if (!activeWs) return;
     setScanning(true);
@@ -477,10 +491,8 @@ function VideosPage() {
               <VideoRow
                 key={video.id}
                 video={video}
-                onNavigate={() => navigateToVideo(video.id)}
-                onDelete={(e) =>
-                  handleDelete(video.id, video.file_name, e)
-                }
+                onNavigate={handleRowNavigate}
+                onDelete={handleRowDelete}
                 selected={selectedVideoIds.has(video.id)}
                 onToggleSelect={toggleVideoSelect}
                 tags={videoTagsMap[video.id]}

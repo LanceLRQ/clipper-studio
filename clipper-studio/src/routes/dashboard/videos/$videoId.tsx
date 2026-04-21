@@ -133,13 +133,31 @@ function VideoDetailPage() {
     document.addEventListener("mouseup", onMouseUp);
   }, []);
 
-  // Track playback time
+  // Track playback time：改用原生 timeupdate 事件（浏览器按帧触发，
+  // 比 250ms 轮询 DOM 更轻量，且避免在 video 元素未挂载时的无效查询）
   useEffect(() => {
-    const interval = setInterval(() => {
-      const videoEl = document.querySelector("video");
+    let videoEl: HTMLVideoElement | null = null;
+    let detachFn: (() => void) | null = null;
+
+    const onTimeUpdate = () => {
       if (videoEl) setCurrentTime(videoEl.currentTime);
+    };
+
+    // video 元素可能由 vidstack 延迟挂载，轮询查找后仅绑定一次事件
+    const attachTimer = setInterval(() => {
+      const el = document.querySelector("video");
+      if (el && el !== videoEl) {
+        videoEl = el as HTMLVideoElement;
+        videoEl.addEventListener("timeupdate", onTimeUpdate);
+        detachFn = () => videoEl?.removeEventListener("timeupdate", onTimeUpdate);
+        clearInterval(attachTimer);
+      }
     }, 250);
-    return () => clearInterval(interval);
+
+    return () => {
+      clearInterval(attachTimer);
+      detachFn?.();
+    };
   }, []);
 
   // Load video data
