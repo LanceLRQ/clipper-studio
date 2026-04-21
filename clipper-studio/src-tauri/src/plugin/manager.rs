@@ -343,6 +343,11 @@ impl PluginManager {
         action: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        // Auto-restart crashed managed services before calling
+        if let Some(svc) = self.services.read().await.get(plugin_id) {
+            svc.check_and_restart().await;
+        }
+
         let transports = self.transports.read().await;
         let transport = transports
             .get(plugin_id)
