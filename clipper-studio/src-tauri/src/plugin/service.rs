@@ -19,6 +19,7 @@ pub struct ServiceManager {
     logs: Mutex<VecDeque<String>>,
     port: u16,
     health_endpoint: String,
+    log_tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl ServiceManager {
@@ -29,6 +30,7 @@ impl ServiceManager {
             logs: Mutex::new(VecDeque::new()),
             port,
             health_endpoint: health_endpoint.to_string(),
+            log_tasks: Mutex::new(Vec::new()),
         }
     }
 
@@ -64,29 +66,33 @@ impl ServiceManager {
             .spawn()
             .map_err(|e| format!("Failed to start service: {}", e))?;
 
-        // Capture stdout logs in background
+        // Capture stdout/stderr logs in background, save handles for clean shutdown
+        let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+
         if let Some(stdout) = child.stdout.take() {
             let plugin_id = self.plugin_id.clone();
-            // For simplicity, just spawn and let it log to tracing
-            tokio::spawn(async move {
+            handles.push(tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::debug!("[{}] {}", plugin_id, line);
                 }
-            });
+            }));
         }
 
-        // Capture stderr logs
         if let Some(stderr) = child.stderr.take() {
             let plugin_id = self.plugin_id.clone();
-            tokio::spawn(async move {
+            handles.push(tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     tracing::warn!("[{}] stderr: {}", plugin_id, line);
                 }
-            });
+            }));
+        }
+
+        if let Ok(mut guard) = self.log_tasks.lock() {
+            *guard = handles;
         }
 
         {
@@ -118,6 +124,13 @@ impl ServiceManager {
 
     /// Stop the service process
     pub async fn stop(&self) -> Result<(), String> {
+        // Abort log capture tasks
+        if let Ok(mut guard) = self.log_tasks.lock() {
+            for handle in guard.drain(..) {
+                handle.abort();
+            }
+        }
+
         // Extract child from lock before awaiting (MutexGuard is not Send)
         let child = self.child.lock().ok().and_then(|mut g| g.take());
         if let Some(mut child) = child {

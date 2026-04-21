@@ -516,20 +516,16 @@ pub async fn burn_subtitle_with_progress(
     let mut args: Vec<String> = Vec::new();
     args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
 
-    let vf_filter = if cfg!(target_os = "windows") {
-        // Escape colon for subtitles filter's internal option parser.
-        // Single quotes protect against the FFmpeg filter-graph parser,
-        // but the subtitles filter also splits on ':' internally.
-        // '\:' tells the subtitles option parser to treat ':' as literal.
-        let path = ass_path
-            .to_string_lossy()
-            .replace('\\', "/")
-            .replace(':', "\\:");
-        format!("subtitles='{}'", path)
-    } else {
-        format!("ass={}", ass_escaped)
-    };
-    args.extend(["-vf".to_string(), vf_filter]);
+    // Platform font directories for libass (COMPAT-12)
+    for font_dir in get_system_font_dirs() {
+        if font_dir.exists() {
+            args.extend(["-fontsdir".to_string(), font_dir.to_string_lossy().to_string()]);
+        }
+    }
+
+    // 统一使用 ass= 滤镜，确保跨平台渲染行为一致
+    // escape_ass_path 已处理反斜杠和冒号转义
+    args.extend(["-vf".to_string(), format!("ass={}", ass_escaped)]);
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
@@ -655,6 +651,35 @@ pub async fn burn_subtitle_with_progress(
 fn escape_ass_path(ass_path: &Path) -> String {
     let path_str = ass_path.to_string_lossy().to_string();
     path_str.replace('\\', "/").replace(':', "\\:")
+}
+
+/// Returns platform-specific system font directories for libass.
+fn get_system_font_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        dirs.push(PathBuf::from("/Library/Fonts"));
+        dirs.push(PathBuf::from("/System/Library/Fonts"));
+        if let Some(home) = std::env::var_os("HOME") {
+            dirs.push(PathBuf::from(home).join("Library/Fonts"));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(windir) = std::env::var("WINDIR") {
+            dirs.push(PathBuf::from(windir).join("Fonts"));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        dirs.push(PathBuf::from("/usr/share/fonts"));
+        dirs.push(PathBuf::from("/usr/local/share/fonts"));
+        if let Some(home) = std::env::var_os("HOME") {
+            dirs.push(PathBuf::from(home).join(".local/share/fonts"));
+            dirs.push(PathBuf::from(home).join(".fonts"));
+        }
+    }
+    dirs
 }
 
 /// Get FFmpeg version string

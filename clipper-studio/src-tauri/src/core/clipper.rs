@@ -256,22 +256,24 @@ fn detect_best_h264(ffmpeg_path: &str) -> String {
         "h264_amf",          // AMD
     ];
     for c in candidates {
-        if encoder_available(ffmpeg_path, c) {
+        if encoder_available(ffmpeg_path, c) && encoder_really_available(ffmpeg_path, c) {
             tracing::info!("Using hardware H.264 encoder: {}", c);
             return c.to_string();
         }
     }
+    tracing::info!("No hardware H.264 encoder available, falling back to libx264");
     "libx264".to_string()
 }
 
 fn detect_best_h265(ffmpeg_path: &str) -> String {
     let candidates = ["hevc_videotoolbox", "hevc_nvenc", "hevc_qsv", "hevc_amf"];
     for c in candidates {
-        if encoder_available(ffmpeg_path, c) {
+        if encoder_available(ffmpeg_path, c) && encoder_really_available(ffmpeg_path, c) {
             tracing::info!("Using hardware H.265 encoder: {}", c);
             return c.to_string();
         }
     }
+    tracing::info!("No hardware H.265 encoder available, falling back to libx265");
     "libx265".to_string()
 }
 
@@ -307,6 +309,52 @@ fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
     }
 
     contains
+}
+
+/// Cache for hardware encoder test-encode results (key: "ffmpeg_path:encoder")
+fn encoders_verified() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> = OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Verify a hardware encoder can actually produce output.
+///
+/// FFmpeg may list hardware encoders in `-encoders` even when the required
+/// hardware/driver is absent (e.g., NVENC without NVIDIA GPU, VideoToolbox
+/// in headless environments). This runs a minimal test encode and caches
+/// the result to avoid re-checking on every clip.
+fn encoder_really_available(ffmpeg_path: &str, encoder: &str) -> bool {
+    let key = format!("{}:{}", ffmpeg_path, encoder);
+
+    if let Ok(guard) = encoders_verified().lock() {
+        if let Some(&result) = guard.get(&key) {
+            return result;
+        }
+    }
+
+    let result = std::process::Command::new(ffmpeg_path)
+        .args([
+            "-hide_banner",
+            "-f", "lavfi",
+            "-i", "color=c=black:s=64x64:d=0.1",
+            "-c:v", encoder,
+            "-frames:v", "1",
+            "-f", "null",
+            "-",
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !result {
+        tracing::info!("Encoder {} listed but hardware unavailable, falling back", encoder);
+    }
+
+    if let Ok(mut guard) = encoders_verified().lock() {
+        guard.insert(key, result);
+    }
+
+    result
 }
 
 // ====== Two-pass Clip + Burn Pipeline ======

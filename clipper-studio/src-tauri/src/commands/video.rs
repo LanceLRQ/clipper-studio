@@ -226,7 +226,7 @@ pub async fn list_videos(
 ) -> Result<ListVideosResponse, String> {
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     // Build WHERE clauses dynamically
     let mut conditions: Vec<String> = Vec::new();
@@ -460,7 +460,7 @@ pub async fn list_sessions(
 
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     let sort_dir = match req.sort_order.as_deref() {
         Some("asc") => "ASC",
@@ -619,7 +619,7 @@ pub async fn list_streamers(
     });
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     let ws_filter = match req.workspace_id {
         Some(id) => format!("WHERE v.workspace_id = {}", id),
