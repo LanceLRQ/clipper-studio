@@ -117,7 +117,15 @@ impl PluginManager {
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    tracing::debug!("Skipping {}: {}", dir_name, e);
+                    tracing::warn!("Skipping plugin {}: {}", dir_name, e);
+                    results.push(PluginScanResult {
+                        id: dir_name.clone(),
+                        name: dir_name,
+                        version: String::new(),
+                        plugin_type: String::new(),
+                        status: "error".to_string(),
+                        error: Some(e.to_string()),
+                    });
                 }
             }
         }
@@ -383,7 +391,11 @@ impl PluginManager {
         let mut services = self.services.write().await;
         for (id, svc) in services.drain() {
             tracing::info!("Shutting down plugin service: {}", id);
-            let _ = svc.stop().await;
+            match tokio::time::timeout(std::time::Duration::from_secs(5), svc.stop()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("Failed to stop plugin {}: {}", id, e),
+                Err(_) => tracing::warn!("Timeout stopping plugin {} (5s)", id),
+            }
         }
     }
 
