@@ -1,6 +1,6 @@
 use crate::utils::locks::RwLockExt;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, State};
 
 use crate::core::clipper::{self, BurnOptions, PresetOptions};
@@ -1221,6 +1221,23 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+/// SEC-FS-05：生成带随机后缀的独占临时文件路径。
+///
+/// 使用 `tempfile::Builder`（内部 O_EXCL）原子创建唯一文件，再 `keep()` 释放
+/// auto-delete 守卫把清理责任交给调用方现有的 `remove_file` 逻辑。
+/// 避免仅以 `task_id` 作为文件名可被本机其他进程预测导致 TOCTOU 替换攻击。
+/// 失败时返回 None，调用方应优雅降级跳过该可选流程。
+fn create_random_tmp(dir: &Path, prefix: &str, suffix: &str) -> Option<PathBuf> {
+    tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(suffix)
+        .tempfile_in(dir)
+        .ok()?
+        .keep()
+        .ok()
+        .map(|(_, path)| path)
+}
+
 // ====== Batch Clip Creation ======
 
 #[derive(Debug, Deserialize)]
@@ -1363,29 +1380,50 @@ async fn prepare_burn_options(
                         scroll_ms,
                     );
                     if !filtered.is_empty() {
-                        // Write filtered XML for DanmakuFactory
-                        let tmp_xml = tmp_dir.join(format!("clipper_{}_danmaku.xml", task_id));
-                        let tmp_ass = tmp_dir.join(format!("clipper_{}_danmaku.ass", task_id));
-                        if crate::core::danmaku::write_bilibili_xml(&filtered, &tmp_xml).is_ok() {
-                            let options = crate::core::danmaku::DanmakuAssOptions::default();
-                            match crate::core::danmaku::convert_to_ass(
-                                danmaku_factory_path,
-                                &tmp_xml,
-                                &tmp_ass,
-                                &options,
-                            )
-                            .await
+                        // SEC-FS-05：随机名独占临时文件替代 task_id 预测性命名
+                        let prefix = format!("clipper_{}_", task_id);
+                        let tmp_files = create_random_tmp(&tmp_dir, &prefix, "_danmaku.xml")
+                            .zip(create_random_tmp(&tmp_dir, &prefix, "_danmaku.ass"));
+                        if let Some((tmp_xml, tmp_ass)) = tmp_files {
+                            if crate::core::danmaku::write_bilibili_xml(&filtered, &tmp_xml)
+                                .is_ok()
                             {
-                                Ok(()) => {
-                                    danmaku_ass_path = Some(tmp_ass);
-                                    tracing::info!("Generated danmaku ASS for task {}", task_id);
+                                let options = crate::core::danmaku::DanmakuAssOptions::default();
+                                match crate::core::danmaku::convert_to_ass(
+                                    danmaku_factory_path,
+                                    &tmp_xml,
+                                    &tmp_ass,
+                                    &options,
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        danmaku_ass_path = Some(tmp_ass);
+                                        tracing::info!(
+                                            "Generated danmaku ASS for task {}",
+                                            task_id
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "DanmakuFactory conversion failed: {}",
+                                            e
+                                        );
+                                        // 转换失败时清理预创建的空 ASS 占位
+                                        let _ = std::fs::remove_file(&tmp_ass);
+                                    }
                                 }
-                                Err(e) => {
-                                    tracing::warn!("DanmakuFactory conversion failed: {}", e);
-                                }
+                            } else {
+                                // XML 写入失败：清理预创建的空 ASS 占位
+                                let _ = std::fs::remove_file(&tmp_ass);
                             }
+                            let _ = std::fs::remove_file(&tmp_xml);
+                        } else {
+                            tracing::warn!(
+                                "Skipping danmaku burn: temp file creation failed for task {}",
+                                task_id
+                            );
                         }
-                        let _ = std::fs::remove_file(&tmp_xml);
                     } else {
                         tracing::info!("No danmaku in clip range [{}-{}ms]", start_ms, end_ms);
                     }
@@ -1401,20 +1439,36 @@ async fn prepare_burn_options(
 
     // Generate subtitle ASS
     if include_subtitle {
-        let tmp_ass = tmp_dir.join(format!("clipper_{}_subtitle.ass", task_id));
-        match crate::core::subtitle::export_ass_for_clip(db, video_id, start_ms, end_ms, &tmp_ass)
+        // SEC-FS-05：随机名独占临时文件
+        if let Some(tmp_ass) = create_random_tmp(
+            &tmp_dir,
+            &format!("clipper_{}_", task_id),
+            "_subtitle.ass",
+        ) {
+            match crate::core::subtitle::export_ass_for_clip(
+                db, video_id, start_ms, end_ms, &tmp_ass,
+            )
             .await
-        {
-            Ok(true) => {
-                subtitle_ass_path = Some(tmp_ass);
-                tracing::info!("Generated subtitle ASS for task {}", task_id);
+            {
+                Ok(true) => {
+                    subtitle_ass_path = Some(tmp_ass);
+                    tracing::info!("Generated subtitle ASS for task {}", task_id);
+                }
+                Ok(false) => {
+                    // 无字幕，清理空占位文件
+                    let _ = std::fs::remove_file(&tmp_ass);
+                    tracing::info!("No subtitles in clip range [{}-{}ms]", start_ms, end_ms);
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&tmp_ass);
+                    tracing::warn!("Failed to generate subtitle ASS: {}", e);
+                }
             }
-            Ok(false) => {
-                tracing::info!("No subtitles in clip range [{}-{}ms]", start_ms, end_ms);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to generate subtitle ASS: {}", e);
-            }
+        } else {
+            tracing::warn!(
+                "Skipping subtitle burn: temp file creation failed for task {}",
+                task_id
+            );
         }
     }
 

@@ -102,5 +102,9 @@ default = ["builtin-plugins"]
 builtin-plugins = ["dep:clipper-studio-plugin-recorder", "dep:clipper-studio-plugin-storage"]
 devtools = ["tauri/devtools"]
 
+# tempfile 用于生成随机名独占临时文件（SEC-FS-05），同时兼作 dev-dependency
+[dependencies.tempfile]
+version = "3"
+
 [dev-dependencies]
-tempfile = "3"
+# （tempfile 已在 [dependencies] 中声明）

@@ -488,8 +488,13 @@ pub fn reveal_file(path: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
+        // P4-COMPAT-09：explorer 对 `/select,<path>` 的路径部分要求自行加引号，
+        // 否则含空格时会被 explorer 内部解析错误分割。
+        // Rust 的默认 Command::arg 转义会把整个参数加引号（即 "/select,C:\a b\c" 而非 /select,"C:\a b\c"），
+        // 因此用 raw_arg 传入我们自己已引号化的字符串。
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .raw_arg(format!("/select,\"{}\"", path))
             .spawn()
             .map_err(|e| e.to_string())?;
     }

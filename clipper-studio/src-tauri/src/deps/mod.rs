@@ -164,6 +164,9 @@ impl DependencyManager {
 
         let dep_dir = self.deps_dir.join(dep_id);
         let temp_dir = self.deps_dir.join(format!(".{}-temp", dep_id));
+        // P4-COMPAT-17：extract 目标改为 staging 目录；全部源成功后再原子替换
+        // dep_dir。这样部分下载失败不会污染已安装的旧版本，也不会留下半成品。
+        let staging_dir = self.deps_dir.join(format!(".{}-staging", dep_id));
 
         // Update status to downloading
         self.update_registry(
@@ -184,12 +187,12 @@ impl DependencyManager {
         std::fs::create_dir_all(&temp_dir)
             .map_err(|e| format!("Failed to create temp directory: {}", e))?;
 
-        // Clean existing install dir
-        if dep_dir.exists() {
-            let _ = std::fs::remove_dir_all(&dep_dir);
+        // Clean staging dir（只清理 staging，保留现有 dep_dir 直到全部成功）
+        if staging_dir.exists() {
+            let _ = std::fs::remove_dir_all(&staging_dir);
         }
-        std::fs::create_dir_all(&dep_dir)
-            .map_err(|e| format!("Failed to create dep directory: {}", e))?;
+        std::fs::create_dir_all(&staging_dir)
+            .map_err(|e| format!("Failed to create staging directory: {}", e))?;
 
         // Download and extract each source (some deps have multiple, e.g. ffmpeg + ffprobe on macOS)
         let total_sources = sources.len();
@@ -228,7 +231,8 @@ impl DependencyManager {
             if let Err(e) = download_result {
                 self.set_error(dep_id, &e);
                 let _ = std::fs::remove_dir_all(&temp_dir);
-                let _ = std::fs::remove_dir_all(&dep_dir);
+                // 只清理 staging；原 dep_dir（如有）保持不动，回滚到上一次成功安装
+                let _ = std::fs::remove_dir_all(&staging_dir);
                 let _ = app_handle.emit(
                     "dep:install-error",
                     serde_json::json!({ "dep_id": dep_id, "error": e }),
@@ -248,10 +252,10 @@ impl DependencyManager {
                 },
             );
 
-            // Extract (append to dep_dir, don't clear between sources)
+            // Extract (append to staging, don't clear between sources)
             let extract_result = installer::extract_archive(
                 &archive_path,
-                &dep_dir,
+                &staging_dir,
                 source.archive_type,
                 source.extract_mappings,
                 dep_id,
@@ -261,7 +265,7 @@ impl DependencyManager {
             if let Err(e) = extract_result {
                 self.set_error(dep_id, &e);
                 let _ = std::fs::remove_dir_all(&temp_dir);
-                let _ = std::fs::remove_dir_all(&dep_dir);
+                let _ = std::fs::remove_dir_all(&staging_dir);
                 let _ = app_handle.emit(
                     "dep:install-error",
                     serde_json::json!({ "dep_id": dep_id, "error": e }),
@@ -270,17 +274,20 @@ impl DependencyManager {
             }
         }
 
-        // Clean up temp
+        // Clean up download temp
         let _ = std::fs::remove_dir_all(&temp_dir);
 
-        // Verify installation
+        // 所有 source 已下载 + 解压到 staging；先在 staging 上做健康检查，
+        // 通过后再原子替换 dep_dir。这样部分下载后网络中断/进程崩溃
+        // 也不会污染已安装的上一版本依赖。
         installer::emit_progress_static(app_handle, dep_id, "verifying", 0.5, "正在验证...");
 
-        let version = match checker::health_check(&dep_dir, def) {
+        let version = match checker::health_check(&staging_dir, def) {
             Ok(v) => v,
             Err(e) => {
                 let err_msg = format!("安装验证失败: {}", e);
                 self.set_error(dep_id, &err_msg);
+                let _ = std::fs::remove_dir_all(&staging_dir);
                 let _ = app_handle.emit(
                     "dep:install-error",
                     serde_json::json!({ "dep_id": dep_id, "error": err_msg }),
@@ -288,6 +295,30 @@ impl DependencyManager {
                 return Err(err_msg);
             }
         };
+
+        // 原子替换：先删除旧 dep_dir（若存在），再重命名 staging → dep_dir。
+        // rename 在同一文件系统内通常是原子的；失败则留下 staging 以便人工恢复。
+        if dep_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&dep_dir) {
+                let err_msg = format!("移除旧依赖目录失败: {}", e);
+                self.set_error(dep_id, &err_msg);
+                let _ = app_handle.emit(
+                    "dep:install-error",
+                    serde_json::json!({ "dep_id": dep_id, "error": err_msg }),
+                );
+                return Err(err_msg);
+            }
+        }
+        if let Err(e) = std::fs::rename(&staging_dir, &dep_dir) {
+            let err_msg = format!("发布新依赖目录失败: {}", e);
+            self.set_error(dep_id, &err_msg);
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            let _ = app_handle.emit(
+                "dep:install-error",
+                serde_json::json!({ "dep_id": dep_id, "error": err_msg }),
+            );
+            return Err(err_msg);
+        }
 
         // Success
         let now = chrono_now();
