@@ -137,10 +137,9 @@ export function SubtitlePanel({
 
     setLoading(true);
     try {
-      // Check health first
-      const health = await checkASRHealth();
-      if (health.status !== "ready") {
-        alert("ASR 引擎未就绪，请检查「设置 > 语音识别」中的服务状态");
+      // Validate ASR readiness using already-tracked state
+      if (asrMode === "remote" && !remoteHealthy) {
+        alert("远程 ASR 服务未就绪，请检查「设置 > 语音识别」中的连接配置");
         return;
       }
 
