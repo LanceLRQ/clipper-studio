@@ -379,7 +379,8 @@ fn emit_progress(
     payload: ScanProgressPayload,
 ) {
     let message = serde_json::to_string(&payload).unwrap_or_default();
-    let _ = tx.send(TaskProgressEvent {
+    // 有界 channel + try_send：满时丢弃当前进度事件，避免消费慢时堆积内存
+    let _ = tx.try_send(TaskProgressEvent {
         task_id,
         status: TaskStatus::Processing,
         progress,

@@ -41,7 +41,13 @@ pub struct TaskDefinition {
 }
 
 /// Sender for progress updates from within a task
-pub type TaskProgressSender = mpsc::UnboundedSender<TaskProgressEvent>;
+///
+/// 使用有界 channel（容量 [`PROGRESS_CHANNEL_CAPACITY`]）+ `try_send` 策略：
+/// 当前端消费慢时新事件被丢弃而不是无限堆积，防止长时间运行任务耗尽内存。
+pub type TaskProgressSender = mpsc::Sender<TaskProgressEvent>;
+
+/// 进度事件 channel 容量：足够容纳若干节流后的进度批次，满时 try_send 丢弃最新事件
+pub const PROGRESS_CHANNEL_CAPACITY: usize = 100;
 
 /// Task queue that manages async task execution with progress reporting.
 ///
@@ -80,7 +86,8 @@ impl TaskQueue {
             tokens.insert(task_id, cancel_token.clone());
         }
 
-        let (progress_tx, mut progress_rx) = mpsc::unbounded_channel::<TaskProgressEvent>();
+        let (progress_tx, mut progress_rx) =
+            mpsc::channel::<TaskProgressEvent>(PROGRESS_CHANNEL_CAPACITY);
         let app_handle = self.app_handle.clone();
         let cancel_tokens = self.cancel_tokens.clone();
         let semaphore = self.semaphore.clone();

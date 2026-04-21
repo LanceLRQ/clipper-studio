@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -9,6 +9,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::core::storage::VIDEO_EXTENSIONS;
+
+/// 文件监听 debounce 时长：
+/// - FFmpeg 批量输出多段文件时，短时内多次 create 事件会合并为一次 emit
+/// - 500ms 兼顾 UX 即时性与事件聚合效率
+const WATCHER_DEBOUNCE_MS: u64 = 500;
 
 /// Event payload emitted to the frontend when new files are detected
 #[derive(Debug, Clone, Serialize)]
@@ -51,8 +56,9 @@ impl WorkspaceWatcher {
 
         let (tx, rx) = std::sync::mpsc::channel();
 
-        let mut debouncer = new_debouncer(Duration::from_secs(3), None, tx)
-            .map_err(|e| format!("Failed to create watcher: {}", e))?;
+        let mut debouncer =
+            new_debouncer(Duration::from_millis(WATCHER_DEBOUNCE_MS), None, tx)
+                .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
         debouncer
             .watch(path, RecursiveMode::Recursive)
@@ -107,6 +113,8 @@ fn process_events(
     for result in rx {
         match result {
             Ok(events) => {
+                // 路径去重：同一文件在一个 debounce 窗口内可能触发多次 create 事件
+                let mut seen: HashSet<String> = HashSet::new();
                 let mut new_video_files: Vec<String> = Vec::new();
 
                 for event in events {
@@ -117,7 +125,10 @@ fn process_events(
 
                     for path in &event.event.paths {
                         if is_video_file(path) {
-                            new_video_files.push(path.to_string_lossy().to_string());
+                            let p = path.to_string_lossy().to_string();
+                            if seen.insert(p.clone()) {
+                                new_video_files.push(p);
+                            }
                         }
                     }
                 }

@@ -2,6 +2,37 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// FFmpeg stderr 缓冲上限：长时间编码的 stderr 可累积至数十 MB，
+/// 仅保留尾部 4MB 已足够诊断失败原因。
+pub const STDERR_CAP_BYTES: usize = 4 * 1024 * 1024;
+
+/// 以 ring-buffer 模式读取 stderr 至完成或进程退出：
+/// - 超过 `STDERR_CAP_BYTES` 时丢弃前半段数据但继续 drain 管道（防止 pipe deadlock）
+/// - 返回数据保证是 stderr 流的"尾部"，适合失败时提取错误信息
+pub async fn read_stderr_capped<R>(mut reader: R) -> Vec<u8>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut buf = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > STDERR_CAP_BYTES {
+                    // 保留末尾 STDERR_CAP_BYTES / 2，丢弃更早的日志
+                    let drop = buf.len() - STDERR_CAP_BYTES / 2;
+                    buf.drain(..drop);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
 /// Derive the ffprobe path from ffmpeg path by replacing only the filename component.
 /// Unlike simple string replace, this avoids corrupting paths like "/opt/ffmpeg-tools/ffmpeg".
 pub fn derive_ffprobe_path(ffmpeg_path: &str) -> String {
@@ -462,7 +493,7 @@ pub async fn burn_subtitle_with_progress(
     cancel: tokio_util::sync::CancellationToken,
     on_progress: impl Fn(BurnProgress) + Send + 'static,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command as AsyncCommand;
 
     if ffmpeg_path.is_empty() {
@@ -546,19 +577,21 @@ pub async fn burn_subtitle_with_progress(
         .map_err(|e| format!("Failed to start FFmpeg burn: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
 
     // Drain stderr concurrently to prevent pipe buffer deadlock.
     // FFmpeg writes extensive status to stderr; if the pipe buffer fills,
     // FFmpeg blocks and stops producing progress output on stdout.
-    let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf).await;
-        buf
-    });
+    // 使用 read_stderr_capped 避免长时间编码累积数十 MB 日志
+    let stderr_task = tokio::spawn(async move { read_stderr_capped(stderr).await });
 
     let mut reader = BufReader::new(stdout).lines();
     let mut current_speed: Option<f64> = None;
+    // 进度节流：同步 clipper.rs 的 200ms 窗口，避免前端 UI 卡顿
+    let interval_ms = crate::core::clipper::PROGRESS_EMIT_INTERVAL_MS;
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(interval_ms))
+        .unwrap_or_else(std::time::Instant::now);
 
     loop {
         tokio::select! {
@@ -578,16 +611,22 @@ pub async fn burn_subtitle_with_progress(
                                 } else {
                                     0.0
                                 };
-                                on_progress(BurnProgress {
-                                    progress,
-                                    time_secs,
-                                    speed: current_speed,
-                                });
+                                if last_emit.elapsed()
+                                    >= std::time::Duration::from_millis(interval_ms)
+                                {
+                                    on_progress(BurnProgress {
+                                        progress,
+                                        time_secs,
+                                        speed: current_speed,
+                                    });
+                                    last_emit = std::time::Instant::now();
+                                }
                             }
                         } else if let Some(speed_str) = line.strip_prefix("speed=") {
                             let cleaned = speed_str.trim().trim_end_matches('x');
                             current_speed = cleaned.parse::<f64>().ok();
                         } else if line.starts_with("progress=end") {
+                            // 结束事件必发
                             on_progress(BurnProgress {
                                 progress: 1.0,
                                 time_secs: duration_secs,

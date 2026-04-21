@@ -1,10 +1,22 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::utils::ffmpeg;
+
+/// FFmpeg 进度事件节流间隔（ms）——避免 30fps 进度 spam 导致前端重渲染卡顿
+pub(crate) const PROGRESS_EMIT_INTERVAL_MS: u64 = 200;
+
+/// 按 ffmpeg 可执行路径缓存 `-encoders` 输出，避免 clip 时重复启动子进程
+/// key: ffmpeg_path, value: encoder 名称集合（stdout 文本）
+fn encoders_cache() -> &'static Mutex<HashMap<String, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// FFmpeg progress info parsed from stderr
 #[derive(Debug, Clone, serde::Serialize)]
@@ -109,18 +121,21 @@ pub async fn execute_clip(
     let mut reader = BufReader::new(stdout).lines();
 
     // Concurrently consume stderr to prevent pipe buffer deadlock
+    // 使用 read_stderr_capped 避免长时间编码累积数十 MB 日志
     let stderr = child.stderr.take();
     let stderr_task = tokio::spawn(async move {
-        if let Some(mut stderr) = stderr {
-            let mut buf = Vec::new();
-            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf).await;
-            buf
+        if let Some(stderr) = stderr {
+            ffmpeg::read_stderr_capped(stderr).await
         } else {
             Vec::new()
         }
     });
 
     let mut current_speed: Option<f64> = None;
+    // 进度节流：FFmpeg stdout 每帧输出一次（~30/s），每 200ms 最多发送一次事件
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
+        .unwrap_or_else(std::time::Instant::now);
 
     // Parse FFmpeg progress output
     loop {
@@ -137,16 +152,22 @@ pub async fn execute_clip(
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
                                 let progress = (time_secs / duration_secs).min(1.0).max(0.0);
-                                on_progress(ClipProgress {
-                                    progress,
-                                    time_secs,
-                                    speed: current_speed,
-                                });
+                                if last_emit.elapsed()
+                                    >= std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS)
+                                {
+                                    on_progress(ClipProgress {
+                                        progress,
+                                        time_secs,
+                                        speed: current_speed,
+                                    });
+                                    last_emit = std::time::Instant::now();
+                                }
                             }
                         } else if let Some(speed_str) = line.strip_prefix("speed=") {
                             let cleaned = speed_str.trim().trim_end_matches('x');
                             current_speed = cleaned.parse::<f64>().ok();
                         } else if line.starts_with("progress=end") {
+                            // 结束事件必发，忽略节流窗口
                             on_progress(ClipProgress {
                                 progress: 1.0,
                                 time_secs: duration_secs,
@@ -227,14 +248,38 @@ fn detect_best_h265(ffmpeg_path: &str) -> String {
     "libx265".to_string()
 }
 
-/// Check if a specific encoder is available
+/// Check if a specific encoder is available.
+///
+/// 首次调用时执行 `ffmpeg -encoders` 并按 `ffmpeg_path` 缓存输出，
+/// 后续调用直接查缓存，避免每次 clip 启动 4+ 次 ffmpeg 子进程。
 fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
-    std::process::Command::new(ffmpeg_path)
+    let cache = encoders_cache();
+
+    if let Ok(guard) = cache.lock() {
+        if let Some(text) = guard.get(ffmpeg_path) {
+            return text.contains(encoder);
+        }
+    }
+
+    let output = match std::process::Command::new(ffmpeg_path)
         .args(["-hide_banner", "-encoders"])
         .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).contains(encoder))
-        .unwrap_or(false)
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!("ffmpeg -encoders failed ({}): {}", ffmpeg_path, e);
+            return false;
+        }
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let contains = text.contains(encoder);
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(ffmpeg_path.to_string(), text);
+    }
+
+    contains
 }
 
 // ====== Two-pass Clip + Burn Pipeline ======
