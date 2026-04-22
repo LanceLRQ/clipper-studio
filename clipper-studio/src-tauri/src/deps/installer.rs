@@ -1,5 +1,7 @@
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -43,6 +45,7 @@ fn emit_progress(app_handle: &AppHandle, dep_id: &str, phase: &str, progress: f6
 
 /// Download a file from URL to a local path, with progress reporting.
 /// `label` is shown in the progress message (e.g. "FFmpeg (1/2)").
+/// `cancel_token` - if Some, the download will be aborted when the token is set to true.
 pub async fn download_file(
     client: &reqwest::Client,
     url: &str,
@@ -50,6 +53,7 @@ pub async fn download_file(
     dep_id: &str,
     label: &str,
     app_handle: &AppHandle,
+    cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<(), String> {
     tracing::info!("Downloading {} -> {}", url, dest.display());
     emit_progress(
@@ -90,6 +94,15 @@ pub async fn download_file(
 
     use futures_util::StreamExt;
     while let Some(chunk) = stream.next().await {
+        // Check cancellation
+        if let Some(ref token) = cancel_token {
+            if token.load(Ordering::Relaxed) {
+                // Delete partial file
+                let _ = std::fs::remove_file(dest);
+                return Err("下载已取消".to_string());
+            }
+        }
+
         let chunk = chunk.map_err(|e| format!("Download stream error: {}", e))?;
         file.write_all(&chunk)
             .map_err(|e| format!("File write error: {}", e))?;

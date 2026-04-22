@@ -21,6 +21,11 @@ export async function uninstallDep(depId: string): Promise<void> {
   return invoke<void>("uninstall_dep", { depId });
 }
 
+/** Cancel an in-progress dependency installation */
+export async function cancelDep(depId: string): Promise<void> {
+  return invoke<void>("cancel_dep", { depId });
+}
+
 /** Set a custom path for a dependency (writes to config.toml) */
 export async function setDepCustomPath(
   depId: string,
