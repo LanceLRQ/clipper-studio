@@ -87,6 +87,11 @@ jobs:
         working-directory: clipper-studio
         run: pnpm tauri build --features builtin-plugins --target ${{ matrix.target }}
 
+      - name: List bundle outputs
+        if: always()
+        shell: bash
+        run: find clipper-studio/src-tauri/target/${{ matrix.target }}/release/bundle -type f \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.app" \) 2>/dev/null || echo "No bundle files found in bundle dir"
+
       - name: Upload bundles
         uses: actions/upload-artifact@v4
         with:
