@@ -1,6 +1,6 @@
 [package]
 name = "clipper-studio"
-version = "0.1.0"
+version = "0.1.1"
 description = "A local-first desktop video workbench for live stream clip creators"
 authors = ["LanceLRQ"]
 license = "GPL-3.0"
