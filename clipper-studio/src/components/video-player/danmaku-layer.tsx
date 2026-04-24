@@ -117,12 +117,33 @@ export function DanmakuLayer({
     else dm.hide();
   }, [enabled]);
 
-  // Resize when container dimensions change
+  // Resize when container dimensions change (window resize / layout change)
   useEffect(() => {
-    const dm = danmakuRef.current;
-    if (!dm || !container) return;
-    dm.resize();
-  }, [container]);
+    if (!container) return;
+
+    let rafId = 0;
+    const schedule = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const dm = danmakuRef.current;
+        if (!dm) return;
+        // Resize the stage to match new container dimensions;
+        // existing in-flight bullets keep flowing from their current positions.
+        dm.resize();
+      });
+    };
+
+    const observer = new ResizeObserver(() => schedule());
+    observer.observe(container);
+    // Fallback for viewport resize in case container ResizeObserver misses it
+    window.addEventListener("resize", schedule);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", schedule);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [container, media]);
 
   return null;
 }
