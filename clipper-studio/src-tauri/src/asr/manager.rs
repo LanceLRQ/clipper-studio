@@ -770,19 +770,11 @@ impl ASRServiceManager {
             }
             Ok(resp) => {
                 let status = resp.status();
-                let headers: Vec<String> = resp
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("?")))
-                    .collect();
-                let body = resp.text().await.unwrap_or_default();
                 tracing::info!(
-                    "ASR health check attempt {}/{}: HTTP {} headers={:?} body={}",
+                    "ASR health check attempt {}/{}: HTTP {}",
                     attempt + 1,
                     MAX_HEALTH_CHECK_ATTEMPTS,
                     status,
-                    headers,
-                    body,
                 );
                 false
             }

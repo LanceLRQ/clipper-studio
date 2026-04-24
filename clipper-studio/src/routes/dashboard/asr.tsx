@@ -339,6 +339,7 @@ function ASRSettingsContent() {
 
   const handleStartService = async () => {
     setServiceActionLoading(true);
+    setServiceLogs([]);
     setRightTab("logs");
     try {
       await handleSave();
@@ -550,7 +551,7 @@ function ASRSettingsContent() {
                 </p>
               )}
 
-              <div className="flex items-center gap-3 pt-2">
+              <div className="flex items-center gap-3 pt-2 flex-wrap">
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? "保存中..." : saved ? (
                     <span className="inline-flex items-center gap-1">
@@ -564,22 +565,24 @@ function ASRSettingsContent() {
                     {asrChecking ? "检测中..." : "测试连接"}
                   </Button>
                 )}
+                {/* Inline health result */}
+                {asrHealth && (
+                  asrHealth.status === "ready" ? (
+                    <span className="text-sm text-green-600 inline-flex items-center gap-1">
+                      <Check className="h-4 w-4" />
+                      连接成功
+                      <span className="text-muted-foreground ml-1">
+                        ({asrHealth.device ?? "unknown"} / {asrHealth.model_size ?? "unknown"})
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-red-500 inline-flex items-center gap-1">
+                      <X className="h-4 w-4" />
+                      连接失败
+                    </span>
+                  )
+                )}
               </div>
-
-              {/* Health info */}
-              {asrHealth && (
-                asrHealth.status === "ready" ? (
-                  <div className="text-sm bg-green-500/10 border border-green-500/20 rounded-md px-4 py-3 space-y-1">
-                    <div className="text-green-600 font-medium">连接成功</div>
-                    <div className="text-muted-foreground">设备: <span className="font-medium text-foreground">{asrHealth.device ?? "unknown"}</span></div>
-                    <div className="text-muted-foreground">模型: <span className="font-medium text-foreground">{asrHealth.model_size ?? "unknown"}</span></div>
-                  </div>
-                ) : (
-                  <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-md px-4 py-3">
-                    连接失败
-                  </div>
-                )
-              )}
             </section>
 
             {/* 本地服务控制 - 仅在本地引擎模式下展示，紧跟在基本设置下方 */}
