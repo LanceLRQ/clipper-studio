@@ -91,6 +91,12 @@ fn refresh_tool_paths(dep_id: &str, state: &AppState) {
     }
 }
 
+/// Cancel an in-progress dependency installation
+#[tauri::command]
+pub async fn cancel_dep(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.dep_manager.cancel_dep(&dep_id)
+}
+
 /// Uninstall a dependency
 #[tauri::command]
 pub async fn uninstall_dep(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {

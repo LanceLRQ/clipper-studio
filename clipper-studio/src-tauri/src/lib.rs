@@ -435,6 +435,7 @@ pub fn run() {
             commands::deps::check_dep,
             commands::deps::install_dep,
             commands::deps::uninstall_dep,
+            commands::deps::cancel_dep,
             commands::deps::set_dep_custom_path,
             commands::deps::reveal_dep_dir,
             commands::deps::set_deps_proxy,

@@ -9,6 +9,7 @@ import {
   listDeps,
   installDep,
   uninstallDep,
+  cancelDep,
   revealDepDir,
   setDepCustomPath,
   setDepsProxy,
@@ -132,6 +133,17 @@ export function DepsSection({ intro, footer }: DepsSectionProps) {
     }
   };
 
+  const handleCancelInstall = async (depId: string) => {
+    try {
+      await cancelDep(depId);
+    } catch (e) {
+      console.error("Cancel failed:", e);
+    }
+    setInstallingId(null);
+    setProgress(null);
+    loadDeps();
+  };
+
   const handleUninstall = async (dep: DependencyStatus) => {
     if (
       !(await ask(
@@ -167,11 +179,12 @@ export function DepsSection({ intro, footer }: DepsSectionProps) {
     }
   };
 
-  const handlePickCustomPath = async (_depId: string) => {
+  const handlePickCustomPath = async (defaultPath: string | null) => {
     const selected = await open({
       directory: false,
       multiple: false,
       title: "选择可执行文件",
+      defaultPath: defaultPath || undefined,
     });
     if (selected) {
       setCustomPathValue(selected as string);
@@ -361,7 +374,7 @@ export function DepsSection({ intro, footer }: DepsSectionProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handlePickCustomPath(dep.id)}
+                  onClick={() => handlePickCustomPath(customPathValue || null)}
                 >
                   浏览...
                 </Button>
@@ -397,6 +410,15 @@ export function DepsSection({ intro, footer }: DepsSectionProps) {
                     卸载
                   </Button>
                 </>
+              ) : isInstalling ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-500 hover:text-red-600"
+                  onClick={() => handleCancelInstall(dep.id)}
+                >
+                  取消安装
+                </Button>
               ) : dep.status === "not_installed" || dep.status === "error" ? (
                 <>
                   {dep.auto_install_available && (

@@ -6,17 +6,18 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
 import { Check, Loader2, Play, X } from "lucide-react";
 import { getSettings, setSetting } from "@/services/settings";
 import {
@@ -120,6 +121,7 @@ function ASRPage() {
 function ASRSettingsContent() {
   const activeTaskCount = useASRActiveCount();
   const [asrMode, setAsrMode] = useState<ASRMode>("local");
+  const [asrHost, setAsrHost] = useState("127.0.0.1");
   const [asrPort, setAsrPort] = useState("8765");
   const [asrUrl, setAsrUrl] = useState("");
   const [asrApiKey, setAsrApiKey] = useState("");
@@ -152,14 +154,15 @@ function ASRSettingsContent() {
   const dockerReady = dockerCap?.installed === true && dockerCap?.daemon_running === true;
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
   const [serviceLogs, setServiceLogs] = useState<string[]>([]);
-  const [showLogs, setShowLogs] = useState(false);
+  const [leftTab, setLeftTab] = useState<"general" | "local-service">("general");
+  const [rightTab, setRightTab] = useState<"logs" | "tasks">("tasks");
   const [serviceActionLoading, setServiceActionLoading] = useState(false);
   const [slowStartMessage, setSlowStartMessage] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     getSettings([
-      "asr_mode", "asr_port", "asr_url", "asr_api_key", "asr_language", "asr_max_chars",
+      "asr_mode", "asr_host", "asr_port", "asr_url", "asr_api_key", "asr_language", "asr_max_chars",
       "asr_local_path", "asr_local_device", "asr_local_model_size",
       "asr_local_enable_align", "asr_local_enable_punc", "asr_local_model_source",
       "asr_local_max_segment",
@@ -167,6 +170,7 @@ function ASRSettingsContent() {
     ])
       .then(async (s) => {
         if (s.asr_mode) setAsrMode(s.asr_mode as ASRMode);
+        if (s.asr_host) setAsrHost(s.asr_host);
         if (s.asr_port) setAsrPort(s.asr_port);
         if (s.asr_url) setAsrUrl(s.asr_url);
         if (s.asr_api_key) setAsrApiKey(s.asr_api_key);
@@ -248,12 +252,17 @@ function ASRSettingsContent() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceStatus?.status]);
 
-  // Auto-scroll logs to bottom when new lines arrive
+  // Auto-scroll logs to bottom when new lines arrive and logs tab is active
   useEffect(() => {
-    if (showLogs && logsEndRef.current) {
+    if (rightTab === "logs" && logsEndRef.current) {
       logsEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [serviceLogs, showLogs]);
+  }, [serviceLogs, rightTab]);
+
+  // Backfill historical logs once on mount; real-time events will append later
+  useEffect(() => {
+    getASRServiceLogs(200).then(setServiceLogs).catch(console.error);
+  }, []);
 
   // Listen for real-time log events from the managed process
   useEffect(() => {
@@ -299,6 +308,7 @@ function ASRSettingsContent() {
     setSaving(true); setSaved(false);
     try {
       await setSetting("asr_mode", asrMode);
+      await setSetting("asr_host", asrHost);
       await setSetting("asr_port", asrPort);
       if (asrUrl) await setSetting("asr_url", asrUrl);
       if (asrApiKey) await setSetting("asr_api_key", asrApiKey);
@@ -330,6 +340,8 @@ function ASRSettingsContent() {
 
   const handleStartService = async () => {
     setServiceActionLoading(true);
+    setServiceLogs([]);
+    setRightTab("logs");
     try {
       await handleSave();
       try {
@@ -447,230 +459,345 @@ function ASRSettingsContent() {
     setAsrMode(newMode);
   };
 
-  const handleViewLogs = async () => {
-    if (!showLogs) {
-      try { setServiceLogs(await getASRServiceLogs(200)); }
-      catch (e) { console.error("Failed to load logs:", e); }
-    }
-    setShowLogs(!showLogs);
-  };
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-full min-h-0">
-      {/* Left column: Queue Display + Basic ASR Settings */}
-      <div className="overflow-y-auto min-h-0 pr-1">
-      <ASRQueueDisplay />
-      <section className="rounded-lg border p-5 space-y-4">
-        <h3 className="font-medium text-lg">基本设置</h3>
+      {/* Left column: 语音识别设置 / 本地服务设置 */}
+      <div className="flex flex-col min-h-0 h-full">
+        <Tabs
+          value={leftTab}
+          onValueChange={(v) => setLeftTab(v as typeof leftTab)}
+          className="flex flex-col h-full min-h-0"
+        >
+          <TabsList>
+            <TabsTrigger value="general">语音识别设置</TabsTrigger>
+            <TabsTrigger value="local-service">本地服务设置</TabsTrigger>
+          </TabsList>
 
-        <div className="space-y-1">
-          <Label className="text-sm">识别模式</Label>
-          <div className="flex rounded-md border w-fit">
-            {([
-              { value: "local", label: "本地引擎" },
-              { value: "remote", label: "远程服务" },
-              { value: "disabled", label: "禁用" },
-            ] as const).map((opt) => (
-              <button
-                key={opt.value}
-                className={`px-4 py-1.5 text-sm ${asrMode === opt.value ? "bg-accent font-medium" : ""}`}
-                onClick={() => handleModeChange(opt.value)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </div>
+          <TabsContent
+            value="general"
+            className="mt-4 flex-1 min-h-0 flex flex-col gap-6"
+          >
+            <section className="rounded-lg border p-5 space-y-4 flex-1 min-h-0 overflow-y-auto">
+              <h3 className="font-medium text-lg">基本设置</h3>
 
-        {asrMode !== "disabled" && (
-          <>
-            <div className="space-y-1">
-              <Label className="text-sm">识别语言</Label>
-              <select
-                value={asrLanguage}
-                onChange={(e) => setAsrLanguage(e.target.value)}
-                className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm w-48"
-              >
-                {ASR_LANGUAGES.map((lang) => (
-                  <option key={lang} value={lang}>{lang}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-sm">每条字幕最大字符数</Label>
-              <Input
-                value={asrMaxChars}
-                onChange={(e) => setAsrMaxChars(e.target.value)}
-                placeholder="15"
-                className="w-32 text-sm h-8"
-                type="number"
-                min={0}
-              />
-              <p className="text-xs text-muted-foreground">
-                ASR 识别后按标点和字数自动拆分字幕，设为 0 则不拆分
-              </p>
-            </div>
-          </>
-        )}
-
-        {asrMode === "remote" && (
-          <div className="space-y-3 pl-1">
-            <div className="space-y-1">
-              <Label className="text-xs">服务地址</Label>
-              <Input value={asrUrl} onChange={(e) => setAsrUrl(e.target.value)}
-                placeholder="http://192.168.1.100:8765" className="text-sm h-8" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">API Key（可选）</Label>
-              <Input value={asrApiKey} onChange={(e) => setAsrApiKey(e.target.value)}
-                placeholder="留空则不使用认证" type="password" className="text-sm h-8" />
-            </div>
-          </div>
-        )}
-
-        {asrMode === "disabled" && (
-          <p className="text-sm text-muted-foreground pl-1">
-            ASR 功能已禁用，视频详情页中将不会显示语音识别按钮。
-          </p>
-        )}
-
-        <div className="flex items-center gap-3 pt-2">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : saved ? (
-              <span className="inline-flex items-center gap-1">
-                <Check className="h-4 w-4" />
-                已保存
-              </span>
-            ) : "保存设置"}
-          </Button>
-          {asrMode !== "disabled" && (
-            <Button variant="outline" onClick={handleCheckHealth} disabled={asrChecking}>
-              {asrChecking ? "检测中..." : "测试连接"}
-            </Button>
-          )}
-        </div>
-
-        {/* Health info */}
-        {asrHealth && (
-          asrHealth.status === "ready" ? (
-            <div className="text-sm bg-green-500/10 border border-green-500/20 rounded-md px-4 py-3 space-y-1">
-              <div className="text-green-600 font-medium">连接成功</div>
-              <div className="text-muted-foreground">设备: <span className="font-medium text-foreground">{asrHealth.device ?? "unknown"}</span></div>
-              <div className="text-muted-foreground">模型: <span className="font-medium text-foreground">{asrHealth.model_size ?? "unknown"}</span></div>
-            </div>
-          ) : (
-            <div className="text-sm text-red-500 bg-red-500/10 border border-red-500/20 rounded-md px-4 py-3">
-              连接失败
-            </div>
-          )
-        )}
-      </section>
-      </div>
-
-      {/* Right column: Service Control (sticky) + Local Config (scrollable) */}
-      <div className="relative flex flex-col min-h-0 h-full gap-6">
-          {/* Mask when current mode is not local */}
-          {asrMode !== "local" && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 dark:bg-black/60 backdrop-blur-[1px]">
-              <div className="rounded-md border bg-background/90 px-4 py-3 shadow-sm text-sm text-muted-foreground max-w-xs text-center">
-                当前识别模式为「{asrMode === "remote" ? "远程服务" : "禁用"}」，
-                切换回「本地引擎」后即可管理本地服务。
+              <div className="space-y-1">
+                <Label className="text-sm">识别模式</Label>
+                <div className="flex rounded-md border w-fit">
+                  {([
+                    { value: "local", label: "本地引擎" },
+                    { value: "remote", label: "远程服务" },
+                    { value: "disabled", label: "禁用" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.value}
+                      className={`px-4 py-1.5 text-sm ${asrMode === opt.value ? "bg-accent font-medium" : ""}`}
+                      onClick={() => handleModeChange(opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-          {/* Local Service Control - sticky */}
-          <section className="rounded-lg border p-5 space-y-4 shrink-0">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium text-lg">本地服务控制</h3>
-              <div className="flex items-center gap-2">
-                <span className={`inline-block h-2.5 w-2.5 rounded-full ${
-                  serviceStatus?.status === "running" ? "bg-green-500"
-                    : serviceStatus?.status === "starting" ? "bg-yellow-500 animate-pulse"
-                    : serviceStatus?.status === "error" ? "bg-red-500"
-                    : "bg-gray-400"
-                }`} />
-                <span className="text-sm text-muted-foreground">
-                  {serviceStatus?.status === "running" ? "运行中"
-                    : serviceStatus?.status === "starting" ? "启动中..."
-                    : serviceStatus?.status === "stopping" ? "停止中..."
-                    : serviceStatus?.status === "error" ? "错误"
-                    : "已停止"}
-                </span>
-              </div>
-            </div>
 
-            {/* Error message */}
-            {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
-              <p className="text-sm text-red-500">
-                {(serviceStatus as { message?: string }).message}
-              </p>
-            )}
-
-            {/* Slow-start warning (model download) */}
-            {slowStartMessage && (
-              <p className="text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md px-4 py-3">
-                {slowStartMessage}
-              </p>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex flex-wrap items-center gap-3">
-              {serviceStatus?.status === "running" || serviceStatus?.status === "starting" ? (
+              {asrMode !== "disabled" && (
                 <>
-                  <Button
-                    variant="destructive"
-                    onClick={handleStopService}
-                    disabled={
-                      serviceActionLoading ||
-                      activeTaskCount > 0
-                    }
-                    title={activeTaskCount > 0 ? `有 ${activeTaskCount} 个识别任务进行中，无法停止服务` : undefined}
-                  >
-                    停止服务
-                  </Button>
+                  <div className="space-y-1">
+                    <Label className="text-sm">识别语言</Label>
+                    <select
+                      value={asrLanguage}
+                      onChange={(e) => setAsrLanguage(e.target.value)}
+                      className="h-8 rounded-md border border-input bg-background px-3 py-1 text-sm w-48"
+                    >
+                      {ASR_LANGUAGES.map((lang) => (
+                        <option key={lang} value={lang}>{lang}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-sm">每条字幕最大字符数</Label>
+                    <Input
+                      value={asrMaxChars}
+                      onChange={(e) => setAsrMaxChars(e.target.value)}
+                      placeholder="15"
+                      className="w-32 text-sm h-8"
+                      type="number"
+                      min={0}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      ASR 识别后按标点和字数自动拆分字幕，设为 0 则不拆分
+                    </p>
+                  </div>
                 </>
-              ) : (
-                <Button
-                  onClick={handleStartService}
-                  disabled={
-                    serviceActionLoading ||
-                    (launchMode === "native"
-                      ? !pathValidation?.valid
-                      : !dockerReady || !dockerImage || imagePulled !== true)
-                  }
-                  title={
-                    launchMode === "docker"
-                      ? !dockerReady
-                        ? dockerCap?.hint ?? "Docker 不可用"
-                        : !dockerImage
-                        ? "请先选择 Docker 镜像"
-                        : imagePulled !== true
-                        ? "镜像尚未拉取到本地"
-                        : undefined
-                      : !pathValidation?.valid
-                      ? "服务目录无效"
-                      : undefined
-                  }
-                >
-                  {serviceActionLoading ? "操作中..." : "启动服务"}
-                </Button>
               )}
 
-              <Button variant="outline" onClick={() => { handleRefreshValidation(); getASRServiceStatus().then(setServiceStatus).catch(console.error); }}>
-                刷新状态
-              </Button>
+              {asrMode === "remote" && (
+                <div className="space-y-3 pl-1">
+                  <div className="space-y-1">
+                    <Label className="text-xs">服务地址</Label>
+                    <Input value={asrUrl} onChange={(e) => setAsrUrl(e.target.value)}
+                      placeholder="http://192.168.1.100:8765" className="text-sm h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">API Key（可选）</Label>
+                    <Input value={asrApiKey} onChange={(e) => setAsrApiKey(e.target.value)}
+                      placeholder="留空则不使用认证" type="password" className="text-sm h-8" />
+                  </div>
+                </div>
+              )}
 
-              <Button variant="outline" onClick={handleViewLogs}>
-                查看日志
-              </Button>
-            </div>
-          </section>
+              {asrMode === "disabled" && (
+                <p className="text-sm text-muted-foreground pl-1">
+                  ASR 功能已禁用，视频详情页中将不会显示语音识别按钮。
+                </p>
+              )}
 
-          {/* Local Service Config - scrollable */}
-          <div className="overflow-y-auto min-h-0 flex-1 pr-1">
-          <section className="rounded-lg border p-5 space-y-4">
-            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 pt-2 flex-wrap">
+                <Button onClick={handleSave} disabled={saving}>
+                  {saving ? "保存中..." : saved ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Check className="h-4 w-4" />
+                      已保存
+                    </span>
+                  ) : "保存设置"}
+                </Button>
+                {asrMode !== "disabled" && (
+                  <Button variant="outline" onClick={handleCheckHealth} disabled={asrChecking}>
+                    {asrChecking ? "检测中..." : "测试连接"}
+                  </Button>
+                )}
+                {/* Inline health result */}
+                {asrHealth && (
+                  asrHealth.status === "ready" ? (
+                    <span className="text-sm text-green-600 inline-flex items-center gap-1">
+                      <Check className="h-4 w-4" />
+                      连接成功
+                      <span className="text-muted-foreground ml-1">
+                        ({asrHealth.device ?? "unknown"} / {asrHealth.model_size ?? "unknown"})
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-sm text-red-500 inline-flex items-center gap-1">
+                      <X className="h-4 w-4" />
+                      连接失败
+                    </span>
+                  )
+                )}
+              </div>
+            </section>
+
+            {/* 本地服务控制 - 仅在本地引擎模式下展示，紧跟在基本设置下方 */}
+            {asrMode === "local" && (
+              <section className="rounded-lg border p-5 space-y-4 shrink-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium text-lg">本地服务控制</h3>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-block h-2.5 w-2.5 rounded-full ${
+                      serviceStatus?.status === "running" ? "bg-green-500"
+                        : serviceStatus?.status === "starting" ? "bg-yellow-500 animate-pulse"
+                        : serviceStatus?.status === "error" ? "bg-red-500"
+                        : "bg-gray-400"
+                    }`} />
+                    <span className="text-sm text-muted-foreground">
+                      {serviceStatus?.status === "running" ? "运行中"
+                        : serviceStatus?.status === "starting" ? "启动中..."
+                        : serviceStatus?.status === "stopping" ? "停止中..."
+                        : serviceStatus?.status === "error" ? "错误"
+                        : "已停止"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Error message */}
+                {serviceStatus?.status === "error" && (serviceStatus as { message?: string }).message && (
+                  <p className="text-sm text-red-500">
+                    {(serviceStatus as { message?: string }).message}
+                  </p>
+                )}
+
+                {/* Slow-start warning (model download) */}
+                {slowStartMessage && (
+                  <p className="text-sm text-amber-600 bg-amber-500/10 border border-amber-500/20 rounded-md px-4 py-3">
+                    {slowStartMessage}
+                  </p>
+                )}
+
+                {/* Launch configuration check */}
+                {(() => {
+                  const launchReady =
+                    launchMode === "native"
+                      ? !!pathValidation?.valid
+                      : dockerReady && !!dockerImage && imagePulled === true;
+                  return (
+                    <div className="rounded-md border bg-muted/20 px-3 py-2.5 space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">
+                          启动方式：{launchMode === "native" ? "本地源码" : "Docker"}
+                        </span>
+                        <span className={`text-xs inline-flex items-center gap-1 ${launchReady ? "text-green-600" : "text-amber-600"}`}>
+                          {launchReady ? (
+                            <>
+                              <Check className="h-3.5 w-3.5" />
+                              配置已就绪
+                            </>
+                          ) : (
+                            "配置未就绪"
+                          )}
+                        </span>
+                      </div>
+                      <ul className="text-xs space-y-1">
+                        {launchMode === "native" ? (
+                          <li className="flex items-start gap-1.5">
+                            <span className={pathValidation?.valid ? "text-green-600 shrink-0" : "text-red-500 shrink-0"}>
+                              {pathValidation?.valid ? "✓" : "✗"}
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="text-muted-foreground">服务目录：</span>
+                              {asrLocalPath ? (
+                                pathValidation?.valid ? (
+                                  <Tooltip>
+                                    <TooltipTrigger render={<span className="cursor-help border-b border-dashed border-muted-foreground/60" />}>
+                                      已设置
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-96 break-all font-mono text-xs">
+                                      {asrLocalPath}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  <span className="text-red-500">
+                                    {pathValidation == null
+                                      ? "未校验"
+                                      : !pathValidation.has_python_env
+                                        ? "缺少 Python 环境"
+                                        : "缺少入口文件 asr-service/app/main.py"}
+                                  </span>
+                                )
+                              ) : (
+                                <span className="text-red-500">未设置</span>
+                              )}
+                            </span>
+                          </li>
+                        ) : (
+                          <>
+                            <li className="flex items-start gap-1.5">
+                              <span className={dockerReady ? "text-green-600 shrink-0" : "text-red-500 shrink-0"}>
+                                {dockerReady ? "✓" : "✗"}
+                              </span>
+                              <span className="flex-1 min-w-0">
+                                <span className="text-muted-foreground">Docker 引擎：</span>
+                                {dockerReady ? (
+                                  <span>{dockerCap?.version ?? "已就绪"}</span>
+                                ) : (
+                                  <span className="text-red-500">{dockerCap?.hint ?? "不可用或未运行"}</span>
+                                )}
+                              </span>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span className={dockerImage ? "text-green-600 shrink-0" : "text-red-500 shrink-0"}>
+                                {dockerImage ? "✓" : "✗"}
+                              </span>
+                              <span className="flex-1 min-w-0">
+                                <span className="text-muted-foreground">镜像：</span>
+                                {dockerImage ? (
+                                  <span className="break-all font-mono">{dockerImage}</span>
+                                ) : (
+                                  <span className="text-red-500">未选择</span>
+                                )}
+                              </span>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span className={imagePulled === true ? "text-green-600 shrink-0" : imagePulled === false ? "text-red-500 shrink-0" : "text-muted-foreground shrink-0"}>
+                                {imagePulled === true ? "✓" : imagePulled === false ? "✗" : "…"}
+                              </span>
+                              <span className="flex-1 min-w-0">
+                                <span className="text-muted-foreground">镜像状态：</span>
+                                {imagePulled === true ? (
+                                  "已拉取到本地"
+                                ) : imagePulled === false ? (
+                                  <span className="text-red-500">未拉取</span>
+                                ) : (
+                                  <span className="text-muted-foreground">检测中...</span>
+                                )}
+                              </span>
+                            </li>
+                          </>
+                        )}
+                      </ul>
+                      {!launchReady && (
+                        <div className="pt-1">
+                          <Button variant="outline" size="sm" onClick={() => setLeftTab("local-service")}>
+                            前往「本地服务设置」完善配置 →
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap items-center gap-3">
+                  {serviceStatus?.status === "running" || serviceStatus?.status === "starting" ? (
+                    <Button
+                      variant="destructive"
+                      onClick={handleStopService}
+                      disabled={
+                        serviceActionLoading ||
+                        activeTaskCount > 0
+                      }
+                      title={activeTaskCount > 0 ? `有 ${activeTaskCount} 个识别任务进行中，无法停止服务` : undefined}
+                    >
+                      停止服务
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleStartService}
+                      disabled={
+                        serviceActionLoading ||
+                        (launchMode === "native"
+                          ? !pathValidation?.valid
+                          : !dockerReady || !dockerImage || imagePulled !== true)
+                      }
+                      title={
+                        launchMode === "docker"
+                          ? !dockerReady
+                            ? dockerCap?.hint ?? "Docker 不可用"
+                            : !dockerImage
+                            ? "请先选择 Docker 镜像"
+                            : imagePulled !== true
+                            ? "镜像尚未拉取到本地"
+                            : undefined
+                          : !pathValidation?.valid
+                          ? "服务目录无效"
+                          : undefined
+                      }
+                    >
+                      {serviceActionLoading ? "操作中..." : "启动服务"}
+                    </Button>
+                  )}
+
+                  <Button variant="outline" onClick={() => { handleRefreshValidation(); getASRServiceStatus().then(setServiceStatus).catch(console.error); }}>
+                    刷新状态
+                  </Button>
+                </div>
+              </section>
+            )}
+          </TabsContent>
+
+          <TabsContent
+            value="local-service"
+            className="mt-4 flex-1 min-h-0 relative flex flex-col"
+          >
+            {/* Mask when current mode is not local */}
+            {asrMode !== "local" && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-white/60 dark:bg-black/60 backdrop-blur-[1px]">
+                <div className="rounded-md border bg-background/90 px-4 py-3 shadow-sm text-sm text-muted-foreground max-w-xs text-center">
+                  当前识别模式为「{asrMode === "remote" ? "远程服务" : "禁用"}」，
+                  切换回「本地引擎」后即可管理本地服务。
+                </div>
+              </div>
+            )}
+            <section className="rounded-lg border p-5 flex-1 min-h-0 flex flex-col gap-4">
+            <div className="flex items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2">
                 <h3 className="font-medium text-lg">本地服务配置</h3>
                 <span className="inline-flex items-center rounded-md border border-input bg-muted px-1.5 py-0.5 text-[11px] font-mono text-muted-foreground">
@@ -697,6 +824,9 @@ function ASRSettingsContent() {
               </div>
             </div>
 
+            {/* Scrollable middle content */}
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+
             {/* Launch mode radio */}
             <div className="space-y-1">
               <Label className="text-sm">启动方式</Label>
@@ -707,18 +837,22 @@ function ASRSettingsContent() {
                 >
                   本地源码模式
                 </button>
-                <button
-                  className={`px-4 py-1.5 text-sm ${launchMode === "docker" ? "bg-accent font-medium" : ""} ${!dockerReady ? "opacity-50 cursor-not-allowed" : ""}`}
-                  onClick={() => handleLaunchModeChange("docker")}
-                  disabled={!dockerReady}
-                  title={!dockerReady ? dockerCap?.hint ?? "Docker 不可用" : undefined}
-                >
-                  Docker 方式
-                </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<button
+                      className={`px-4 py-1.5 text-sm ${launchMode === "docker" ? "bg-accent font-medium" : ""} ${!dockerReady ? "opacity-50 cursor-not-allowed" : ""}`}
+                      onClick={() => handleLaunchModeChange("docker")}
+                    />}
+                  >
+                    Docker 方式
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72">
+                    {!dockerReady
+                      ? dockerCap?.hint ?? "Docker 不可用"
+                      : `${dockerCap?.version ?? "Docker"} (${dockerCap?.host_platform}/${dockerCap?.host_arch})`}
+                  </TooltipContent>
+                </Tooltip>
               </div>
-              {!dockerReady && dockerCap?.hint && (
-                <p className="text-xs text-amber-600">{dockerCap.hint}</p>
-              )}
               {dockerReady && dockerCap && (
                 <p className="text-xs text-muted-foreground">
                   已检测到 Docker：{dockerCap.version ?? "unknown"} ({dockerCap.host_platform}/{dockerCap.host_arch})
@@ -862,17 +996,34 @@ function ASRSettingsContent() {
               </>
             )}
 
-            {/* Port */}
-            <div className="space-y-1">
-              <Label className="text-sm">本地服务端口</Label>
-              <Input value={asrPort} onChange={(e) => setAsrPort(e.target.value)}
-                placeholder="8765" className="w-32 text-sm h-8" />
-            </div>
-
             {/* Startup Parameters */}
             <div className="space-y-3 pt-2">
               <h4 className="text-sm font-medium">启动参数</h4>
               <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Tooltip>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground w-fit" />}>
+                      允许局域网访问
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-72">
+                      关闭（默认）时仅监听本机 127.0.0.1，其他设备无法连接；开启后监听所有网卡 (0.0.0.0)，局域网内其他设备可通过本机 IP 地址访问该服务
+                    </TooltipContent>
+                  </Tooltip>
+                  <div className="flex items-center gap-2 h-8">
+                    <Switch
+                      checked={asrHost === "0.0.0.0"}
+                      onCheckedChange={(checked) => setAsrHost(checked ? "0.0.0.0" : "127.0.0.1")}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {asrHost === "0.0.0.0" ? "已开放" : "仅本机"}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">端口 (Port)</Label>
+                  <Input value={asrPort} onChange={(e) => setAsrPort(e.target.value)}
+                    placeholder="8765" className="text-sm h-8 font-mono" type="number" min={1} max={65535} />
+                </div>
                 <div className="space-y-1">
                   <Label className="text-xs">运行设备</Label>
                   <select value={asrLocalDevice} onChange={(e) => setAsrLocalDevice(e.target.value)}
@@ -901,7 +1052,7 @@ function ASRSettingsContent() {
                 </div>
                 <div className="space-y-1">
                   <Tooltip>
-                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground w-fit" />}>
                       VAD 合并阈值 (秒)
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-72">
@@ -921,7 +1072,7 @@ function ASRSettingsContent() {
                     <option value="false">否</option>
                   </select>
                   <Tooltip>
-                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground w-fit" />}>
                       启用字级对齐
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-64">
@@ -936,7 +1087,7 @@ function ASRSettingsContent() {
                     <option value="false">否</option>
                   </select>
                   <Tooltip>
-                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground" />}>
+                    <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground w-fit" />}>
                       启用标点恢复
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-64">
@@ -947,7 +1098,10 @@ function ASRSettingsContent() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2">
+            </div>
+            {/* End of scrollable middle content */}
+
+            <div className="flex items-center gap-3 pt-2 shrink-0 border-t">
               <Button onClick={handleSave} disabled={saving}>
                 {saving ? "保存中..." : saved ? (
                   <span className="inline-flex items-center gap-1">
@@ -957,24 +1111,43 @@ function ASRSettingsContent() {
                 ) : "保存设置"}
               </Button>
             </div>
-          </section>
-          </div>
+            </section>
+          </TabsContent>
+        </Tabs>
       </div>
 
-      {/* Logs Dialog */}
-      <Dialog open={showLogs} onOpenChange={setShowLogs}>
-        <DialogContent className="max-w-[60vw] sm:max-w-[60vw] h-[80vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>ASR 服务日志</DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-auto rounded-md border bg-muted/30 p-3 min-h-0">
-            <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
-              {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
-            </pre>
-            <div ref={logsEndRef} />
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Right column: ASR 任务 / 本地 ASR 日志 */}
+      <div className="flex flex-col min-h-0 h-full">
+        <Tabs
+          value={rightTab}
+          onValueChange={(v) => setRightTab(v as typeof rightTab)}
+          className="flex flex-col h-full min-h-0"
+        >
+          <TabsList>
+            <TabsTrigger value="tasks">ASR 任务</TabsTrigger>
+            <TabsTrigger value="logs">本地 ASR 日志</TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="tasks"
+            className="mt-4 flex-1 min-h-0 flex flex-col"
+          >
+            <ASRQueueDisplay />
+          </TabsContent>
+
+          <TabsContent
+            value="logs"
+            className="mt-4 flex-1 min-h-0 flex flex-col"
+          >
+            <div className="flex-1 overflow-auto rounded-md border bg-muted/30 p-3 min-h-0">
+              <pre className="text-[11px] font-mono whitespace-pre-wrap leading-relaxed">
+                {serviceLogs.length > 0 ? serviceLogs.join("\n") : "暂无日志"}
+              </pre>
+              <div ref={logsEndRef} />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }
@@ -995,8 +1168,6 @@ function ASRQueueDisplay() {
   const activeTasks = useASRActiveTasks();
   const cancelTask = useASRQueueStore((s) => s.cancelTask);
 
-  if (activeTasks.length === 0) return null;
-
   // Running task first, then queued tasks
   const running = activeTasks.filter(
     (t) => t.status === "converting" || t.status === "submitting" || t.status === "processing"
@@ -1005,21 +1176,25 @@ function ASRQueueDisplay() {
   const sorted = [...running, ...queued];
 
   return (
-    <section className="rounded-lg border p-5 space-y-3 mb-6">
-      <div className="flex items-center justify-between">
+    <section className="rounded-lg border p-5 flex-1 min-h-0 flex flex-col gap-3">
+      <div className="flex items-center justify-between shrink-0">
         <h3 className="font-medium text-lg">识别队列</h3>
         <span className="text-xs text-muted-foreground">{activeTasks.length} 个任务</span>
       </div>
-      <div className="space-y-2">
-        {sorted.map((task) => (
-          <ASRQueueTaskRow
-            key={task.task_id}
-            task={task}
-            queuePosition={task.status === "queued" ? queued.indexOf(task) + 1 : undefined}
-            onCancel={() => cancelTask(task.task_id)}
-          />
-        ))}
-      </div>
+      {sorted.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-4 text-center">暂无识别任务</p>
+      ) : (
+        <div className="space-y-2 flex-1 min-h-0 overflow-y-auto">
+          {sorted.map((task) => (
+            <ASRQueueTaskRow
+              key={task.task_id}
+              task={task}
+              queuePosition={task.status === "queued" ? queued.indexOf(task) + 1 : undefined}
+              onCancel={() => cancelTask(task.task_id)}
+            />
+          ))}
+        </div>
+      )}
     </section>
   );
 }

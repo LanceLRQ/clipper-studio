@@ -10,14 +10,24 @@ pub struct LocalASRProvider {
 }
 
 impl LocalASRProvider {
-    pub fn new(port: u16) -> Self {
+    /// Create a local provider.
+    ///
+    /// `host` is the bind host of the local service. For a wildcard bind
+    /// ("0.0.0.0"), connections are made via 127.0.0.1. Empty host also
+    /// falls back to 127.0.0.1.
+    pub fn new(host: &str, port: u16) -> Self {
+        let connect_host = if host.is_empty() || host == "0.0.0.0" {
+            "127.0.0.1"
+        } else {
+            host
+        };
         Self {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(300))
                 .no_proxy()
                 .build()
                 .unwrap_or_default(),
-            base_url: format!("http://127.0.0.1:{}", port),
+            base_url: format!("http://{}:{}", connect_host, port),
         }
     }
 

@@ -265,7 +265,7 @@ impl ASRServiceManager {
         Ok(())
     }
 
-    /// Start the native (setup.sh/start.sh) backend
+    /// Start the native backend by invoking Python directly (no batch/shell scripts).
     async fn spawn_native(
         self: &Arc<Self>,
         base_dir: &Path,
@@ -281,43 +281,79 @@ impl ASRServiceManager {
             ));
         }
 
-        let script_path = get_start_script_path(base_dir);
-        if !script_path.exists() {
-            return Err(format!("未找到启动脚本：{}", script_path.display()));
+        let asr_dir = base_dir.join("asr-service");
+        let main_py = asr_dir.join("app").join("main.py");
+        if !main_py.exists() {
+            return Err(format!("未找到入口文件：{}", main_py.display()));
         }
 
-        let working_dir = base_dir.join("asr-service");
-        let args = build_script_args(config);
+        // Resolve Python executable
+        #[cfg(target_os = "windows")]
+        let python_exe = asr_dir.join("bin").join("python").join("python.exe");
+
+        #[cfg(not(target_os = "windows"))]
+        let python_exe = asr_dir.join("venv").join("bin").join("python3");
+
+        if !python_exe.exists() {
+            return Err(format!("未找到 Python：{}", python_exe.display()));
+        }
+
+        // Build args: -m app.main --host ... --port ... ...
+        let mut args: Vec<String> = vec!["-m".to_string(), "app.main".to_string()];
+        args.extend(build_script_args(config));
 
         tracing::info!(
-            "Starting ASR service (native): {} {}",
-            script_path.display(),
+            "[ASR] Starting ASR service (native): cwd={} cmd={} {}",
+            asr_dir.display(),
+            python_exe.display(),
             args.join(" ")
         );
 
-        // Spawn the start script as a managed child process.
-        let script_str = script_path.to_string_lossy().to_string();
-        let args_str = args.join(" ");
+        // Set PYTHONPATH to asr_dir so that `from app.xxx import ...` works.
+        // Also add bin/python to PATH on Windows for DLL resolution (matches start.bat).
+        let asr_dir_str = asr_dir.to_string_lossy().to_string();
 
         #[cfg(target_os = "windows")]
-        let mut child = tokio::process::Command::new("cmd")
-            .args(["/C", &format!("{} {} 2>&1", script_str, args_str)])
-            .current_dir(&working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("启动 ASR 服务失败：{}", e))?;
+        let mut child = {
+            let bin_dir = asr_dir.join("bin");
+            let bin_python_dir = bin_dir.join("python");
+            let existing_path = std::env::var("PATH").unwrap_or_default();
+            let new_path = format!(
+                "{};{};{}",
+                bin_dir.to_string_lossy(),
+                bin_python_dir.to_string_lossy(),
+                existing_path
+            );
+            tracing::info!(
+                "[ASR] Windows env: PYTHONPATH={}, PATH prepend: {} ; {}",
+                asr_dir_str,
+                bin_dir.display(),
+                bin_python_dir.display()
+            );
+            tokio::process::Command::new(&python_exe)
+                .args(&args)
+                .current_dir(&asr_dir)
+                .env("PYTHONPATH", &asr_dir_str)
+                .env("PATH", &new_path)
+                // Force UTF-8 mode on Windows (equivalent to chcp 65001 in start.bat)
+                .env("PYTHONUTF8", "1")
+                .env("PYTHONIOENCODING", "utf-8")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .stdin(Stdio::null())
+                .kill_on_drop(true)
+                .spawn()
+                .map_err(|e| format!("启动 ASR 服务失败：{}", e))?
+        };
 
         #[cfg(not(target_os = "windows"))]
         let mut child = {
-            let mut cmd = tokio::process::Command::new("bash");
-            cmd.arg("-c")
-                .arg(format!("'{}' {} 2>&1", script_str, args_str))
-                .current_dir(&working_dir)
+            let mut cmd = tokio::process::Command::new(&python_exe);
+            cmd.args(&args)
+                .current_dir(&asr_dir)
+                .env("PYTHONPATH", &asr_dir_str)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
             // Create a new process group so we can kill the entire tree
@@ -331,12 +367,14 @@ impl ASRServiceManager {
                 .map_err(|e| format!("启动 ASR 服务失败：{}", e))?
         };
 
-        // Take stdout handle (stderr is merged into stdout via 2>&1)
+        // Take stdout and stderr handles
         let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
 
         // Store PID separately so we can kill the process tree even after
         // the Child handle is consumed by try_wait() in native_child_running().
         let pid = child.id();
+        tracing::info!("[ASR] Python process spawned, PID: {:?}", pid);
         if let Ok(mut guard) = self.child_pid.lock() {
             *guard = pid;
         }
@@ -349,7 +387,7 @@ impl ASRServiceManager {
         self.set_status(ASRServiceStatus::Starting);
         self.emit_status(&app_handle);
 
-        // Spawn log reader
+        // Spawn stdout log reader
         if let Some(stdout) = stdout {
             let mgr = Arc::clone(self);
             let app_h = app_handle.clone();
@@ -357,13 +395,36 @@ impl ASRServiceManager {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::info!("[ASR stdout] {}", line);
                     mgr.push_log(&line, &app_h);
                 }
+                tracing::info!("[ASR] stdout reader finished");
+            });
+        }
+
+        // Spawn stderr log reader
+        if let Some(stderr) = stderr {
+            let mgr = Arc::clone(self);
+            let app_h = app_handle.clone();
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    tracing::warn!("[ASR stderr] {}", line);
+                    mgr.push_log(&line, &app_h);
+                }
+                tracing::info!("[ASR] stderr reader finished");
             });
         }
 
         // Spawn health check loop (checks native child liveness via try_wait)
-        let health_url = format!("http://{}:{}/v1/health", config.host, config.port);
+        // Client connects via 127.0.0.1 when host is wildcard (0.0.0.0)
+        let connect_host = if config.host == "0.0.0.0" || config.host.is_empty() {
+            "127.0.0.1"
+        } else {
+            config.host.as_str()
+        };
+        let health_url = format!("http://{}:{}/v1/health", connect_host, config.port);
         let mgr = Arc::clone(self);
         let app_h = app_handle.clone();
         tokio::spawn(async move {
@@ -423,7 +484,7 @@ impl ASRServiceManager {
             "--name".to_string(),
             docker::CONTAINER_NAME.to_string(),
             "-p".to_string(),
-            format!("127.0.0.1:{}:8765", config.port),
+            format!("{}:{}:8765", config.host, config.port),
             "-v".to_string(),
             format!("{}:/app/models", models_dir.to_string_lossy()),
         ];
@@ -497,7 +558,13 @@ impl ASRServiceManager {
         }
 
         // Health check + container liveness loop
-        let health_url = format!("http://127.0.0.1:{}/v1/health", config.port);
+        // Client connects via 127.0.0.1 when host is wildcard (0.0.0.0)
+        let connect_host = if config.host == "0.0.0.0" || config.host.is_empty() {
+            "127.0.0.1"
+        } else {
+            config.host.as_str()
+        };
+        let health_url = format!("http://{}:{}/v1/health", connect_host, config.port);
         let mgr = Arc::clone(self);
         let app_h = app_handle.clone();
         tokio::spawn(async move {
@@ -543,16 +610,30 @@ impl ASRServiceManager {
             ) {
                 return;
             }
-            if !self.native_child_running() {
+
+            // On Windows, cmd.exe may exit while python.exe is still running
+            // (e.g. start.bat uses `start` to launch python in a new process).
+            // Don't hard-fail here — let the health check be authoritative.
+            let child_exited = !self.native_child_running();
+            if child_exited {
+                tracing::info!(
+                    "[ASR] Launcher process exited during startup (attempt {}/{}), continuing health checks...",
+                    attempt + 1,
+                    MAX_HEALTH_CHECK_ATTEMPTS,
+                );
+            }
+
+            if self.probe_health(&client, &health_url, attempt).await {
+                self.monitor_native_process(app_h, client, health_url).await;
+                return;
+            }
+
+            // If the launcher has exited, fail faster to avoid unnecessary waits
+            if child_exited && attempt >= 5 {
                 let msg = "ASR 服务进程异常退出，请查看日志了解原因".to_string();
                 tracing::warn!("{}", msg);
                 self.set_status(ASRServiceStatus::Error { message: msg });
                 self.emit_status(&app_h);
-                return;
-            }
-
-            if self.probe_health(&client, &health_url, attempt).await {
-                self.monitor_native_process(app_h).await;
                 return;
             }
 
@@ -701,19 +782,11 @@ impl ASRServiceManager {
             }
             Ok(resp) => {
                 let status = resp.status();
-                let headers: Vec<String> = resp
-                    .headers()
-                    .iter()
-                    .map(|(k, v)| format!("{}: {}", k, v.to_str().unwrap_or("?")))
-                    .collect();
-                let body = resp.text().await.unwrap_or_default();
                 tracing::info!(
-                    "ASR health check attempt {}/{}: HTTP {} headers={:?} body={}",
+                    "ASR health check attempt {}/{}: HTTP {}",
                     attempt + 1,
                     MAX_HEALTH_CHECK_ATTEMPTS,
                     status,
-                    headers,
-                    body,
                 );
                 false
             }
@@ -730,8 +803,15 @@ impl ASRServiceManager {
         }
     }
 
-    /// Monitor native child; if it exits unexpectedly, set Error status
-    async fn monitor_native_process(self: Arc<Self>, app_handle: AppHandle) {
+    /// Monitor native child process; if it exits, verify service health
+    /// before reporting an error (on Windows, cmd.exe may exit while the
+    /// actual python service is still running).
+    async fn monitor_native_process(
+        self: Arc<Self>,
+        app_handle: AppHandle,
+        health_client: reqwest::Client,
+        health_url: String,
+    ) {
         // Emit Running once before entering monitor loop
         self.emit_status(&app_handle);
         loop {
@@ -742,14 +822,24 @@ impl ASRServiceManager {
                 return;
             }
             if !self.native_child_running() {
-                let msg = "ASR 服务进程异常退出".to_string();
-                tracing::warn!("{}", msg);
-                if let Ok(mut hi) = self.health_info.lock() {
-                    *hi = None;
+                // Launcher process exited — verify service is still healthy
+                tracing::info!("[ASR] Launcher process exited, verifying service health...");
+                match health_client.get(&health_url).send().await {
+                    Ok(resp) if resp.status().is_success() => {
+                        tracing::info!("[ASR] Service still healthy after launcher exit");
+                        continue;
+                    }
+                    _ => {
+                        let msg = "ASR 服务进程异常退出".to_string();
+                        tracing::warn!("{}", msg);
+                        if let Ok(mut hi) = self.health_info.lock() {
+                            *hi = None;
+                        }
+                        self.set_status(ASRServiceStatus::Error { message: msg });
+                        self.emit_status(&app_handle);
+                        return;
+                    }
                 }
-                self.set_status(ASRServiceStatus::Error { message: msg });
-                self.emit_status(&app_handle);
-                return;
             }
         }
     }
@@ -1057,13 +1147,21 @@ impl ASRServiceManager {
             if let Some(ref mut child) = *guard {
                 match child.try_wait() {
                     Ok(None) => return true,
-                    Ok(Some(_)) => {
-                        // Child (cmd.exe) exited, but grandchild (python.exe) may
-                        // still be alive. Consume the handle but keep child_pid.
+                    Ok(Some(status)) => {
+                        tracing::warn!(
+                            "[ASR] Python process exited — code: {:?}, success: {}",
+                            status.code(),
+                            status.success()
+                        );
+                        // Python process exited — consume the handle but keep child_pid
+                        // so stop() can still kill the process tree if needed.
                         *guard = None;
                         return false;
                     }
-                    Err(_) => return false,
+                    Err(e) => {
+                        tracing::warn!("[ASR] Failed to query process status: {}", e);
+                        return false;
+                    }
                 }
             }
         }
@@ -1124,18 +1222,6 @@ impl Drop for ASRServiceManager {
 }
 
 // ==================== Helpers ====================
-
-/// Get the start script path for the current platform
-fn get_start_script_path(base_dir: &Path) -> PathBuf {
-    #[cfg(target_os = "windows")]
-    {
-        base_dir.join("asr-service").join("start.bat")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        base_dir.join("asr-service").join("start.sh")
-    }
-}
 
 /// Get the setup script path for the current platform
 fn get_setup_script_path(base_dir: &Path) -> PathBuf {
