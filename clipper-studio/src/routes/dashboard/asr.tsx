@@ -707,18 +707,22 @@ function ASRSettingsContent() {
                 >
                   本地源码模式
                 </button>
-                <button
-                  className={`px-4 py-1.5 text-sm ${launchMode === "docker" ? "bg-accent font-medium" : ""} ${!dockerReady ? "opacity-50 cursor-not-allowed" : ""}`}
-                  onClick={() => handleLaunchModeChange("docker")}
-                  disabled={!dockerReady}
-                  title={!dockerReady ? dockerCap?.hint ?? "Docker 不可用" : undefined}
-                >
-                  Docker 方式
-                </button>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<button
+                      className={`px-4 py-1.5 text-sm ${launchMode === "docker" ? "bg-accent font-medium" : ""} ${!dockerReady ? "opacity-50 cursor-not-allowed" : ""}`}
+                      onClick={() => handleLaunchModeChange("docker")}
+                    />}
+                  >
+                    Docker 方式
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-72">
+                    {!dockerReady
+                      ? dockerCap?.hint ?? "Docker 不可用"
+                      : `${dockerCap?.version ?? "Docker"} (${dockerCap?.host_platform}/${dockerCap?.host_arch})`}
+                  </TooltipContent>
+                </Tooltip>
               </div>
-              {!dockerReady && dockerCap?.hint && (
-                <p className="text-xs text-amber-600">{dockerCap.hint}</p>
-              )}
               {dockerReady && dockerCap && (
                 <p className="text-xs text-muted-foreground">
                   已检测到 Docker：{dockerCap.version ?? "unknown"} ({dockerCap.host_platform}/{dockerCap.host_arch})
