@@ -2,6 +2,28 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+// ==================== Upstream Dependency Versions ====================
+//
+// P4-COMPAT-16：依赖下载源集中声明为常量，便于版本管理与审计。
+//
+// **固定 vs 浮动**：
+// - DanmakuFactory 固定为 `v1.70`（显式 release tag，可重现）
+// - FFmpeg Windows 当前仍使用 BtbN `latest` 浮动标签，原因：BtbN autobuild
+//   每 autobuild 时间戳的资产命名不一致（命名含 git hash），切换到固定 tag
+//   需同时修改 extract_mappings。此处留待下一次 release 前用完整快照替换。
+//
+// TODO(release-pinning)：在下一次项目 release 前，把 FFmpeg 改为
+//   `autobuild-YYYY-MM-DD-HH-MM` 固定时间戳 + 对应资产名 + 期望 hash 校验。
+
+/// BtbN/FFmpeg-Builds 发布页路径前缀。
+#[allow(dead_code)]
+const FFMPEG_BTBN_RELEASE_BASE: &str = "https://github.com/BtbN/FFmpeg-Builds/releases/download";
+
+/// DanmakuFactory 发布版本（显式固定）。
+/// 用作文档锚点 — 若修改此值必须同步更新 sources 中对应 URL。
+#[allow(dead_code)]
+const DANMAKU_FACTORY_VERSION: &str = "v1.70";
+
 // ==================== Static Dependency Definitions ====================
 
 /// Dependency type

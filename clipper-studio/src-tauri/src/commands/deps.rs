@@ -91,6 +91,12 @@ fn refresh_tool_paths(dep_id: &str, state: &AppState) {
     }
 }
 
+/// Cancel an in-progress dependency installation
+#[tauri::command]
+pub async fn cancel_dep(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.dep_manager.cancel_dep(&dep_id)
+}
+
 /// Uninstall a dependency
 #[tauri::command]
 pub async fn uninstall_dep(dep_id: String, state: State<'_, AppState>) -> Result<(), String> {
@@ -250,6 +256,7 @@ pub async fn reveal_dep_dir(dep_id: String, state: State<'_, AppState>) -> Resul
         return Err(format!("依赖 '{}' 未安装", dep_id));
     }
 
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     let path_str = dep_dir.to_string_lossy().to_string();
 
     #[cfg(target_os = "macos")]

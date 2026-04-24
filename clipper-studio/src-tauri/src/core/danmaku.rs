@@ -519,6 +519,44 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_empty_xml() {
+        // Empty <i></i> with no danmaku
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?><i></i>"#;
+        let result = parse_bilibili_xml_str(xml);
+        assert!(!result.is_truncated);
+        assert!(result.items.is_empty());
+        assert!(result.parse_error.is_none());
+    }
+
+    #[test]
+    fn test_parse_xml_whitespace_only_danmaku() {
+        // Empty text danmaku should be skipped
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<i>
+<d p="1.0,1,25,255,0,0,0,0">   </d>
+<d p="2.0,1,25,255,0,0,0,0"></d>
+<d p="3.0,1,25,255,0,0,0,0">有效弹幕</d>
+</i>"#;
+        let result = parse_bilibili_xml_str(xml);
+        assert!(!result.is_truncated);
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].text, "有效弹幕");
+    }
+
+    #[test]
+    fn test_parse_xml_only_special_danmaku() {
+        // All special danmaku (mode 7+) should be skipped
+        let xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<i>
+<d p="1.0,7,25,255,0,0,0,0">特殊弹幕</d>
+<d p="2.0,9,25,255,0,0,0,0">高级弹幕</d>
+</i>"#;
+        let result = parse_bilibili_xml_str(xml);
+        assert!(!result.is_truncated);
+        assert!(result.items.is_empty());
+    }
+
+    #[test]
     fn test_filter_danmaku_by_range() {
         let items = vec![
             DanmakuItem {

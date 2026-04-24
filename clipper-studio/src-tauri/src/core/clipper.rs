@@ -1,10 +1,46 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
 use crate::utils::ffmpeg;
+
+/// FFmpeg 进度事件节流间隔（ms）——避免 30fps 进度 spam 导致前端重渲染卡顿
+pub(crate) const PROGRESS_EMIT_INTERVAL_MS: u64 = 200;
+
+/// Graceful FFmpeg shutdown: send SIGTERM first, wait 3s, then SIGKILL.
+///
+/// On Unix, tokio's `kill()` sends SIGKILL immediately which prevents
+/// FFmpeg from finalizing output (potentially leaving corrupt files).
+/// Sending SIGTERM first gives FFmpeg a chance to write MP4 moov atom.
+pub(crate) async fn graceful_kill_child(child: &mut tokio::process::Child) {
+    #[cfg(unix)]
+    {
+        // Send SIGTERM via PID
+        if let Some(id) = child.id() {
+            unsafe {
+                libc::kill(id as i32, libc::SIGTERM);
+            }
+        }
+        // Wait up to 3s for graceful exit
+        match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
+            Ok(Ok(_)) => return,
+            _ => {} // Timed out or error, fall through to SIGKILL
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+/// 按 ffmpeg 可执行路径缓存 `-encoders` 输出，避免 clip 时重复启动子进程
+/// key: ffmpeg_path, value: encoder 名称集合（stdout 文本）
+fn encoders_cache() -> &'static Mutex<HashMap<String, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// FFmpeg progress info parsed from stderr
 #[derive(Debug, Clone, serde::Serialize)]
@@ -109,25 +145,27 @@ pub async fn execute_clip(
     let mut reader = BufReader::new(stdout).lines();
 
     // Concurrently consume stderr to prevent pipe buffer deadlock
+    // 使用 read_stderr_capped 避免长时间编码累积数十 MB 日志
     let stderr = child.stderr.take();
     let stderr_task = tokio::spawn(async move {
-        if let Some(mut stderr) = stderr {
-            let mut buf = Vec::new();
-            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf).await;
-            buf
+        if let Some(stderr) = stderr {
+            ffmpeg::read_stderr_capped(stderr).await
         } else {
             Vec::new()
         }
     });
 
     let mut current_speed: Option<f64> = None;
+    // 进度节流：FFmpeg stdout 每帧输出一次（~30/s），每 200ms 最多发送一次事件
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS))
+        .unwrap_or_else(std::time::Instant::now);
 
     // Parse FFmpeg progress output
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                graceful_kill_child(&mut child).await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
@@ -137,16 +175,22 @@ pub async fn execute_clip(
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
                                 let progress = (time_secs / duration_secs).min(1.0).max(0.0);
-                                on_progress(ClipProgress {
-                                    progress,
-                                    time_secs,
-                                    speed: current_speed,
-                                });
+                                if last_emit.elapsed()
+                                    >= std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS)
+                                {
+                                    on_progress(ClipProgress {
+                                        progress,
+                                        time_secs,
+                                        speed: current_speed,
+                                    });
+                                    last_emit = std::time::Instant::now();
+                                }
                             }
                         } else if let Some(speed_str) = line.strip_prefix("speed=") {
                             let cleaned = speed_str.trim().trim_end_matches('x');
                             current_speed = cleaned.parse::<f64>().ok();
                         } else if line.starts_with("progress=end") {
+                            // 结束事件必发，忽略节流窗口
                             on_progress(ClipProgress {
                                 progress: 1.0,
                                 time_secs: duration_secs,
@@ -190,6 +234,33 @@ pub async fn execute_clip(
     Ok(())
 }
 
+/// 根据视频编码器类型，将 CRF 质量值转换为对应编码器的正确参数并追加到 `args`。
+///
+/// 背景（P4-COMPAT-18）：硬件编码器（VideoToolbox / NVENC / QSV / AMF）不支持
+/// `-crf`，各自使用不同的质量控制参数。若所有编码器都无条件使用 `-crf`，
+/// 硬件编码路径下参数会被忽略甚至导致报错，产出视频质量不可控。
+///
+/// - `videotoolbox` — 无等价参数，跳过（使用默认质量）
+/// - `nvenc`        — `-cq <val> -b:v 0`（0 比特率强制恒定质量模式）
+/// - `qsv`          — `-global_quality <val>`
+/// - `amf`          — `-q:v <val>`
+/// - 软件编码器    — `-crf <val>`
+pub fn apply_quality_args(video_codec: &str, crf: Option<u32>, args: &mut Vec<String>) {
+    let Some(crf_val) = crf else { return };
+    if video_codec.contains("videotoolbox") {
+        tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
+    } else if video_codec.contains("nvenc") {
+        args.extend(["-cq".to_string(), crf_val.to_string()]);
+        args.extend(["-b:v".to_string(), "0".to_string()]);
+    } else if video_codec.contains("qsv") {
+        args.extend(["-global_quality".to_string(), crf_val.to_string()]);
+    } else if video_codec.contains("amf") {
+        args.extend(["-q:v".to_string(), crf_val.to_string()]);
+    } else {
+        args.extend(["-crf".to_string(), crf_val.to_string()]);
+    }
+}
+
 /// Detect available encoders and select the best video codec.
 /// Priority: hardware (NVENC/VideoToolbox/QSV) > software (libx264)
 pub fn resolve_video_codec(ffmpeg_path: &str, codec_hint: &str) -> String {
@@ -208,33 +279,114 @@ fn detect_best_h264(ffmpeg_path: &str) -> String {
         "h264_amf",          // AMD
     ];
     for c in candidates {
-        if encoder_available(ffmpeg_path, c) {
+        if encoder_available(ffmpeg_path, c) && encoder_really_available(ffmpeg_path, c) {
             tracing::info!("Using hardware H.264 encoder: {}", c);
             return c.to_string();
         }
     }
+    tracing::info!("No hardware H.264 encoder available, falling back to libx264");
     "libx264".to_string()
 }
 
 fn detect_best_h265(ffmpeg_path: &str) -> String {
     let candidates = ["hevc_videotoolbox", "hevc_nvenc", "hevc_qsv", "hevc_amf"];
     for c in candidates {
-        if encoder_available(ffmpeg_path, c) {
+        if encoder_available(ffmpeg_path, c) && encoder_really_available(ffmpeg_path, c) {
             tracing::info!("Using hardware H.265 encoder: {}", c);
             return c.to_string();
         }
     }
+    tracing::info!("No hardware H.265 encoder available, falling back to libx265");
     "libx265".to_string()
 }
 
-/// Check if a specific encoder is available
+/// Check if a specific encoder is available.
+///
+/// 首次调用时执行 `ffmpeg -encoders` 并按 `ffmpeg_path` 缓存输出，
+/// 后续调用直接查缓存，避免每次 clip 启动 4+ 次 ffmpeg 子进程。
 fn encoder_available(ffmpeg_path: &str, encoder: &str) -> bool {
-    std::process::Command::new(ffmpeg_path)
+    let cache = encoders_cache();
+
+    if let Ok(guard) = cache.lock() {
+        if let Some(text) = guard.get(ffmpeg_path) {
+            return text.contains(encoder);
+        }
+    }
+
+    let output = match std::process::Command::new(ffmpeg_path)
         .args(["-hide_banner", "-encoders"])
         .output()
-        .ok()
-        .map(|output| String::from_utf8_lossy(&output.stdout).contains(encoder))
-        .unwrap_or(false)
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!("ffmpeg -encoders failed ({}): {}", ffmpeg_path, e);
+            return false;
+        }
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let contains = text.contains(encoder);
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(ffmpeg_path.to_string(), text);
+    }
+
+    contains
+}
+
+/// Cache for hardware encoder test-encode results (key: "ffmpeg_path:encoder")
+fn encoders_verified() -> &'static std::sync::Mutex<std::collections::HashMap<String, bool>> {
+    static MAP: OnceLock<std::sync::Mutex<std::collections::HashMap<String, bool>>> =
+        OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Verify a hardware encoder can actually produce output.
+///
+/// FFmpeg may list hardware encoders in `-encoders` even when the required
+/// hardware/driver is absent (e.g., NVENC without NVIDIA GPU, VideoToolbox
+/// in headless environments). This runs a minimal test encode and caches
+/// the result to avoid re-checking on every clip.
+fn encoder_really_available(ffmpeg_path: &str, encoder: &str) -> bool {
+    let key = format!("{}:{}", ffmpeg_path, encoder);
+
+    if let Ok(guard) = encoders_verified().lock() {
+        if let Some(&result) = guard.get(&key) {
+            return result;
+        }
+    }
+
+    let result = std::process::Command::new(ffmpeg_path)
+        .args([
+            "-hide_banner",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x64:d=0.1",
+            "-c:v",
+            encoder,
+            "-frames:v",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !result {
+        tracing::info!(
+            "Encoder {} listed but hardware unavailable, falling back",
+            encoder
+        );
+    }
+
+    if let Ok(mut guard) = encoders_verified().lock() {
+        guard.insert(key, result);
+    }
+
+    result
 }
 
 // ====== Two-pass Clip + Burn Pipeline ======

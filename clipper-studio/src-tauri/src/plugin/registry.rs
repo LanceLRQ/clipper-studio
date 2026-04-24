@@ -111,8 +111,10 @@ impl PluginRegistry {
         };
         for (id, trans) in instances {
             tracing::info!("Shutting down builtin plugin: {}", id);
-            if let Err(e) = trans.shutdown().await {
-                tracing::warn!("Failed to shutdown builtin plugin {}: {}", id, e);
+            match tokio::time::timeout(std::time::Duration::from_secs(5), trans.shutdown()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("Failed to shutdown builtin plugin {}: {}", id, e),
+                Err(_) => tracing::warn!("Timeout shutting down builtin plugin {} (5s)", id),
             }
         }
     }

@@ -2,6 +2,37 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// FFmpeg stderr 缓冲上限：长时间编码的 stderr 可累积至数十 MB，
+/// 仅保留尾部 4MB 已足够诊断失败原因。
+pub const STDERR_CAP_BYTES: usize = 4 * 1024 * 1024;
+
+/// 以 ring-buffer 模式读取 stderr 至完成或进程退出：
+/// - 超过 `STDERR_CAP_BYTES` 时丢弃前半段数据但继续 drain 管道（防止 pipe deadlock）
+/// - 返回数据保证是 stderr 流的"尾部"，适合失败时提取错误信息
+pub async fn read_stderr_capped<R>(mut reader: R) -> Vec<u8>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    use tokio::io::AsyncReadExt;
+    let mut buf = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > STDERR_CAP_BYTES {
+                    // 保留末尾 STDERR_CAP_BYTES / 2，丢弃更早的日志
+                    let drop = buf.len() - STDERR_CAP_BYTES / 2;
+                    buf.drain(..drop);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    buf
+}
+
 /// Derive the ffprobe path from ffmpeg path by replacing only the filename component.
 /// Unlike simple string replace, this avoids corrupting paths like "/opt/ffmpeg-tools/ffmpeg".
 pub fn derive_ffprobe_path(ffmpeg_path: &str) -> String {
@@ -462,7 +493,7 @@ pub async fn burn_subtitle_with_progress(
     cancel: tokio_util::sync::CancellationToken,
     on_progress: impl Fn(BurnProgress) + Send + 'static,
 ) -> Result<(), String> {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command as AsyncCommand;
 
     if ffmpeg_path.is_empty() {
@@ -485,45 +516,26 @@ pub async fn burn_subtitle_with_progress(
     let mut args: Vec<String> = Vec::new();
     args.extend(["-i".to_string(), input.to_string_lossy().to_string()]);
 
-    let vf_filter = if cfg!(target_os = "windows") {
-        // Escape colon for subtitles filter's internal option parser.
-        // Single quotes protect against the FFmpeg filter-graph parser,
-        // but the subtitles filter also splits on ':' internally.
-        // '\:' tells the subtitles option parser to treat ':' as literal.
-        let path = ass_path
-            .to_string_lossy()
-            .replace('\\', "/")
-            .replace(':', "\\:");
-        format!("subtitles='{}'", path)
-    } else {
-        format!("ass={}", ass_escaped)
-    };
-    args.extend(["-vf".to_string(), vf_filter]);
+    // 统一使用 ass= 滤镜，确保跨平台渲染行为一致
+    // COMPAT-12：将字体目录作为滤镜参数传入（fontsdir=dir:fontsdir=dir）
+    let mut vf = format!("ass={}", ass_escaped);
+    for font_dir in get_system_font_dirs() {
+        if font_dir.exists() {
+            let dir_escaped = font_dir
+                .to_string_lossy()
+                .replace('\\', "/")
+                .replace(':', "\\:");
+            vf = format!("{}:fontsdir={}", vf, dir_escaped);
+        }
+    }
+    args.extend(["-vf".to_string(), vf]);
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
     args.extend(["-c:v".to_string(), video_codec.clone()]);
 
-    // Quality setting: hardware encoders need special handling, software encoders use -crf
-    if let Some(crf_val) = crf {
-        if video_codec.contains("videotoolbox") {
-            // VideoToolbox does not support -crf or -cq; use default quality
-            tracing::debug!("VideoToolbox encoder: skipping quality param, using default");
-        } else if video_codec.contains("nvenc") {
-            // NVENC: -cq is the CRF-equivalent constant quality mode;
-            // -b:v 0 forces CQ mode (otherwise encoder falls back to bitrate-limited VBR)
-            args.extend(["-cq".to_string(), crf_val.to_string()]);
-            args.extend(["-b:v".to_string(), "0".to_string()]);
-        } else if video_codec.contains("qsv") {
-            // QSV: -global_quality is the CRF-like quality control
-            args.extend(["-global_quality".to_string(), crf_val.to_string()]);
-        } else if video_codec.contains("amf") {
-            // AMF: -q:v works as quality level
-            args.extend(["-q:v".to_string(), crf_val.to_string()]);
-        } else {
-            args.extend(["-crf".to_string(), crf_val.to_string()]);
-        }
-    }
+    // Quality setting：统一通过 apply_quality_args 处理硬件/软件编码器差异
+    crate::core::clipper::apply_quality_args(&video_codec, crf, &mut args);
 
     // Audio: copy (no re-encoding needed)
     args.extend(["-c:a".to_string(), "copy".to_string()]);
@@ -546,25 +558,26 @@ pub async fn burn_subtitle_with_progress(
         .map_err(|e| format!("Failed to start FFmpeg burn: {}", e))?;
 
     let stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
 
     // Drain stderr concurrently to prevent pipe buffer deadlock.
     // FFmpeg writes extensive status to stderr; if the pipe buffer fills,
     // FFmpeg blocks and stops producing progress output on stdout.
-    let stderr_task = tokio::spawn(async move {
-        let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf).await;
-        buf
-    });
+    // 使用 read_stderr_capped 避免长时间编码累积数十 MB 日志
+    let stderr_task = tokio::spawn(async move { read_stderr_capped(stderr).await });
 
     let mut reader = BufReader::new(stdout).lines();
     let mut current_speed: Option<f64> = None;
+    // 进度节流：同步 clipper.rs 的 200ms 窗口，避免前端 UI 卡顿
+    let interval_ms = crate::core::clipper::PROGRESS_EMIT_INTERVAL_MS;
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(interval_ms))
+        .unwrap_or_else(std::time::Instant::now);
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                crate::core::clipper::graceful_kill_child(&mut child).await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
@@ -578,16 +591,22 @@ pub async fn burn_subtitle_with_progress(
                                 } else {
                                     0.0
                                 };
-                                on_progress(BurnProgress {
-                                    progress,
-                                    time_secs,
-                                    speed: current_speed,
-                                });
+                                if last_emit.elapsed()
+                                    >= std::time::Duration::from_millis(interval_ms)
+                                {
+                                    on_progress(BurnProgress {
+                                        progress,
+                                        time_secs,
+                                        speed: current_speed,
+                                    });
+                                    last_emit = std::time::Instant::now();
+                                }
                             }
                         } else if let Some(speed_str) = line.strip_prefix("speed=") {
                             let cleaned = speed_str.trim().trim_end_matches('x');
                             current_speed = cleaned.parse::<f64>().ok();
                         } else if line.starts_with("progress=end") {
+                            // 结束事件必发
                             on_progress(BurnProgress {
                                 progress: 1.0,
                                 time_secs: duration_secs,
@@ -634,6 +653,35 @@ pub async fn burn_subtitle_with_progress(
 fn escape_ass_path(ass_path: &Path) -> String {
     let path_str = ass_path.to_string_lossy().to_string();
     path_str.replace('\\', "/").replace(':', "\\:")
+}
+
+/// Returns platform-specific system font directories for libass.
+fn get_system_font_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    #[cfg(target_os = "macos")]
+    {
+        dirs.push(PathBuf::from("/Library/Fonts"));
+        dirs.push(PathBuf::from("/System/Library/Fonts"));
+        if let Some(home) = std::env::var_os("HOME") {
+            dirs.push(PathBuf::from(home).join("Library/Fonts"));
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(windir) = std::env::var("WINDIR") {
+            dirs.push(PathBuf::from(windir).join("Fonts"));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        dirs.push(PathBuf::from("/usr/share/fonts"));
+        dirs.push(PathBuf::from("/usr/local/share/fonts"));
+        if let Some(home) = std::env::var_os("HOME") {
+            dirs.push(PathBuf::from(&home).join(".local/share/fonts"));
+            dirs.push(PathBuf::from(home).join(".fonts"));
+        }
+    }
+    dirs
 }
 
 /// Get FFmpeg version string

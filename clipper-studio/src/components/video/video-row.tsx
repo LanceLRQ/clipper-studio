@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { FileX2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { VideoInfo } from "@/types/video";
@@ -32,7 +33,19 @@ export function StatusTags({ videos }: { videos: VideoInfo[] }) {
   );
 }
 
-export function VideoRow({
+interface VideoRowProps {
+  video: VideoInfo;
+  compact?: boolean;
+  indent?: boolean;
+  /** 接收 video 本身以便父组件使用稳定 useCallback 回调（避免每行创建新闭包破坏 memo） */
+  onNavigate: (video: VideoInfo) => void;
+  onDelete: (video: VideoInfo, e: React.MouseEvent) => void;
+  selected?: boolean;
+  onToggleSelect?: (id: number) => void;
+  tags?: TagInfo[];
+}
+
+function VideoRowComponent({
   video,
   compact = false,
   indent,
@@ -41,16 +54,7 @@ export function VideoRow({
   selected,
   onToggleSelect,
   tags,
-}: {
-  video: VideoInfo;
-  compact?: boolean;
-  indent?: boolean;
-  onNavigate: () => void;
-  onDelete: (e: React.MouseEvent) => void;
-  selected?: boolean;
-  onToggleSelect?: (id: number) => void;
-  tags?: TagInfo[];
-}) {
+}: VideoRowProps) {
   const title = buildVideoTitle(video);
   const showTitle = title !== video.file_name;
 
@@ -65,7 +69,7 @@ export function VideoRow({
   return (
     <div
       className={`flex items-center justify-between hover:bg-accent/30 cursor-pointer transition-colors ${paddingClass} ${selected ? "bg-accent/40" : ""} ${missing ? "opacity-60" : ""}`}
-      onClick={onNavigate}
+      onClick={() => onNavigate(video)}
       title={missing ? "文件已缺失（磁盘上找不到），操作功能将被禁用" : undefined}
     >
       <div className="flex items-center gap-3 min-w-0">
@@ -124,7 +128,7 @@ export function VideoRow({
           variant="ghost"
           size="sm"
           className="text-red-500 hover:text-red-600 h-7 px-2"
-          onClick={onDelete}
+          onClick={(e) => onDelete(video, e)}
         >
           删除
         </Button>
@@ -132,3 +136,20 @@ export function VideoRow({
     </div>
   );
 }
+
+/**
+ * React.memo：列表中任意一行的选中/视频元数据未变化时跳过重渲染。
+ * 比较选中状态、视频引用（父组件 memoize 列表时稳定）、tags/回调引用。
+ */
+export const VideoRow = memo(VideoRowComponent, (prev, next) => {
+  return (
+    prev.video === next.video &&
+    prev.selected === next.selected &&
+    prev.compact === next.compact &&
+    prev.indent === next.indent &&
+    prev.tags === next.tags &&
+    prev.onNavigate === next.onNavigate &&
+    prev.onDelete === next.onDelete &&
+    prev.onToggleSelect === next.onToggleSelect
+  );
+});

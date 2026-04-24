@@ -43,7 +43,7 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: clipper-studio/src-tauri -> target
+          workspaces: clipper-studio -> target
 
       - name: Install Linux webkit deps
         run: |

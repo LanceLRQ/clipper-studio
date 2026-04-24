@@ -162,9 +162,9 @@ fn walk_bililive(
         }
 
         let dir_name = entry.file_name().to_string_lossy().to_string();
-        let matched = dir_re.captures(&dir_name).map(|caps| {
-            (caps[1].to_string(), caps[2].to_string())
-        });
+        let matched = dir_re
+            .captures(&dir_name)
+            .map(|caps| (caps[1].to_string(), caps[2].to_string()));
 
         let (room_id, streamer_name) = if let Some((rid, name)) = matched {
             streamer_dirs.push(StreamerDir {
@@ -384,16 +384,48 @@ fn scan_generic(dir: &Path) -> WorkspaceScanResult {
     }
 }
 
+/// 递归扫描目录查找视频文件。
+///
+/// 安全约束（SEC-FS-04）：跳过符号链接目录，避免扫描逃出工作区。
+/// 性能约束（P5-PERF-34）：限制递归深度与结果数量，防止循环链接导致死循环。
 fn scan_dir_recursive(dir: &Path, results: &mut Vec<RecordingFileMeta>) {
+    const MAX_DEPTH: usize = 16;
+    const MAX_RESULTS: usize = 100_000;
     let file_re = Regex::new(BILIREC_FILE_REGEX).unwrap();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                scan_dir_recursive(&path, results);
-            } else {
-                scan_file(&path, &file_re, None, None, results);
-            }
+    scan_dir_recursive_inner(dir, results, &file_re, 0, MAX_DEPTH, MAX_RESULTS);
+}
+
+fn scan_dir_recursive_inner(
+    dir: &Path,
+    results: &mut Vec<RecordingFileMeta>,
+    file_re: &Regex,
+    depth: usize,
+    max_depth: usize,
+    max_results: usize,
+) {
+    if depth > max_depth || results.len() >= max_results {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if results.len() >= max_results {
+            return;
+        }
+        let path = entry.path();
+        // symlink_metadata 不跟随符号链接；跳过符号链接目录避免递归到工作区外
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
+            scan_dir_recursive_inner(&path, results, file_re, depth + 1, max_depth, max_results);
+        } else if meta.is_file() {
+            scan_file(&path, file_re, None, None, results);
         }
     }
 }

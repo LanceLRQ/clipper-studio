@@ -117,7 +117,15 @@ impl PluginManager {
                         .file_name()
                         .map(|n| n.to_string_lossy().to_string())
                         .unwrap_or_default();
-                    tracing::debug!("Skipping {}: {}", dir_name, e);
+                    tracing::warn!("Skipping plugin {}: {}", dir_name, e);
+                    results.push(PluginScanResult {
+                        id: dir_name.clone(),
+                        name: dir_name,
+                        version: String::new(),
+                        plugin_type: String::new(),
+                        status: "error".to_string(),
+                        error: Some(e.to_string()),
+                    });
                 }
             }
         }
@@ -158,6 +166,30 @@ impl PluginManager {
                     .ok_or("No executable defined for current platform")?;
 
                 let full_path = meta.dir.join(exec_path);
+
+                // Validate executable exists
+                if !full_path.exists() {
+                    return Err(format!(
+                        "Plugin executable not found: {}",
+                        full_path.display()
+                    ));
+                }
+
+                // Check executable permission on Unix
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(metadata) = std::fs::metadata(&full_path) {
+                        let mode = metadata.permissions().mode();
+                        if mode & 0o111 == 0 {
+                            return Err(format!(
+                                "Plugin executable lacks execute permission: {}",
+                                full_path.display()
+                            ));
+                        }
+                    }
+                }
+
                 Box::new(StdioTransport::new(full_path, meta.dir.clone()))
             }
             Transport::Builtin => {
@@ -311,6 +343,11 @@ impl PluginManager {
         action: &str,
         payload: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
+        // Auto-restart crashed managed services before calling
+        if let Some(svc) = self.services.read().await.get(plugin_id) {
+            svc.check_and_restart().await;
+        }
+
         let transports = self.transports.read().await;
         let transport = transports
             .get(plugin_id)
@@ -383,7 +420,11 @@ impl PluginManager {
         let mut services = self.services.write().await;
         for (id, svc) in services.drain() {
             tracing::info!("Shutting down plugin service: {}", id);
-            let _ = svc.stop().await;
+            match tokio::time::timeout(std::time::Duration::from_secs(5), svc.stop()).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!("Failed to stop plugin {}: {}", id, e),
+                Err(_) => tracing::warn!("Timeout stopping plugin {} (5s)", id),
+            }
         }
     }
 

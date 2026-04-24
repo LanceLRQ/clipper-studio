@@ -39,10 +39,8 @@ pub async fn create_tag(
     state: State<'_, AppState>,
     req: CreateTagRequest,
 ) -> Result<TagInfo, String> {
+    crate::utils::validation::validate_name(&req.name, "标签名称")?;
     let name = req.name.trim().to_string();
-    if name.is_empty() {
-        return Err("标签名称不能为空".to_string());
-    }
 
     let color_sql = req
         .color
@@ -111,10 +109,8 @@ pub async fn update_tag(
     let mut sets: Vec<String> = Vec::new();
 
     if let Some(ref name) = req.name {
+        crate::utils::validation::validate_name(name, "标签名称")?;
         let name = name.trim();
-        if name.is_empty() {
-            return Err("标签名称不能为空".to_string());
-        }
         sets.push(format!("name = '{}'", name.replace('\'', "''")));
     }
 

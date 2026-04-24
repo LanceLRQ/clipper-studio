@@ -135,8 +135,7 @@ impl ASRServiceManager {
     pub fn validate_path(raw_dir: &Path) -> ASRPathValidation {
         // Auto-detect: if the selected dir looks like the `asr-service` subdirectory
         // (contains `app/main.py` directly), treat its parent as the base_dir.
-        let base_dir = if raw_dir.join("app").join("main.py").exists()
-            && raw_dir.parent().is_some()
+        let base_dir = if raw_dir.join("app").join("main.py").exists() && raw_dir.parent().is_some()
         {
             tracing::info!(
                 "[ASR] validate_path: detected asr-service subdirectory, normalizing to parent: {}",

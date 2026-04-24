@@ -139,11 +139,11 @@ pub async fn merge_physical(
 
     // Video codec
     let video_codec = crate::core::clipper::resolve_video_codec(ffmpeg_path, codec_hint);
-    args.extend(["-c:v".to_string(), video_codec]);
+    args.extend(["-c:v".to_string(), video_codec.clone()]);
 
-    if let Some(crf_val) = crf {
-        args.extend(["-crf".to_string(), crf_val.to_string()]);
-    }
+    // Quality setting：通过 apply_quality_args 统一硬件/软件编码器质量参数
+    // （P4-COMPAT-18：原先无条件 -crf 在硬件编码器下会被忽略或报错）
+    crate::core::clipper::apply_quality_args(&video_codec, crf, &mut args);
 
     args.extend(["-c:a".to_string(), "aac".to_string()]);
     args.extend([
@@ -217,14 +217,18 @@ async fn run_ffmpeg_with_progress(
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
     let mut current_speed: Option<f64> = None;
+    // 进度节流：同步 clipper.rs 的 200ms 窗口
+    let interval_ms = crate::core::clipper::PROGRESS_EMIT_INTERVAL_MS;
+    let mut last_emit = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_millis(interval_ms))
+        .unwrap_or_else(std::time::Instant::now);
 
     // Concurrently consume stderr to prevent pipe buffer deadlock
+    // 使用 read_stderr_capped 避免长时间编码累积数十 MB 日志
     let stderr = child.stderr.take();
     let stderr_task = tokio::spawn(async move {
-        if let Some(mut stderr) = stderr {
-            let mut buf = Vec::new();
-            let _ = tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut buf).await;
-            buf
+        if let Some(stderr) = stderr {
+            crate::utils::ffmpeg::read_stderr_capped(stderr).await
         } else {
             Vec::new()
         }
@@ -233,8 +237,7 @@ async fn run_ffmpeg_with_progress(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+                crate::core::clipper::graceful_kill_child(&mut child).await;
                 return Err("Task cancelled".to_string());
             }
             line = reader.next_line() => {
@@ -248,16 +251,22 @@ async fn run_ffmpeg_with_progress(
                                 } else {
                                     0.0
                                 };
-                                on_progress(ClipProgress {
-                                    progress,
-                                    time_secs,
-                                    speed: current_speed,
-                                });
+                                if last_emit.elapsed()
+                                    >= std::time::Duration::from_millis(interval_ms)
+                                {
+                                    on_progress(ClipProgress {
+                                        progress,
+                                        time_secs,
+                                        speed: current_speed,
+                                    });
+                                    last_emit = std::time::Instant::now();
+                                }
                             }
                         } else if let Some(speed_str) = line.strip_prefix("speed=") {
                             let cleaned = speed_str.trim().trim_end_matches('x');
                             current_speed = cleaned.parse::<f64>().ok();
                         } else if line.starts_with("progress=end") {
+                            // 结束事件必发
                             on_progress(ClipProgress {
                                 progress: 1.0,
                                 time_secs: total_duration_secs,

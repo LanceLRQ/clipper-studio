@@ -226,7 +226,7 @@ pub async fn list_videos(
 ) -> Result<ListVideosResponse, String> {
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     // Build WHERE clauses dynamically
     let mut conditions: Vec<String> = Vec::new();
@@ -347,6 +347,7 @@ pub async fn list_videos(
 /// Get a single video by ID
 #[tauri::command]
 pub async fn get_video(state: State<'_, AppState>, video_id: i64) -> Result<VideoInfo, String> {
+    crate::utils::validation::validate_id(video_id, "video_id")?;
     let row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
@@ -369,6 +370,7 @@ pub async fn get_video(state: State<'_, AppState>, video_id: i64) -> Result<Vide
 /// Delete a video record (does not delete file on disk)
 #[tauri::command]
 pub async fn delete_video(state: State<'_, AppState>, video_id: i64) -> Result<(), String> {
+    crate::utils::validation::validate_id(video_id, "video_id")?;
     sea_orm::ConnectionTrait::execute_unprepared(
         state.db.conn(),
         &format!("DELETE FROM videos WHERE id = {}", video_id),
@@ -458,7 +460,7 @@ pub async fn list_sessions(
 
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     let sort_dir = match req.sort_order.as_deref() {
         Some("asc") => "ASC",
@@ -617,7 +619,7 @@ pub async fn list_streamers(
     });
     let page = req.page.unwrap_or(1).max(1);
     let page_size = req.page_size.unwrap_or(50).min(200);
-    let offset = (page - 1) * page_size;
+    let offset = ((page - 1) * page_size).min(10_000);
 
     let ws_filter = match req.workspace_id {
         Some(id) => format!("WHERE v.workspace_id = {}", id),

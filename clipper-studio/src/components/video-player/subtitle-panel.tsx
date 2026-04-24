@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import type { SubtitleSegment, ASRServiceStatusInfo } from "@/services/asr";
 import {
   listSubtitles,
-  checkASRHealth,
   getASRServiceStatus,
   exportSubtitlesSrt,
   exportSubtitlesAss,
@@ -16,6 +15,7 @@ import {
 } from "@/services/asr";
 import { getSettings } from "@/services/settings";
 import { useASRQueueStore, useASRTaskForVideo } from "@/stores/asr-queue";
+import { useASRHealth } from "@/stores/asr-health";
 
 interface SubtitlePanelProps {
   videoId: number;
@@ -67,7 +67,8 @@ export function SubtitlePanel({
   // ASR service availability
   const [asrMode, setAsrMode] = useState<string>("local");
   const [serviceStatus, setServiceStatus] = useState<ASRServiceStatusInfo | null>(null);
-  const [remoteHealthy, setRemoteHealthy] = useState<boolean | null>(null);
+  // P5-PERF-25：通过共享 store 订阅远程健康状态
+  const remoteHealthy = useASRHealth(asrMode === "remote");
 
   // ASR queue store
   const queueTask = useASRTaskForVideo(videoId);
@@ -98,23 +99,6 @@ export function SubtitlePanel({
 
     getASRServiceStatus().then(setServiceStatus).catch(console.error);
   }, []);
-
-  // Periodically check remote ASR health when in remote mode
-  useEffect(() => {
-    if (asrMode !== "remote") {
-      setRemoteHealthy(null);
-      return;
-    }
-    let cancelled = false;
-    const check = () => {
-      checkASRHealth()
-        .then((h) => { if (!cancelled) setRemoteHealthy(h.status === "ready"); })
-        .catch(() => { if (!cancelled) setRemoteHealthy(false); });
-    };
-    check();
-    const interval = setInterval(check, 30000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [asrMode]);
 
   // Listen for real-time service status changes
   useEffect(() => {
@@ -153,10 +137,9 @@ export function SubtitlePanel({
 
     setLoading(true);
     try {
-      // Check health first
-      const health = await checkASRHealth();
-      if (health.status !== "ready") {
-        alert("ASR 引擎未就绪，请检查「设置 > 语音识别」中的服务状态");
+      // Validate ASR readiness using already-tracked state
+      if (asrMode === "remote" && !remoteHealthy) {
+        alert("远程 ASR 服务未就绪，请检查「设置 > 语音识别」中的连接配置");
         return;
       }
 
@@ -179,12 +162,19 @@ export function SubtitlePanel({
     (s) => s.start_ms <= currentAbsoluteMs && s.end_ms > currentAbsoluteMs
   );
 
-  // Filter by search
-  const displaySegments = searchQuery
-    ? segments.filter((s) =>
-        s.text.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : segments;
+  // 搜索防抖：避免每次按键对 1000+ 条字幕做 O(n) lower-case 全量扫描
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Filter by (debounced) search，useMemo 缓存过滤结果避免 currentTime 更新时重算
+  const displaySegments = useMemo(() => {
+    if (!debouncedQuery) return segments;
+    const needle = debouncedQuery.toLowerCase();
+    return segments.filter((s) => s.text.toLowerCase().includes(needle));
+  }, [segments, debouncedQuery]);
 
   // Virtualized row rendering (P5-PERF-09): avoid mounting thousands of DOM nodes
   const rowVirtualizer = useVirtualizer({
@@ -198,10 +188,10 @@ export function SubtitlePanel({
   // rows mounted. Only triggers when activeIndex or search toggle changes, not
   // on every currentTime tick.
   useEffect(() => {
-    if (searchQuery) return;
+    if (debouncedQuery) return;
     if (activeIndex < 0) return;
     rowVirtualizer.scrollToIndex(activeIndex, { align: "auto", behavior: "smooth" });
-  }, [activeIndex, searchQuery, rowVirtualizer]);
+  }, [activeIndex, debouncedQuery, rowVirtualizer]);
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -382,7 +372,7 @@ export function SubtitlePanel({
               const seg = displaySegments[virtualRow.index];
               if (!seg) return null;
               const isActive =
-                !searchQuery && segments.indexOf(seg) === activeIndex;
+                !debouncedQuery && segments.indexOf(seg) === activeIndex;
               const startSecs = toRelativeSecs(seg.start_ms);
               const endSecs = toRelativeSecs(seg.end_ms);
 
