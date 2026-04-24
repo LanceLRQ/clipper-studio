@@ -314,7 +314,14 @@ impl DependencyManager {
             Ok(v) => v,
             Err(e) => {
                 let err_msg = format!("安装验证失败: {}", e);
-                self.cleanup_on_error(dep_id, &std::path::PathBuf::new(), &staging_dir, false, &err_msg, app_handle);
+                self.cleanup_on_error(
+                    dep_id,
+                    &std::path::PathBuf::new(),
+                    &staging_dir,
+                    false,
+                    &err_msg,
+                    app_handle,
+                );
                 return Err(err_msg);
             }
         };
@@ -323,7 +330,14 @@ impl DependencyManager {
         if dep_dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&dep_dir) {
                 let err_msg = format!("移除旧依赖目录失败: {}", e);
-                self.cleanup_on_error(dep_id, &std::path::PathBuf::new(), &staging_dir, false, &err_msg, app_handle);
+                self.cleanup_on_error(
+                    dep_id,
+                    &std::path::PathBuf::new(),
+                    &staging_dir,
+                    false,
+                    &err_msg,
+                    app_handle,
+                );
                 return Err(err_msg);
             }
         }
