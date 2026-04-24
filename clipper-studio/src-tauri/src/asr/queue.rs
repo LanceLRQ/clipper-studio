@@ -926,11 +926,14 @@ impl ASRTaskQueue {
                 Ok(Arc::new(RemoteASRProvider::new(&url, api_key)))
             }
             _ => {
+                let host = service::read_setting_from_db(db, "asr_host")
+                    .await
+                    .unwrap_or_else(|| "127.0.0.1".to_string());
                 let port: u16 = service::read_setting_from_db(db, "asr_port")
                     .await
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(8765);
-                Ok(Arc::new(LocalASRProvider::new(port)))
+                Ok(Arc::new(LocalASRProvider::new(&host, port)))
             }
         }
     }

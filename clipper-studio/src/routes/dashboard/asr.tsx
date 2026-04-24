@@ -6,6 +6,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipTrigger,
@@ -1002,14 +1003,21 @@ function ASRSettingsContent() {
                 <div className="space-y-1">
                   <Tooltip>
                     <TooltipTrigger render={<Label className="text-xs cursor-help border-b border-dashed border-muted-foreground w-fit" />}>
-                      主机地址 (Host)
+                      允许局域网访问
                     </TooltipTrigger>
                     <TooltipContent side="top" className="max-w-72">
-                      本地 ASR 服务监听地址，默认 127.0.0.1 仅本机可访问；若需局域网其他设备访问请改为 0.0.0.0
+                      关闭（默认）时仅监听本机 127.0.0.1，其他设备无法连接；开启后监听所有网卡 (0.0.0.0)，局域网内其他设备可通过本机 IP 地址访问该服务
                     </TooltipContent>
                   </Tooltip>
-                  <Input value={asrHost} onChange={(e) => setAsrHost(e.target.value)}
-                    placeholder="127.0.0.1" className="text-sm h-8 font-mono" />
+                  <div className="flex items-center gap-2 h-8">
+                    <Switch
+                      checked={asrHost === "0.0.0.0"}
+                      onCheckedChange={(checked) => setAsrHost(checked ? "0.0.0.0" : "127.0.0.1")}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {asrHost === "0.0.0.0" ? "已开放" : "仅本机"}
+                    </span>
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">端口 (Port)</Label>

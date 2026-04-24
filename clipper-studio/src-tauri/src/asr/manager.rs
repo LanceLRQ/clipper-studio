@@ -418,7 +418,13 @@ impl ASRServiceManager {
         }
 
         // Spawn health check loop (checks native child liveness via try_wait)
-        let health_url = format!("http://{}:{}/v1/health", config.host, config.port);
+        // Client connects via 127.0.0.1 when host is wildcard (0.0.0.0)
+        let connect_host = if config.host == "0.0.0.0" || config.host.is_empty() {
+            "127.0.0.1"
+        } else {
+            config.host.as_str()
+        };
+        let health_url = format!("http://{}:{}/v1/health", connect_host, config.port);
         let mgr = Arc::clone(self);
         let app_h = app_handle.clone();
         tokio::spawn(async move {
@@ -478,7 +484,7 @@ impl ASRServiceManager {
             "--name".to_string(),
             docker::CONTAINER_NAME.to_string(),
             "-p".to_string(),
-            format!("127.0.0.1:{}:8765", config.port),
+            format!("{}:{}:8765", config.host, config.port),
             "-v".to_string(),
             format!("{}:/app/models", models_dir.to_string_lossy()),
         ];
@@ -552,7 +558,13 @@ impl ASRServiceManager {
         }
 
         // Health check + container liveness loop
-        let health_url = format!("http://127.0.0.1:{}/v1/health", config.port);
+        // Client connects via 127.0.0.1 when host is wildcard (0.0.0.0)
+        let connect_host = if config.host == "0.0.0.0" || config.host.is_empty() {
+            "127.0.0.1"
+        } else {
+            config.host.as_str()
+        };
+        let health_url = format!("http://{}:{}/v1/health", connect_host, config.port);
         let mgr = Arc::clone(self);
         let app_h = app_handle.clone();
         tokio::spawn(async move {

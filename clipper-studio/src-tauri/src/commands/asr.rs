@@ -82,12 +82,15 @@ async fn get_provider(state: &AppState) -> Result<Arc<dyn ASRProvider>, String> 
         }
         _ => {
             // "local" or default
+            let host = read_setting(state, "asr_host")
+                .await
+                .unwrap_or_else(|| "127.0.0.1".to_string());
             let port: u16 = read_setting(state, "asr_port")
                 .await
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8765);
-            tracing::info!("[ASR] Using local provider: http://127.0.0.1:{}", port);
-            Ok(Arc::new(LocalASRProvider::new(port)))
+            tracing::info!("[ASR] Using local provider: http://{}:{}", host, port);
+            Ok(Arc::new(LocalASRProvider::new(&host, port)))
         }
     }
 }
@@ -549,6 +552,10 @@ pub async fn start_asr_service(
         .await
         .unwrap_or_else(|| "native".to_string());
 
+    let host = read_setting(&state, "asr_host")
+        .await
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
     let port: u16 = read_setting(&state, "asr_port")
         .await
         .and_then(|v| v.parse().ok())
@@ -624,7 +631,7 @@ pub async fn start_asr_service(
             .await
             .and_then(|v| v.parse().ok())
             .unwrap_or(5),
-        host: "127.0.0.1".to_string(),
+        host,
     };
 
     state
