@@ -394,6 +394,7 @@ fn emit_progress(
 }
 
 /// 实际执行扫描。错误字符串中若包含 "Task cancelled" 会被 TaskQueue 转成 Cancelled 状态。
+#[allow(clippy::too_many_arguments)]
 async fn scan_workspace_handler(
     task_id: i64,
     workspace_id: i64,

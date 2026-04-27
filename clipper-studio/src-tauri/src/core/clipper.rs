@@ -26,10 +26,12 @@ pub(crate) async fn graceful_kill_child(child: &mut tokio::process::Child) {
             }
         }
         // Wait up to 3s for graceful exit
-        match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
-            Ok(Ok(_)) => return,
-            _ => {} // Timed out or error, fall through to SIGKILL
+        if let Ok(Ok(_)) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await
+        {
+            return;
         }
+        // Timed out or error, fall through to SIGKILL
     }
     let _ = child.kill().await;
     let _ = child.wait().await;
@@ -71,6 +73,7 @@ pub struct PresetOptions {
 /// - Audio extract (audio_only = true): extract audio track only
 ///
 /// Reports progress via the callback. Respects cancellation token.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_clip(
     ffmpeg_path: &str,
     input: &Path,
@@ -174,7 +177,7 @@ pub async fn execute_clip(
                         if let Some(time_str) = line.strip_prefix("out_time_us=") {
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
-                                let progress = (time_secs / duration_secs).min(1.0).max(0.0);
+                                let progress = (time_secs / duration_secs).clamp(0.0, 1.0);
                                 if last_emit.elapsed()
                                     >= std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS)
                                 {
@@ -424,6 +427,7 @@ impl BurnOptions {
 ///
 /// Progress is split: Pass 1 = 0%~40%, Pass 2 = 40%~100%.
 /// If no burning is needed, Pass 1 uses the full 0%~100% range.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_clip_with_burn(
     ffmpeg_path: &str,
     input: &Path,
@@ -479,9 +483,8 @@ pub async fn execute_clip_with_burn(
         },
     )
     .await
-    .map_err(|e| {
+    .inspect_err(|_e| {
         let _ = std::fs::remove_file(&intermediate);
-        e
     })?;
 
     // === Merge ASS files if both danmaku and subtitle are requested ===

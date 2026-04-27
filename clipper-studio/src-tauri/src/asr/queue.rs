@@ -938,6 +938,7 @@ impl ASRTaskQueue {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_progress(
         app_handle: &AppHandle,
         task_id: i64,

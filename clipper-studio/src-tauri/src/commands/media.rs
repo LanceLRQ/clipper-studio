@@ -80,7 +80,7 @@ pub async fn transcode_video(
         }
     };
 
-    let stem = file_name.rsplit('.').last().unwrap_or(&file_name);
+    let stem = file_name.rsplit('.').next_back().unwrap_or(&file_name);
     let output_filename = format!("{}_transcoded.{}", stem, ext);
     let output_path = output_dir.join(&output_filename);
 
@@ -320,7 +320,7 @@ pub async fn merge_videos(
         }
     };
 
-    let stem = first_name.rsplit('.').last().unwrap_or(&first_name);
+    let stem = first_name.rsplit('.').next_back().unwrap_or(&first_name);
     let output_filename = format!("{}_merged.mp4", stem);
     let output_path = output_dir.join(&output_filename);
 

@@ -83,7 +83,7 @@ pub async fn download_file<R: Runtime>(
 
     let total_size = response.content_length();
     let total_str = total_size
-        .map(|s| format_bytes(s))
+        .map(format_bytes)
         .unwrap_or_else(|| "unknown".to_string());
 
     // Create parent directory

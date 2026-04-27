@@ -247,7 +247,7 @@ async fn run_ffmpeg_with_progress(
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
                                 let progress = if total_duration_secs > 0.0 {
-                                    (time_secs / total_duration_secs).min(1.0).max(0.0)
+                                    (time_secs / total_duration_secs).clamp(0.0, 1.0)
                                 } else {
                                     0.0
                                 };

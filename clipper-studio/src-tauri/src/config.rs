@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 ///
 /// Stored at `{app_data_dir}/config.toml`, user-editable.
 /// Changes take effect after app restart.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppConfig {
     #[serde(default)]
     pub general: GeneralConfig,
@@ -46,7 +46,7 @@ pub struct GeneralConfig {
     pub log_level: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FfmpegConfig {
     /// Override FFmpeg binary path (empty = auto-detect)
     #[serde(default)]
@@ -57,7 +57,7 @@ pub struct FfmpegConfig {
     pub ffprobe_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspacesConfig {
     /// Recently opened workspace paths (maintained by the app, also user-editable)
     #[serde(default)]
@@ -78,33 +78,6 @@ impl Default for GeneralConfig {
         Self {
             database_path: default_database_path(),
             log_level: default_log_level(),
-        }
-    }
-}
-
-impl Default for FfmpegConfig {
-    fn default() -> Self {
-        Self {
-            ffmpeg_path: String::new(),
-            ffprobe_path: String::new(),
-        }
-    }
-}
-
-impl Default for WorkspacesConfig {
-    fn default() -> Self {
-        Self { recent: Vec::new() }
-    }
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            general: GeneralConfig::default(),
-            ffmpeg: FfmpegConfig::default(),
-            workspaces: WorkspacesConfig::default(),
-            tools: ToolsConfig::default(),
-            network: NetworkConfig::default(),
         }
     }
 }

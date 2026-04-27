@@ -432,7 +432,7 @@ pub async fn retry_clip_task(
     task_id: i64,
 ) -> Result<ClipTaskInfo, String> {
     crate::utils::validation::validate_id(task_id, "task_id")?;
-    retry_task_internal(&*state, &app_handle, task_id).await
+    retry_task_internal(&state, &app_handle, task_id).await
 }
 
 /// Internal retry implementation, shared by single-task and batch retry paths.
@@ -803,7 +803,7 @@ pub async fn retry_clip_batch(
         if id == 0 {
             continue;
         }
-        match retry_task_internal(&*state, &app_handle, id).await {
+        match retry_task_internal(&state, &app_handle, id).await {
             Ok(_) => success += 1,
             Err(e) => {
                 tracing::warn!("Retry task {} in batch {} failed: {}", id, batch_id, e);
@@ -1054,7 +1054,10 @@ fn build_clip_name(
     }
 
     if parts.is_empty() {
-        let stem = fallback_name.rsplit('.').last().unwrap_or(fallback_name);
+        let stem = fallback_name
+            .rsplit('.')
+            .next_back()
+            .unwrap_or(fallback_name);
         return format!("{}_{}-{}", stem, start_ms, end_ms);
     }
 
@@ -1348,6 +1351,7 @@ pub async fn create_batch_clips(
 /// Prepare burn options for a clip task.
 ///
 /// Generates temporary ASS files for danmaku and/or subtitles if requested.
+#[allow(clippy::too_many_arguments)]
 async fn prepare_burn_options(
     db: &crate::db::Database,
     _ffmpeg_path: &str,

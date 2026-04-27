@@ -482,6 +482,7 @@ pub struct BurnProgress {
 /// and configurable video codec.
 ///
 /// This is the advanced version of `burn_subtitle` used by the clip burning pipeline.
+#[allow(clippy::too_many_arguments)]
 pub async fn burn_subtitle_with_progress(
     ffmpeg_path: &str,
     input: &Path,
@@ -587,7 +588,7 @@ pub async fn burn_subtitle_with_progress(
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
                                 let progress = if duration_secs > 0.0 {
-                                    (time_secs / duration_secs).min(1.0).max(0.0)
+                                    (time_secs / duration_secs).clamp(0.0, 1.0)
                                 } else {
                                     0.0
                                 };

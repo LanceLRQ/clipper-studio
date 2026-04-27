@@ -136,7 +136,7 @@ fn parse_d_element(params: &str, text: &str) -> Option<DanmakuItem> {
     // Field 2: mode
     let mode_int: u16 = parts[1].parse().ok()?;
     let mode = match mode_int {
-        1 | 2 | 3 => DanmakuMode::Scroll, // 1=R2L, 2=L2R (rare), 3=top(rare variant)
+        1..=3 => DanmakuMode::Scroll, // 1=R2L, 2=L2R (rare), 3=top(rare variant)
         4 => DanmakuMode::Bottom,
         5 => DanmakuMode::Top,
         _ => return None, // Skip special danmaku (mode 7, 8, 9, etc.)

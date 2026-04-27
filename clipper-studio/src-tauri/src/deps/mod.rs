@@ -770,6 +770,12 @@ pub struct ConfigOverrides {
     overrides: std::collections::HashMap<String, String>,
 }
 
+impl Default for ConfigOverrides {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConfigOverrides {
     pub fn new() -> Self {
         Self {

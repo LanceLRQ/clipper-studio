@@ -27,17 +27,17 @@ pub struct TaskProgressEvent {
     pub message: String,
 }
 
+/// Task handler closure: receives cancel token + progress sender, returns spawned join handle
+pub type TaskHandler = Box<
+    dyn FnOnce(CancellationToken, TaskProgressSender) -> tokio::task::JoinHandle<Result<(), String>>
+        + Send,
+>;
+
 /// A runnable task definition
 pub struct TaskDefinition {
     pub task_id: TaskId,
     pub cancel_token: CancellationToken,
-    pub handler: Box<
-        dyn FnOnce(
-                CancellationToken,
-                TaskProgressSender,
-            ) -> tokio::task::JoinHandle<Result<(), String>>
-            + Send,
-    >,
+    pub handler: TaskHandler,
 }
 
 /// Sender for progress updates from within a task
@@ -240,10 +240,8 @@ mod tests {
         assert!(json.contains("正在处理"));
     }
 
-    #[test]
-    fn test_progress_channel_capacity_constant() {
-        assert!(PROGRESS_CHANNEL_CAPACITY >= 32);
-    }
+    // 编译期断言：PROGRESS_CHANNEL_CAPACITY 必须 >= 32，否则编译失败
+    const _: () = assert!(PROGRESS_CHANNEL_CAPACITY >= 32);
 
     // ==================== TaskQueue behavior (with mock app) ====================
 
