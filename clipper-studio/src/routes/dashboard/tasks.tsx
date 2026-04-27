@@ -41,7 +41,13 @@ import {
   deleteClipBatch,
   clearFinishedClipTasks,
 } from "@/services/clip";
-import { clearFinishedMediaTasks } from "@/services/media";
+import {
+  clearFinishedMediaTasks,
+  listMediaTasks,
+  cancelMediaTask,
+  deleteMediaTask,
+  type MediaTaskInfo,
+} from "@/services/media";
 import { getDiskUsage, type DiskUsageInfo } from "@/services/workspace";
 import { DateRangePicker } from "@/components/video/date-range-picker";
 import { formatFileSize } from "@/lib/video-utils";
@@ -132,6 +138,7 @@ interface TaskGroup {
 
 function TasksPage() {
   const [tasks, setTasks] = useState<ClipTaskInfo[]>([]);
+  const [mediaTasks, setMediaTasks] = useState<MediaTaskInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [liveProgress, setLiveProgress] = useState<
     Record<number, TaskProgressEvent>
@@ -155,13 +162,17 @@ function TasksPage() {
 
   const loadTasks = useCallback(async () => {
     try {
-      const t = await listClipTasks(
-        undefined,
-        wsRef.current,
-        dateFromRef.current || undefined,
-        dateToRef.current || undefined,
-      );
+      const [t, m] = await Promise.all([
+        listClipTasks(
+          undefined,
+          wsRef.current,
+          dateFromRef.current || undefined,
+          dateToRef.current || undefined,
+        ),
+        listMediaTasks(),
+      ]);
       setTasks(t);
+      setMediaTasks(m);
     } catch (e) {
       console.error("Failed to load tasks:", e);
     } finally {
@@ -252,6 +263,25 @@ function TasksPage() {
   const handleCancel = async (taskId: number) => {
     await cancelClip(taskId);
     await loadTasks();
+  };
+
+  const handleCancelMedia = async (taskId: number) => {
+    try {
+      await cancelMediaTask(taskId);
+      await loadTasks();
+    } catch (e) {
+      alert("取消失败: " + String(e));
+    }
+  };
+
+  const handleDeleteMedia = (taskId: number) => {
+    showDeleteDialog(
+      "删除任务",
+      "确定要删除该媒体任务记录吗？",
+      async (df) => {
+        await deleteMediaTask(taskId, df);
+      },
+    );
   };
 
   const handleRetry = async (taskId: number, isCompleted: boolean) => {
@@ -484,13 +514,143 @@ function TasksPage() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-auto p-6">
+      {/* Media tasks (transcode / merge) section */}
+      {mediaTasks.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <div className="text-xs font-medium text-muted-foreground">
+            媒体任务（转码 / 合并）
+          </div>
+          {mediaTasks.map((mt) => {
+            const live = liveProgress[mt.id];
+            const status = live?.status ?? mt.status;
+            const progress = live?.progress ?? mt.progress;
+            const label = statusLabels[status] ?? statusLabels.pending;
+            const typeText = mt.task_type === "transcode" ? "转码" : "合并";
+            const isActive = status === "pending" || status === "processing";
+            const isFinished = ["completed", "failed", "cancelled"].includes(
+              status,
+            );
+            return (
+              <div
+                key={`media-${mt.id}`}
+                className="rounded-lg border p-3 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${label.tag}`}
+                    >
+                      {label.text}
+                    </span>
+                    <span className="font-medium">{typeText}</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      {mt.output_path ?? `task #${mt.id}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {isActive && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-red-500"
+                              onClick={() => handleCancelMedia(mt.id)}
+                            />
+                          }
+                        >
+                          <XIcon className="h-4 w-4" />
+                        </TooltipTrigger>
+                        <TooltipContent>取消任务</TooltipContent>
+                      </Tooltip>
+                    )}
+                    {status === "completed" && mt.output_path && (
+                      <>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() =>
+                                  handleOpenFile(mt.output_path!)
+                                }
+                              />
+                            }
+                          >
+                            <PlayIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>播放</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                onClick={() =>
+                                  handleRevealFile(mt.output_path!)
+                                }
+                              />
+                            }
+                          >
+                            <FolderOpenIcon className="h-4 w-4" />
+                          </TooltipTrigger>
+                          <TooltipContent>定位文件</TooltipContent>
+                        </Tooltip>
+                      </>
+                    )}
+                    {isFinished && (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-red-500"
+                              onClick={() => handleDeleteMedia(mt.id)}
+                            />
+                          }
+                        >
+                          <Trash2Icon className="h-4 w-4" />
+                        </TooltipTrigger>
+                        <TooltipContent>删除</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                </div>
+                {status === "processing" && (
+                  <div className="h-1.5 w-full overflow-hidden rounded bg-muted">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{ width: `${Math.round(progress * 100)}%` }}
+                    />
+                  </div>
+                )}
+                {live?.message && status === "processing" && (
+                  <div className="text-xs text-muted-foreground truncate">
+                    {live.message}
+                  </div>
+                )}
+                {status === "failed" && mt.error_message && (
+                  <div className="text-xs text-red-600 break-words">
+                    {mt.error_message}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {loading ? (
         <div className="text-muted-foreground">加载中...</div>
-      ) : groups.length === 0 ? (
+      ) : groups.length === 0 && mediaTasks.length === 0 ? (
         <div className="rounded-lg border border-dashed p-12 text-center text-muted-foreground">
           暂无任务，在视频详情页中创建切片任务
         </div>
-      ) : (
+      ) : groups.length === 0 ? null : (
         <div className="space-y-2">
           {groups.map((group) => {
             if (!group.isBatch) {
