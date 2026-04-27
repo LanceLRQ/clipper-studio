@@ -411,6 +411,152 @@ pub async fn set_plugin_enabled(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============== base64_encode（私有）==============
+    // 用于 HTTP Basic Auth 头：Authorization: Basic <base64(user:pass)>
+
+    #[test]
+    fn test_base64_encode_empty() {
+        assert_eq!(base64_encode(""), "");
+    }
+
+    #[test]
+    fn test_base64_encode_one_byte_pads_two_equals() {
+        // "f" → "Zg=="
+        assert_eq!(base64_encode("f"), "Zg==");
+    }
+
+    #[test]
+    fn test_base64_encode_two_bytes_pads_one_equals() {
+        // "fo" → "Zm8="
+        assert_eq!(base64_encode("fo"), "Zm8=");
+    }
+
+    #[test]
+    fn test_base64_encode_three_bytes_no_padding() {
+        // "foo" → "Zm9v"
+        assert_eq!(base64_encode("foo"), "Zm9v");
+    }
+
+    #[test]
+    fn test_base64_encode_basic_auth_format() {
+        // 经典 HTTP Basic Auth 测试向量：Aladdin:open sesame → QWxhZGRpbjpvcGVuIHNlc2FtZQ==
+        assert_eq!(
+            base64_encode("Aladdin:open sesame"),
+            "QWxhZGRpbjpvcGVuIHNlc2FtZQ=="
+        );
+    }
+
+    #[test]
+    fn test_base64_encode_user_pass_combo() {
+        // 复刻 call_plugin_http 中的用法：format!("{}:{}", user, pass)
+        let credentials = format!("{}:{}", "alice", "wonderland");
+        let encoded = base64_encode(&credentials);
+        assert_eq!(encoded, "YWxpY2U6d29uZGVybGFuZA==");
+    }
+
+    #[test]
+    fn test_base64_encode_long_input_produces_correct_length() {
+        // 编码后长度 = ceil(len/3) * 4
+        let input = "0123456789abcdef"; // 16 bytes
+        let encoded = base64_encode(input);
+        // ceil(16/3) = 6 → 24 chars
+        assert_eq!(encoded.len(), 24);
+        // 16 mod 3 = 1 → 末尾两个 =
+        assert!(encoded.ends_with("=="));
+    }
+
+    #[test]
+    fn test_base64_encode_zero_byte() {
+        // 单个 0x00 → "AA=="
+        assert_eq!(base64_encode("\0"), "AA==");
+    }
+
+    // ============== call_plugin_http 的字段剥离逻辑 ==============
+
+    /// 复刻 call_plugin_http 中"剥离 auth 字段"的纯逻辑
+    fn strip_auth_fields(payload: &serde_json::Value) -> serde_json::Value {
+        let mut map = serde_json::Map::new();
+        if let Some(obj) = payload.as_object() {
+            for (k, v) in obj {
+                if !["base_url", "api_key", "basic_user", "basic_pass"]
+                    .iter()
+                    .any(|x| x == k)
+                {
+                    map.insert(k.clone(), v.clone());
+                }
+            }
+        }
+        serde_json::Value::Object(map)
+    }
+
+    #[test]
+    fn test_strip_auth_removes_all_four_keys() {
+        let payload = serde_json::json!({
+            "base_url": "http://x",
+            "api_key": "secret",
+            "basic_user": "u",
+            "basic_pass": "p",
+            "real_field": "keep me",
+        });
+        let stripped = strip_auth_fields(&payload);
+        let obj = stripped.as_object().unwrap();
+        assert_eq!(obj.len(), 1);
+        assert_eq!(obj.get("real_field").unwrap(), "keep me");
+    }
+
+    #[test]
+    fn test_strip_auth_preserves_non_auth_fields() {
+        let payload = serde_json::json!({
+            "video_id": 42,
+            "language": "zh",
+            "options": { "format": "srt" },
+        });
+        let stripped = strip_auth_fields(&payload);
+        let obj = stripped.as_object().unwrap();
+        assert_eq!(obj.len(), 3);
+        assert_eq!(obj.get("video_id").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_strip_auth_handles_non_object_payload() {
+        let payload = serde_json::json!("just a string");
+        let stripped = strip_auth_fields(&payload);
+        assert!(stripped.as_object().unwrap().is_empty());
+    }
+
+    // ============== URL 拼接 ==============
+
+    /// 复刻 call_plugin_http 中的 URL 构造
+    fn build_url(base_url: &str, action: &str) -> String {
+        format!(
+            "{}/{}",
+            base_url.trim_end_matches('/'),
+            action.trim_start_matches('/')
+        )
+    }
+
+    #[test]
+    fn test_build_url_normalizes_slashes() {
+        assert_eq!(
+            build_url("http://x.y/", "/transcribe"),
+            "http://x.y/transcribe"
+        );
+        assert_eq!(
+            build_url("http://x.y", "transcribe"),
+            "http://x.y/transcribe"
+        );
+        assert_eq!(
+            build_url("http://x.y/", "transcribe"),
+            "http://x.y/transcribe"
+        );
+        assert_eq!(build_url("http://x.y///", "///action"), "http://x.y/action");
+    }
+}
+
 /// Auto-load all plugins that are marked as enabled in settings_kv
 /// Called once during app startup
 #[tauri::command]
