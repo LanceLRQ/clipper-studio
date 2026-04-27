@@ -811,6 +811,231 @@ mod tests {
         assert_eq!(parsed.file_size, 1048576);
     }
 
+    // ==================== derive_ffprobe_path ====================
+
+    #[test]
+    fn test_derive_ffprobe_path_unix_style() {
+        let result = derive_ffprobe_path("/usr/local/bin/ffmpeg");
+        #[cfg(target_os = "windows")]
+        assert_eq!(result, "/usr/local/bin/ffprobe.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(result, "/usr/local/bin/ffprobe");
+    }
+
+    #[test]
+    fn test_derive_ffprobe_path_with_ffmpeg_in_dirname() {
+        // Path like "/opt/ffmpeg-tools/ffmpeg" — naive string replace would
+        // corrupt the dir name, but our impl only replaces the filename.
+        let result = derive_ffprobe_path("/opt/ffmpeg-tools/ffmpeg");
+        #[cfg(target_os = "windows")]
+        assert_eq!(result, "/opt/ffmpeg-tools/ffprobe.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(result, "/opt/ffmpeg-tools/ffprobe");
+    }
+
+    #[test]
+    fn test_derive_ffprobe_path_bare_filename() {
+        // Just "ffmpeg" — no parent, expect ffprobe in current dir
+        let result = derive_ffprobe_path("ffmpeg");
+        #[cfg(target_os = "windows")]
+        assert_eq!(result, "ffprobe.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert_eq!(result, "ffprobe");
+    }
+
+    #[test]
+    fn test_derive_ffprobe_path_windows_style() {
+        // Windows-like path; on non-Windows hosts the separator handling differs
+        // but the filename swap should still work.
+        let result = derive_ffprobe_path("C:/tools/ffmpeg.exe");
+        #[cfg(target_os = "windows")]
+        assert_eq!(result, "C:/tools/ffprobe.exe");
+        #[cfg(not(target_os = "windows"))]
+        assert!(result.ends_with("ffprobe"));
+    }
+
+    // ==================== read_stderr_capped ====================
+
+    #[tokio::test]
+    async fn test_read_stderr_capped_small_input() {
+        let data = b"FFmpeg error: bad codec";
+        let cursor = std::io::Cursor::new(data.to_vec());
+        let result = read_stderr_capped(cursor).await;
+        assert_eq!(result, data);
+    }
+
+    #[tokio::test]
+    async fn test_read_stderr_capped_empty_input() {
+        let cursor = std::io::Cursor::new(Vec::<u8>::new());
+        let result = read_stderr_capped(cursor).await;
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_stderr_capped_below_cap() {
+        // 1 MB << 4 MB cap, should be returned verbatim
+        let data = vec![b'a'; 1024 * 1024];
+        let cursor = std::io::Cursor::new(data.clone());
+        let result = read_stderr_capped(cursor).await;
+        assert_eq!(result.len(), data.len());
+    }
+
+    #[tokio::test]
+    async fn test_read_stderr_capped_exceeds_cap() {
+        // 8 MB > 4 MB cap, should be truncated to roughly STDERR_CAP_BYTES / 2 .. STDERR_CAP_BYTES
+        let data = vec![b'x'; 8 * 1024 * 1024];
+        let cursor = std::io::Cursor::new(data);
+        let result = read_stderr_capped(cursor).await;
+        assert!(
+            result.len() <= STDERR_CAP_BYTES,
+            "result {} exceeds cap {}",
+            result.len(),
+            STDERR_CAP_BYTES
+        );
+        assert!(
+            result.len() >= STDERR_CAP_BYTES / 2,
+            "result {} below half cap",
+            result.len()
+        );
+        // Tail should be preserved (last bytes are still 'x')
+        assert_eq!(result.last(), Some(&b'x'));
+    }
+
+    #[tokio::test]
+    async fn test_read_stderr_capped_keeps_tail_after_drain() {
+        // Build input where each MB has a unique marker, verify tail wins
+        let mut data: Vec<u8> = Vec::with_capacity(8 * 1024 * 1024);
+        for i in 0..8 {
+            data.extend(std::iter::repeat(b'0' + i as u8).take(1024 * 1024));
+        }
+        let cursor = std::io::Cursor::new(data);
+        let result = read_stderr_capped(cursor).await;
+        // Last byte must be from the last block ('7')
+        assert_eq!(*result.last().unwrap(), b'7');
+    }
+
+    // ==================== ProbeResult JSON edge cases ====================
+
+    #[test]
+    fn test_probe_result_missing_required_field() {
+        // file_size is the only non-Optional field; missing it should fail
+        let json = r#"{"duration_ms":1000}"#;
+        let parsed: Result<ProbeResult, _> = serde_json::from_str(json);
+        assert!(parsed.is_err(), "missing required file_size should fail");
+    }
+
+    #[test]
+    fn test_probe_result_all_null_optional() {
+        let json = r#"{
+            "duration_ms":null,
+            "width":null,
+            "height":null,
+            "video_codec":null,
+            "audio_codec":null,
+            "format_name":null,
+            "file_size":0
+        }"#;
+        let parsed: ProbeResult = serde_json::from_str(json).unwrap();
+        assert!(parsed.duration_ms.is_none());
+        assert!(parsed.video_codec.is_none());
+        assert_eq!(parsed.file_size, 0);
+    }
+
+    #[test]
+    fn test_probe_result_large_values() {
+        // Large file (> 4 GB) and long duration (> 1 hour)
+        let result = ProbeResult {
+            duration_ms: Some(7_200_000), // 2 hours
+            width: Some(3840),            // 4K
+            height: Some(2160),
+            video_codec: Some("hevc".to_string()),
+            audio_codec: Some("aac".to_string()),
+            format_name: Some("matroska".to_string()),
+            file_size: 8_589_934_592, // 8 GB
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let parsed: ProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.duration_ms, Some(7_200_000));
+        assert_eq!(parsed.file_size, 8_589_934_592);
+    }
+
+    // ==================== probe extra error paths ====================
+
+    #[test]
+    fn test_probe_invalid_path_chars() {
+        // Should not panic on path with NUL or strange chars; ffprobe handles invalid input
+        let result = probe(
+            "/nonexistent/ffprobe",
+            std::path::Path::new("/tmp/a\u{1F600}.mp4"),
+        );
+        assert!(result.is_err());
+    }
+
+    // ==================== check_integrity ====================
+
+    #[test]
+    fn test_check_integrity_propagates_probe_error() {
+        let result = check_integrity("", std::path::Path::new("/tmp/x.mp4"));
+        assert!(result.is_err(), "empty ffprobe path should propagate error");
+    }
+
+    // ==================== get_version ====================
+
+    #[test]
+    fn test_get_version_typical_invalid() {
+        // Typical invalid command name
+        assert!(get_version("definitely_not_a_real_binary_xyz").is_none());
+    }
+
+    // ==================== AudioEnvelope serialization ====================
+
+    #[test]
+    fn test_audio_envelope_roundtrip() {
+        let env = AudioEnvelope {
+            window_ms: 500,
+            values: vec![0.0, 0.5, 1.0, 0.25],
+        };
+        let json = serde_json::to_string(&env).unwrap();
+        let parsed: AudioEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.window_ms, 500);
+        assert_eq!(parsed.values, vec![0.0, 0.5, 1.0, 0.25]);
+    }
+
+    #[test]
+    fn test_audio_envelope_empty_values() {
+        let env = AudioEnvelope {
+            window_ms: 1000,
+            values: vec![],
+        };
+        let json = serde_json::to_string(&env).unwrap();
+        let parsed: AudioEnvelope = serde_json::from_str(&json).unwrap();
+        assert!(parsed.values.is_empty());
+    }
+
+    // ==================== IntegrityResult serialization ====================
+
+    #[test]
+    fn test_integrity_result_intact() {
+        let r = IntegrityResult {
+            is_intact: true,
+            issues: vec![],
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(json.contains("\"is_intact\":true"));
+    }
+
+    #[test]
+    fn test_integrity_result_with_issues() {
+        let r = IntegrityResult {
+            is_intact: false,
+            issues: vec!["缺失视频流".to_string(), "时长无效".to_string()],
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        let parsed: IntegrityResult = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.is_intact);
+        assert_eq!(parsed.issues.len(), 2);
+    }
+
     #[test]
     fn test_probe_result_optional_fields() {
         let result = ProbeResult {

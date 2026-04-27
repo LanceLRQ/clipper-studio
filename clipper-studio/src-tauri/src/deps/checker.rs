@@ -120,6 +120,172 @@ pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn make_fake_binary(binary_name: &str) -> TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target_name = if cfg!(target_os = "windows") && !binary_name.ends_with(".exe") {
+            format!("{}.exe", binary_name)
+        } else {
+            binary_name.to_string()
+        };
+        fs::write(dir.path().join(&target_name), b"#!/bin/sh\nexit 0\n")
+            .expect("write fake binary");
+        dir
+    }
+
+    #[test]
+    fn test_get_binary_path_appends_exe_on_windows_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = get_binary_path(dir.path(), "ffmpeg");
+
+        if cfg!(target_os = "windows") {
+            assert!(path.to_string_lossy().ends_with("ffmpeg.exe"));
+        } else {
+            assert!(path.to_string_lossy().ends_with("ffmpeg"));
+            assert!(!path.to_string_lossy().ends_with(".exe"));
+        }
+    }
+
+    #[test]
+    fn test_get_binary_path_preserves_existing_exe_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = get_binary_path(dir.path(), "tool.exe");
+        // 任何平台下都不应出现 tool.exe.exe
+        assert!(!path.to_string_lossy().ends_with(".exe.exe"));
+    }
+
+    #[test]
+    fn test_binary_exists_true_when_file_present() {
+        let dir = make_fake_binary("ffprobe");
+        assert!(binary_exists(dir.path(), "ffprobe"));
+    }
+
+    #[test]
+    fn test_binary_exists_false_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!binary_exists(dir.path(), "nonexistent"));
+    }
+
+    #[test]
+    fn test_verify_binaries_ok_when_all_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let target_a = if cfg!(target_os = "windows") {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        };
+        let target_b = if cfg!(target_os = "windows") {
+            "ffprobe.exe"
+        } else {
+            "ffprobe"
+        };
+        fs::write(dir.path().join(target_a), b"x").unwrap();
+        fs::write(dir.path().join(target_b), b"x").unwrap();
+
+        let def = DependencyDef {
+            id: "fake",
+            name: "fake",
+            description: "",
+            required: false,
+            dep_type: DepType::Binary,
+            binaries: &["ffmpeg", "ffprobe"],
+            version_check: None,
+            min_version: None,
+            sources: &[],
+            python_sources: &[],
+            manual_download_url: None,
+        };
+
+        assert!(verify_binaries(dir.path(), &def).is_ok());
+    }
+
+    #[test]
+    fn test_verify_binaries_err_lists_missing() {
+        let dir = make_fake_binary("ffmpeg");
+        // ffprobe 故意不创建
+        let def = DependencyDef {
+            id: "fake",
+            name: "fake",
+            description: "",
+            required: false,
+            dep_type: DepType::Binary,
+            binaries: &["ffmpeg", "ffprobe"],
+            version_check: None,
+            min_version: None,
+            sources: &[],
+            python_sources: &[],
+            manual_download_url: None,
+        };
+
+        let err = verify_binaries(dir.path(), &def).expect_err("should fail");
+        assert!(
+            err.contains("ffprobe"),
+            "错误信息应指明缺失的 binary：{}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_detect_version_returns_none_when_binary_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let vc = VersionCheck {
+            binary: "ghost",
+            args: &["-version"],
+            regex: r"v(\d+\.\d+)",
+        };
+        assert!(detect_version(dir.path(), &vc).is_none());
+    }
+
+    // ---------- version_satisfies_minimum ----------
+
+    #[test]
+    fn test_version_equal() {
+        assert!(version_satisfies_minimum("4.4.0", "4.4.0"));
+    }
+
+    #[test]
+    fn test_version_higher_passes() {
+        assert!(version_satisfies_minimum("7.1", "4.4.0"));
+        assert!(version_satisfies_minimum("5.0", "4.4.0"));
+        assert!(version_satisfies_minimum("4.4.1", "4.4.0"));
+    }
+
+    #[test]
+    fn test_version_lower_fails() {
+        assert!(!version_satisfies_minimum("4.3.9", "4.4.0"));
+        assert!(!version_satisfies_minimum("3.9", "4.4.0"));
+        assert!(!version_satisfies_minimum("4.4.0", "4.4.1"));
+    }
+
+    #[test]
+    fn test_version_handles_extra_suffix() {
+        // "7.1-essentials_build" 取数字前缀 "7.1"
+        assert!(version_satisfies_minimum("7.1-essentials_build", "4.4.0"));
+        assert!(version_satisfies_minimum("4.4.0-static", "4.4.0"));
+    }
+
+    #[test]
+    fn test_version_short_minor_treated_as_zero() {
+        // "5" 视作 5.0.0，应 >= 4.4.0
+        assert!(version_satisfies_minimum("5", "4.4.0"));
+        // "4" 视作 4.0.0，应 < 4.4.0
+        assert!(!version_satisfies_minimum("4", "4.4.0"));
+    }
+
+    #[test]
+    fn test_version_garbage_treated_as_zero() {
+        // 完全无法解析 → 0.0.0 → < 4.4.0
+        assert!(!version_satisfies_minimum("abc", "4.4.0"));
+        // detected/minimum 都解析为空 → 视为相等
+        assert!(version_satisfies_minimum("abc", "xyz"));
+    }
+}
+
 /// Validate a Python package installed in a venv
 fn validate_python_package(
     dep_dir: &Path,
