@@ -120,6 +120,51 @@ pub fn health_check(dep_dir: &Path, def: &DependencyDef) -> Result<Option<String
     }
 }
 
+/// Validate a Python package installed in a venv
+fn validate_python_package(
+    dep_dir: &Path,
+    py_source: &registry::PythonPackageSource,
+    def: &DependencyDef,
+) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    let venv_bin = dep_dir.join("venv").join("Scripts");
+    #[cfg(not(target_os = "windows"))]
+    let venv_bin = dep_dir.join("venv").join("bin");
+
+    if !venv_bin.exists() {
+        return Err("Python venv not found".to_string());
+    }
+
+    // Check entry_point script exists
+    #[cfg(target_os = "windows")]
+    let script = venv_bin.join(format!("{}.exe", py_source.entry_point));
+    #[cfg(not(target_os = "windows"))]
+    let script = venv_bin.join(py_source.entry_point);
+
+    if !script.exists() {
+        return Err(format!(
+            "Entry point '{}' not found in venv",
+            py_source.entry_point
+        ));
+    }
+
+    // Version check: use the entry_point as the binary
+    let version = def.version_check.as_ref().and_then(|vc| {
+        let output = Command::new(&script).args(vc.args).output().ok()?;
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let re = regex::Regex::new(vc.regex).ok()?;
+        re.captures(&combined)
+            .and_then(|c| c.get(1))
+            .map(|m| m.as_str().to_string())
+    });
+
+    Ok(version)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,49 +329,4 @@ mod tests {
         // detected/minimum 都解析为空 → 视为相等
         assert!(version_satisfies_minimum("abc", "xyz"));
     }
-}
-
-/// Validate a Python package installed in a venv
-fn validate_python_package(
-    dep_dir: &Path,
-    py_source: &registry::PythonPackageSource,
-    def: &DependencyDef,
-) -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    let venv_bin = dep_dir.join("venv").join("Scripts");
-    #[cfg(not(target_os = "windows"))]
-    let venv_bin = dep_dir.join("venv").join("bin");
-
-    if !venv_bin.exists() {
-        return Err("Python venv not found".to_string());
-    }
-
-    // Check entry_point script exists
-    #[cfg(target_os = "windows")]
-    let script = venv_bin.join(format!("{}.exe", py_source.entry_point));
-    #[cfg(not(target_os = "windows"))]
-    let script = venv_bin.join(py_source.entry_point);
-
-    if !script.exists() {
-        return Err(format!(
-            "Entry point '{}' not found in venv",
-            py_source.entry_point
-        ));
-    }
-
-    // Version check: use the entry_point as the binary
-    let version = def.version_check.as_ref().and_then(|vc| {
-        let output = Command::new(&script).args(vc.args).output().ok()?;
-        let combined = format!(
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr),
-        );
-        let re = regex::Regex::new(vc.regex).ok()?;
-        re.captures(&combined)
-            .and_then(|c| c.get(1))
-            .map(|m| m.as_str().to_string())
-    });
-
-    Ok(version)
 }

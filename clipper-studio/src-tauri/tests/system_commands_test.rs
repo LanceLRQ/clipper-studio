@@ -202,7 +202,7 @@ async fn test_has_workspaces_false_when_empty() {
     .unwrap();
     let cnt: i32 = row.try_get("", "cnt").unwrap_or(0);
     assert_eq!(cnt, 0);
-    assert!(!(cnt > 0), "空表 has_workspaces 应为 false");
+    assert!(cnt <= 0, "空表 has_workspaces 应为 false");
 }
 
 #[tokio::test]

@@ -142,6 +142,34 @@ pub struct BuiltinPluginInfo {
     pub dir: Option<String>,
 }
 
+impl BuiltinPluginInfo {
+    pub fn from(m: PluginManifest, is_loaded: bool, is_enabled: bool) -> Self {
+        Self {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            version: m.version.clone(),
+            plugin_type: format!("{:?}", m.plugin_type),
+            transport: format!("{:?}", m.transport),
+            managed: m.managed,
+            status: if is_loaded {
+                "loaded".to_string()
+            } else {
+                "discovered".to_string()
+            },
+            description: m.description.clone(),
+            has_config: !m.config_schema.is_empty(),
+            enabled: is_enabled,
+            config_schema: if m.config_schema.is_empty() {
+                None
+            } else {
+                Some(m.config_schema)
+            },
+            frontend: m.frontend.clone(),
+            dir: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,33 +462,5 @@ mod tests {
         let info = BuiltinPluginInfo::from(m, false, false);
         assert!(info.has_config);
         assert!(info.config_schema.is_some());
-    }
-}
-
-impl BuiltinPluginInfo {
-    pub fn from(m: PluginManifest, is_loaded: bool, is_enabled: bool) -> Self {
-        Self {
-            id: m.id.clone(),
-            name: m.name.clone(),
-            version: m.version.clone(),
-            plugin_type: format!("{:?}", m.plugin_type),
-            transport: format!("{:?}", m.transport),
-            managed: m.managed,
-            status: if is_loaded {
-                "loaded".to_string()
-            } else {
-                "discovered".to_string()
-            },
-            description: m.description.clone(),
-            has_config: !m.config_schema.is_empty(),
-            enabled: is_enabled,
-            config_schema: if m.config_schema.is_empty() {
-                None
-            } else {
-                Some(m.config_schema)
-            },
-            frontend: m.frontend.clone(),
-            dir: None,
-        }
     }
 }
