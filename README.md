@@ -1,8 +1,7 @@
 # ClipperStudio
 
-> 一个为直播录播切片创作者打造的桌面级视频工作台。
-> A desktop video workbench built for livestream VOD clippers.
-
+ 直播录播切片创作者打造的桌面级视频工作台。
+ 
 [English](#english)
 
 ---
@@ -13,7 +12,9 @@ ClipperStudio 想解决一件事：把一段几个小时的直播录像，变成
 
 它把素材管理、播放预览、ASR 字幕、弹幕压制、切片导出这些事放到一起，本地跑、本地存，不依赖任何在线服务。需要 AI 能力的时候，可以挂自己的大模型；不需要的时候，纯离线也能用。
 
-界面是桌面应用（Tauri），后端是 Rust，前端是 React 19 + TypeScript。数据库用 SQLite，所有元数据都在本地。
+## 界面预览
+![录播切片](docs/images/preview2.webp)
+![录播管理](docs/images/preview1.webp)
 
 ## 主要能力
 
@@ -53,6 +54,15 @@ ClipperStudio 想解决一件事：把一段几个小时的直播录像，变成
 ## License
 
 [MIT](./LICENSE)
+
+## Buy me a coffee
+点个 Star 喵，点个 Star 谢谢喵。
+
+本工具不含任何古法编程的成分，但是人工介入还是有的，尽可能不让它炸就是了，这年头谁还古法编程呢（摊手）
+
+感谢GLM的无周限版本套餐提供的大力支持，虽然没可能买到了，这价格要啥自行车呢。
+
+本项目灵(xu)感(qiu)来源于B站切片UP主麻糕，关注[麻糕](https://space.bilibili.com/89145162)喵，关注[麻糕](https://space.bilibili.com/89145162)谢谢喵。
 
 ---
 
