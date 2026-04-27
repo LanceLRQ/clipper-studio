@@ -367,6 +367,7 @@ pub fn run() {
             commands::clip::clear_finished_clip_tasks,
             commands::media::transcode_video,
             commands::media::merge_videos,
+            commands::media::cancel_media_task,
             commands::media::list_media_tasks,
             commands::media::delete_media_task,
             commands::media::clear_finished_media_tasks,

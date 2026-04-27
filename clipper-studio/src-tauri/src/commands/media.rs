@@ -179,6 +179,21 @@ pub async fn transcode_video(
     })
 }
 
+/// Cancel a media task (transcode/merge)
+///
+/// Triggers the underlying CancellationToken in TaskQueue, causing FFmpeg to
+/// receive SIGTERM (then SIGKILL after 3s). Returns true if the task existed
+/// and a cancel signal was issued, false if the task is no longer active.
+#[tauri::command]
+pub async fn cancel_media_task(state: State<'_, AppState>, task_id: i64) -> Result<bool, String> {
+    crate::utils::validation::validate_id(task_id, "task_id")?;
+    let cancelled = state.task_queue.cancel(task_id).await;
+    if cancelled {
+        let _ = update_media_task_status(&state.db, task_id, "cancelled", None).await;
+    }
+    Ok(cancelled)
+}
+
 /// List media tasks (transcode, merge)
 #[tauri::command]
 pub async fn list_media_tasks(
