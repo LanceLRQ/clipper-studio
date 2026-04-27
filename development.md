@@ -138,15 +138,35 @@ cargo test --features builtin-plugins --all-targets
 
 | 文件 | 覆盖内容 |
 |------|---------|
+| **数据持久层** | |
 | `db_migration_test.rs` | 数据库迁移、索引、默认数据 |
-| `media_server_test.rs` | 本地媒体服务器（HTTP Range） |
-| `video_commands_test.rs` | 视频相关 IPC Command |
+| `db_crud_test.rs` | 14 张表的核心 CRUD + 批量事务一致性 |
+| `fts5_test.rs` | subtitle_fts 虚拟表 + insert/update/delete 触发器 |
+| **基础设施** | |
+| `media_server_test.rs` | 本地媒体服务器（HTTP Range + SEC-FS-03 路径白名单） |
+| **Tauri 命令（按子系统）** | |
+| `video_commands_test.rs` | 视频列表、导入、分页、唯一约束 |
 | `workspace_commands_test.rs` | 工作区相关 IPC Command |
+| `tag_commands_test.rs` | 标签 CRUD + video_tags 关联 |
+| `settings_commands_test.rs` | settings_kv + secrets 透明 base64 编解码 |
+| `dashboard_stats_test.rs` | 仪表盘聚合（视频/主播/会话/切片） |
+| `danmaku_commands_test.rs` | XML 旁路加载、模式过滤、密度归一化 |
+| `asr_commands_test.rs` | list_asr_tasks / list_subtitles / search_subtitles + FTS5 |
+| `asr_queue_test.rs` | 队列状态机 SQL 行为（enqueue/cancel/recovery/completed） |
+| `media_commands_test.rs` | media_tasks 列表/删除/清理 + status 防呆 |
+| `clip_commands_test.rs` | 切片任务列表/删除/批次清理 + 烧录可用性 |
+| `plugin_commands_test.rs` | plugin:%:enabled 集合 + plugin:{id}:{key} 配置编解码 |
+| `deps_commands_test.rs` | AppConfig 持久化 + ffprobe 同目录推导 + dep_id 白名单 |
+| `system_commands_test.rs` | track_event 入库 + has_workspaces + check_ffmpeg JSON 形状 |
 
-跑单个测试：
+> 内联单元测试（`#[cfg(test)] mod tests`）覆盖 utils/ffmpeg|hash|locks|secrets|time|validation、core/clipper|queue|segment|storage|subtitle|danmaku|merger、deps/checker|installer|registry、plugin/registry、asr/provider|queue|service|splitter、commands/plugin、config 等模块的纯函数与私有逻辑。
+
+跑单个测试文件 / 用例：
 ```bash
 cargo test --features builtin-plugins --test db_migration_test
+cargo test --features builtin-plugins --test clip_commands_test
 cargo test --features builtin-plugins test_migration_creates_all_tables
+cargo test --features builtin-plugins --lib deps::checker     # 仅跑某个内联模块
 ```
 
 ### 4.3 Rust 格式与 lint
