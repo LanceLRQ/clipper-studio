@@ -122,7 +122,7 @@ pub async fn transcode_video(
                 &preset,
                 cancel_token,
                 move |p| {
-                    let _ = progress_tx_clone.send(TaskProgressEvent {
+                    let _ = progress_tx_clone.try_send(TaskProgressEvent {
                         task_id,
                         status: TaskStatus::Processing,
                         progress: p.progress,
@@ -358,7 +358,7 @@ pub async fn merge_videos(
 
             let progress_tx_clone = progress_tx.clone();
             let on_progress = move |p: crate::core::clipper::ClipProgress| {
-                let _ = progress_tx_clone.send(TaskProgressEvent {
+                let _ = progress_tx_clone.try_send(TaskProgressEvent {
                     task_id,
                     status: TaskStatus::Processing,
                     progress: p.progress,

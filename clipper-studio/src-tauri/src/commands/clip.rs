@@ -287,7 +287,7 @@ pub async fn create_clip(
                 &burn_options,
                 cancel_token,
                 move |p| {
-                    let _ = progress_tx_clone.send(TaskProgressEvent {
+                    let _ = progress_tx_clone.try_send(TaskProgressEvent {
                         task_id,
                         status: TaskStatus::Processing,
                         progress: p.progress,
@@ -630,7 +630,7 @@ async fn retry_task_internal(
                 &burn_options,
                 cancel_token,
                 move |p| {
-                    let _ = progress_tx_clone.send(TaskProgressEvent {
+                    let _ = progress_tx_clone.try_send(TaskProgressEvent {
                         task_id,
                         status: TaskStatus::Processing,
                         progress: p.progress,
