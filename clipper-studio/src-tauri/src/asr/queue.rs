@@ -962,3 +962,134 @@ impl ASRTaskQueue {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============== ASRTaskProgressEvent 序列化 ==============
+
+    #[test]
+    fn test_progress_event_full_payload_serializes() {
+        let evt = ASRTaskProgressEvent {
+            task_id: 7,
+            video_id: 42,
+            status: "processing".to_string(),
+            progress: 0.5,
+            message: Some("识别中".to_string()),
+            error_message: None,
+            video_file_name: "live.mp4".to_string(),
+        };
+        let json = serde_json::to_value(&evt).unwrap();
+        assert_eq!(json["task_id"], 7);
+        assert_eq!(json["video_id"], 42);
+        assert_eq!(json["status"], "processing");
+        assert!((json["progress"].as_f64().unwrap() - 0.5).abs() < 1e-9);
+        assert_eq!(json["message"], "识别中");
+        assert_eq!(json["video_file_name"], "live.mp4");
+    }
+
+    #[test]
+    fn test_progress_event_skips_none_message_and_error() {
+        let evt = ASRTaskProgressEvent {
+            task_id: 1,
+            video_id: 1,
+            status: "queued".to_string(),
+            progress: 0.0,
+            message: None,
+            error_message: None,
+            video_file_name: "x.mp4".to_string(),
+        };
+        let json = serde_json::to_value(&evt).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("message"),
+            "message=None 应被跳过"
+        );
+        assert!(
+            !json.as_object().unwrap().contains_key("error_message"),
+            "error_message=None 应被跳过"
+        );
+    }
+
+    #[test]
+    fn test_progress_event_with_error_message_only() {
+        let evt = ASRTaskProgressEvent {
+            task_id: 1,
+            video_id: 1,
+            status: "failed".to_string(),
+            progress: 0.0,
+            message: None,
+            error_message: Some("network timeout".to_string()),
+            video_file_name: "y.mp4".to_string(),
+        };
+        let json = serde_json::to_value(&evt).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("message"));
+        assert_eq!(json["error_message"], "network timeout");
+    }
+
+    // ============== ASRQueueItem 序列化 ==============
+
+    #[test]
+    fn test_queue_item_basic_serialization() {
+        let item = ASRQueueItem {
+            task_id: 11,
+            video_id: 22,
+            video_file_name: "v.mp4".to_string(),
+            status: "queued".to_string(),
+            progress: 0.0,
+            message: Some("排队中".to_string()),
+            error_message: None,
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["task_id"], 11);
+        assert_eq!(json["video_id"], 22);
+        assert_eq!(json["status"], "queued");
+        assert_eq!(json["message"], "排队中");
+        assert!(!json.as_object().unwrap().contains_key("error_message"));
+    }
+
+    #[test]
+    fn test_queue_item_with_error_message() {
+        let item = ASRQueueItem {
+            task_id: 1,
+            video_id: 1,
+            video_file_name: "v.mp4".to_string(),
+            status: "failed".to_string(),
+            progress: 0.0,
+            message: None,
+            error_message: Some("boom".to_string()),
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert!(!json.as_object().unwrap().contains_key("message"));
+        assert_eq!(json["error_message"], "boom");
+    }
+
+    // ============== 常量边界 ==============
+
+    #[test]
+    fn test_max_auto_retries_is_two() {
+        // 文档：超过 MAX_AUTO_RETRIES 后任务标记 failed
+        assert_eq!(MAX_AUTO_RETRIES, 2);
+    }
+
+    #[test]
+    fn test_initial_retry_delay_is_five_seconds() {
+        assert_eq!(INITIAL_RETRY_DELAY_SECS, 5);
+    }
+
+    #[test]
+    fn test_poll_interval_is_three_seconds() {
+        assert_eq!(POLL_INTERVAL_SECS, 3);
+    }
+
+    /// 验证退避公式：delay = INITIAL_RETRY_DELAY_SECS * 2^(retry_count-1)
+    #[test]
+    fn test_exponential_backoff_formula() {
+        // retry_count=1 → 5s
+        let d1 = INITIAL_RETRY_DELAY_SECS * 2u64.pow(1 - 1);
+        assert_eq!(d1, 5);
+        // retry_count=2 → 10s（最后一次重试，之后即失败）
+        let d2 = INITIAL_RETRY_DELAY_SECS * 2u64.pow(2 - 1);
+        assert_eq!(d2, 10);
+    }
+}
