@@ -103,7 +103,7 @@ mod tests {
         assert_eq!(*m.lock_safe(), 2);
 
         let r = RwLock::new("hi".to_string());
-        r.write_safe().push_str("!");
+        r.write_safe().push('!');
         assert_eq!(&*r.read_safe(), "hi!");
     }
 }

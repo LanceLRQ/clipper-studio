@@ -153,6 +153,12 @@ impl PluginInstance for BilibiliRecorderPlugin {
     }
 }
 
+impl Default for BilibiliRecorderPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BilibiliRecorderPlugin {
     /// Create a new BilibiliRecorder plugin instance
     pub fn new() -> Self {

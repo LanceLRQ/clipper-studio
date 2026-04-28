@@ -223,3 +223,188 @@ async fn test_settings_kv_basic_operations() {
     let value: String = row.try_get("", "value").unwrap();
     assert_eq!(value, "updated_value");
 }
+
+// ==================== Extended migration coverage ====================
+
+#[tokio::test]
+async fn test_migration_creates_asr_subtitle_tables() {
+    let db = setup_test_db().await;
+    let conn = db.conn();
+
+    for table in &[
+        "asr_tasks",
+        "subtitle_segments",
+        "subtitle_fts",
+        "media_tasks",
+    ] {
+        let result = sea_orm::ConnectionTrait::query_one(
+            conn,
+            sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                format!(
+                    "SELECT name FROM sqlite_master \
+                     WHERE (type='table' OR type='view') AND name='{}'",
+                    table
+                ),
+            ),
+        )
+        .await
+        .expect("query failed");
+        assert!(result.is_some(), "table '{}' missing", table);
+    }
+}
+
+#[tokio::test]
+async fn test_migration_creates_fts_triggers() {
+    let db = setup_test_db().await;
+    let conn = db.conn();
+
+    let triggers = sea_orm::ConnectionTrait::query_all(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'subtitle_fts_%'"
+                .to_string(),
+        ),
+    )
+    .await
+    .expect("query failed");
+    let names: Vec<String> = triggers
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "name").ok())
+        .collect();
+    assert!(names.contains(&"subtitle_fts_insert".to_string()));
+    assert!(names.contains(&"subtitle_fts_delete".to_string()));
+    assert!(names.contains(&"subtitle_fts_update".to_string()));
+}
+
+#[tokio::test]
+async fn test_clip_tasks_burn_flag_columns_present() {
+    // m20260417_000008_clip_task_burn_flags adds 4 columns
+    let db = setup_test_db().await;
+    let conn = db.conn();
+
+    let rows = sea_orm::ConnectionTrait::query_all(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA table_info(clip_tasks)".to_string(),
+        ),
+    )
+    .await
+    .expect("query failed");
+    let cols: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "name").ok())
+        .collect();
+    for c in [
+        "include_danmaku",
+        "include_subtitle",
+        "export_subtitle",
+        "export_danmaku",
+        "batch_id",
+        "batch_title",
+    ] {
+        assert!(
+            cols.contains(&c.to_string()),
+            "clip_tasks missing column {}",
+            c
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_videos_file_missing_column_present() {
+    let db = setup_test_db().await;
+    let conn = db.conn();
+    let rows = sea_orm::ConnectionTrait::query_all(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA table_info(videos)".to_string(),
+        ),
+    )
+    .await
+    .expect("query failed");
+    let cols: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "name").ok())
+        .collect();
+    assert!(cols.contains(&"file_missing".to_string()));
+}
+
+#[tokio::test]
+async fn test_workspace_clip_output_dir_column_present() {
+    let db = setup_test_db().await;
+    let conn = db.conn();
+    let rows = sea_orm::ConnectionTrait::query_all(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "PRAGMA table_info(workspaces)".to_string(),
+        ),
+    )
+    .await
+    .expect("query failed");
+    let cols: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "name").ok())
+        .collect();
+    assert!(cols.contains(&"clip_output_dir".to_string()));
+}
+
+#[tokio::test]
+async fn test_added_missing_indexes_present() {
+    // m20260416_000006_add_missing_indexes
+    let db = setup_test_db().await;
+    let conn = db.conn();
+    let rows = sea_orm::ConnectionTrait::query_all(
+        conn,
+        sea_orm::Statement::from_string(
+            sea_orm::DatabaseBackend::Sqlite,
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'".to_string(),
+        ),
+    )
+    .await
+    .expect("query failed");
+    let names: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.try_get::<String>("", "name").ok())
+        .collect();
+    // At least these performance-critical indexes should exist
+    let must_have = [
+        "idx_clip_tasks_status",
+        "idx_clip_outputs_clip_task_id",
+        "idx_video_tags_tag_id",
+        "idx_recording_sessions_workspace",
+    ];
+    for idx in must_have {
+        assert!(
+            names.iter().any(|n| n == idx),
+            "missing required index {}, have: {:?}",
+            idx,
+            names
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_settings_kv_unique_key_constraint() {
+    let db = setup_test_db().await;
+    let conn = db.conn();
+
+    sea_orm::ConnectionTrait::execute_unprepared(
+        conn,
+        "INSERT INTO settings_kv (key, value) VALUES ('k1', 'v1')",
+    )
+    .await
+    .expect("first insert");
+
+    // Second insert with same key should fail (PRIMARY KEY conflict)
+    let result = sea_orm::ConnectionTrait::execute_unprepared(
+        conn,
+        "INSERT INTO settings_kv (key, value) VALUES ('k1', 'v2')",
+    )
+    .await;
+    assert!(result.is_err(), "duplicate key insert should fail");
+}

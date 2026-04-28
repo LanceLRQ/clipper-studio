@@ -36,6 +36,12 @@ pub struct PluginManager {
     services: RwLock<HashMap<String, Arc<ServiceManager>>>,
 }
 
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PluginManager {
     pub fn new() -> Self {
         Self {

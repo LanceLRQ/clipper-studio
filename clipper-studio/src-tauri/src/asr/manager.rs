@@ -115,6 +115,12 @@ pub struct ASRServiceManager {
     current_mode: Mutex<Option<ASRLaunchMode>>,
 }
 
+impl Default for ASRServiceManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ASRServiceManager {
     pub fn new() -> Self {
         Self {

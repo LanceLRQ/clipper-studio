@@ -227,4 +227,188 @@ mod tests {
         assert_eq!(manifest.api_version, 1); // default
         assert!(!manifest.managed); // default false
     }
+
+    #[test]
+    fn test_parse_builtin_manifest() {
+        let json = r#"{
+            "id": "recorder.bililive",
+            "name": "BililiveRecorder",
+            "type": "recorder",
+            "version": "1.0.0",
+            "transport": "builtin",
+            "singleton": true
+        }"#;
+        let manifest: PluginManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(manifest.transport, Transport::Builtin);
+        assert!(manifest.singleton);
+        assert!(manifest.dependencies.is_empty());
+        assert!(manifest.conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_parse_with_dependencies_and_conflicts() {
+        let json = r#"{
+            "id": "uploader.bilibili",
+            "name": "Bilibili Uploader",
+            "type": "uploader",
+            "version": "1.0.0",
+            "transport": "http",
+            "dependencies": [
+                { "id": "asr.qwen3", "version": ">=2.0.0" },
+                { "id": "danmaku.bilibili" }
+            ],
+            "conflicts": [
+                { "id": "uploader.douyin", "reason": "互斥的上传通道" }
+            ]
+        }"#;
+        let m: PluginManifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.dependencies.len(), 2);
+        assert_eq!(m.dependencies[0].id, "asr.qwen3");
+        assert_eq!(m.dependencies[0].version, Some(">=2.0.0".to_string()));
+        assert!(m.dependencies[1].version.is_none());
+        assert_eq!(m.conflicts.len(), 1);
+        assert_eq!(m.conflicts[0].id, "uploader.douyin");
+    }
+
+    #[test]
+    fn test_plugin_type_all_variants_round_trip() {
+        // kebab-case serialization for every variant
+        let cases = [
+            (PluginType::AsrEngine, "\"asr-engine\""),
+            (PluginType::LlmProvider, "\"llm-provider\""),
+            (PluginType::Recorder, "\"recorder\""),
+            (PluginType::Uploader, "\"uploader\""),
+            (PluginType::SyncProvider, "\"sync-provider\""),
+            (PluginType::WorkspaceAdapter, "\"workspace-adapter\""),
+            (PluginType::DanmakuSource, "\"danmaku-source\""),
+            (PluginType::DanmakuRenderer, "\"danmaku-renderer\""),
+            (PluginType::Exporter, "\"exporter\""),
+            (PluginType::StorageProvider, "\"storage-provider\""),
+        ];
+        for (variant, expected) in cases {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert_eq!(json, expected);
+            let parsed: PluginType = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, variant);
+        }
+    }
+
+    #[test]
+    fn test_transport_round_trip() {
+        for v in [Transport::Http, Transport::Stdio, Transport::Builtin] {
+            let json = serde_json::to_string(&v).unwrap();
+            let parsed: Transport = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, v);
+        }
+    }
+
+    #[test]
+    fn test_plugin_status_round_trip() {
+        for v in [
+            PluginStatus::Discovered,
+            PluginStatus::Loaded,
+            PluginStatus::Running,
+            PluginStatus::Error,
+            PluginStatus::Disabled,
+        ] {
+            let json = serde_json::to_string(&v).unwrap();
+            let parsed: PluginStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, v);
+        }
+    }
+
+    #[test]
+    fn test_platform_command_current_returns_correct_platform() {
+        let cmd = PlatformCommand {
+            windows: Some("win.exe".to_string()),
+            darwin: Some("mac".to_string()),
+            linux: Some("linux".to_string()),
+        };
+        let current = cmd.current().unwrap();
+        #[cfg(target_os = "windows")]
+        assert_eq!(current, "win.exe");
+        #[cfg(target_os = "macos")]
+        assert_eq!(current, "mac");
+        #[cfg(target_os = "linux")]
+        assert_eq!(current, "linux");
+    }
+
+    #[test]
+    fn test_platform_command_current_returns_none_when_missing() {
+        let cmd = PlatformCommand::default();
+        assert!(cmd.current().is_none());
+    }
+
+    #[test]
+    fn test_parse_with_frontend() {
+        let json = r#"{
+            "id": "p",
+            "name": "P",
+            "type": "exporter",
+            "version": "0.1.0",
+            "transport": "builtin",
+            "frontend": { "entry": "index.js" }
+        }"#;
+        let m: PluginManifest = serde_json::from_str(json).unwrap();
+        let fe = m.frontend.expect("frontend should parse");
+        assert_eq!(fe.entry, "index.js");
+        assert_eq!(fe.target, "settings"); // default
+    }
+
+    #[test]
+    fn test_parse_invalid_json_errors() {
+        let bad = r#"{ "id": "p", "name": }"#;
+        let result: Result<PluginManifest, _> = serde_json::from_str(bad);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_missing_required_field() {
+        // version required, omitted
+        let json = r#"{
+            "id": "p", "name": "P", "type": "recorder", "transport": "builtin"
+        }"#;
+        let result: Result<PluginManifest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    // ==================== load_manifest (file IO) ====================
+
+    #[test]
+    fn test_load_manifest_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let manifest_path = tmp.path().join("plugin.json");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+                "id": "test.plugin",
+                "name": "Test Plugin",
+                "type": "exporter",
+                "version": "0.1.0",
+                "transport": "builtin"
+            }"#,
+        )
+        .unwrap();
+
+        let m = load_manifest(tmp.path()).expect("load should succeed");
+        assert_eq!(m.id, "test.plugin");
+        assert_eq!(m.plugin_type, PluginType::Exporter);
+    }
+
+    #[test]
+    fn test_load_manifest_missing_file_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = load_manifest(tmp.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("plugin.json not found"));
+    }
+
+    #[test]
+    fn test_load_manifest_invalid_json_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("plugin.json"), b"{ not valid json }").unwrap();
+        let result = load_manifest(tmp.path());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to parse"));
+    }
 }

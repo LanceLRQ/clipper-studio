@@ -373,20 +373,11 @@ pub struct DependencyStatus {
 }
 
 /// System detection result
+#[derive(Default)]
 pub struct SystemDetection {
     pub available: bool,
     pub path: Option<String>,
     pub version: Option<String>,
-}
-
-impl Default for SystemDetection {
-    fn default() -> Self {
-        Self {
-            available: false,
-            path: None,
-            version: None,
-        }
-    }
 }
 
 /// Build a DependencyStatus from a static def + local state + config override + system detection

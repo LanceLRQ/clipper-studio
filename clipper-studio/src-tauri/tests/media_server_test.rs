@@ -218,3 +218,121 @@ async fn test_media_server_serves_file_content() {
 
     assert_eq!(&body[..], data, "response body should match file content");
 }
+
+// ============== is_path_allowed / allow_prefix（SEC-FS-03 安全校验） ==============
+
+#[tokio::test]
+async fn test_is_path_allowed_empty_whitelist_rejects_all() {
+    let server = MediaServer::start().await.expect("start");
+    let dir = tempfile::tempdir().unwrap();
+    assert!(
+        !server.is_path_allowed(dir.path()),
+        "未登记前缀时所有路径都应被拒绝"
+    );
+}
+
+#[tokio::test]
+async fn test_is_path_allowed_accepts_exact_prefix() {
+    let server = MediaServer::start().await.expect("start");
+    let dir = tempfile::tempdir().unwrap();
+    server.allow_prefix(dir.path());
+    assert!(server.is_path_allowed(dir.path()), "已登记目录应被允许");
+}
+
+#[tokio::test]
+async fn test_is_path_allowed_accepts_file_under_prefix() {
+    let server = MediaServer::start().await.expect("start");
+    let dir = tempfile::tempdir().unwrap();
+    server.allow_prefix(dir.path());
+
+    let file = dir.path().join("video.mp4");
+    std::fs::write(&file, b"x").unwrap();
+    assert!(server.is_path_allowed(&file), "前缀下文件应被允许");
+}
+
+#[tokio::test]
+async fn test_is_path_allowed_rejects_outside_prefix() {
+    let server = MediaServer::start().await.expect("start");
+    let allowed_dir = tempfile::tempdir().unwrap();
+    let outside_dir = tempfile::tempdir().unwrap();
+    server.allow_prefix(allowed_dir.path());
+
+    let outside_file = outside_dir.path().join("evil.mp4");
+    std::fs::write(&outside_file, b"x").unwrap();
+    assert!(!server.is_path_allowed(&outside_file), "前缀外路径应被拒绝");
+}
+
+#[tokio::test]
+async fn test_is_path_allowed_handles_nonexistent_subdir() {
+    // 业务场景：用户指定的输出目录尚未创建，应通过逐级 canonicalize 父目录通过校验
+    let server = MediaServer::start().await.expect("start");
+    let dir = tempfile::tempdir().unwrap();
+    server.allow_prefix(dir.path());
+
+    let new_subdir = dir.path().join("not_yet_created");
+    assert!(!new_subdir.exists());
+    assert!(
+        server.is_path_allowed(&new_subdir),
+        "尚未创建的子路径，父目录在白名单内应被允许"
+    );
+}
+
+#[tokio::test]
+async fn test_is_path_allowed_rejects_nonexistent_root() {
+    let server = MediaServer::start().await.expect("start");
+    // 不登记任何前缀，且路径完全不存在
+    let bogus = std::path::PathBuf::from("/this/path/definitely/does/not/exist/12345");
+    assert!(
+        !server.is_path_allowed(&bogus),
+        "完全不存在且无白名单应被拒绝"
+    );
+}
+
+#[tokio::test]
+async fn test_allow_prefix_dedup_same_path() {
+    // 重复登记同一路径不应造成重复条目；可通过登记后能正常匹配证明
+    let server = MediaServer::start().await.expect("start");
+    let dir = tempfile::tempdir().unwrap();
+    server.allow_prefix(dir.path());
+    server.allow_prefix(dir.path()); // 重复
+    server.allow_prefix(dir.path()); // 再重复
+
+    assert!(server.is_path_allowed(dir.path()), "重复登记不影响匹配");
+}
+
+#[tokio::test]
+async fn test_allow_prefix_multiple_distinct_dirs() {
+    let server = MediaServer::start().await.expect("start");
+    let dir1 = tempfile::tempdir().unwrap();
+    let dir2 = tempfile::tempdir().unwrap();
+    server.allow_prefix(dir1.path());
+    server.allow_prefix(dir2.path());
+
+    assert!(server.is_path_allowed(dir1.path()));
+    assert!(server.is_path_allowed(dir2.path()));
+}
+
+#[tokio::test]
+async fn test_serve_endpoint_rejects_unallowed_path() {
+    // 集成校验：serve 路径校验同样依赖 allow_prefix 白名单，越界应返回 403
+    let server = MediaServer::start().await.expect("start");
+    let port = server.port();
+
+    // 故意创建实际文件，但不登记其目录
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("uninvited.mp4");
+    std::fs::write(&file, b"data").unwrap();
+
+    let url = format!(
+        "http://127.0.0.1:{}/serve?path={}",
+        port,
+        urlencoding::encode(&file.to_string_lossy())
+    );
+
+    let resp = reqwest::get(&url).await.expect("request should complete");
+    assert_eq!(
+        resp.status().as_u16(),
+        403,
+        "未登记白名单的路径应返回 403 Forbidden"
+    );
+}

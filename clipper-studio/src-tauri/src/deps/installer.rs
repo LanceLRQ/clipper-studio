@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use super::registry::{ArchiveType, ExtractMapping};
 
@@ -19,8 +19,8 @@ pub struct InstallProgress {
 }
 
 /// Emit install progress event (public for use by DependencyManager)
-pub fn emit_progress_static(
-    app_handle: &AppHandle,
+pub fn emit_progress_static<R: Runtime>(
+    app_handle: &AppHandle<R>,
     dep_id: &str,
     phase: &str,
     progress: f64,
@@ -29,7 +29,13 @@ pub fn emit_progress_static(
     emit_progress(app_handle, dep_id, phase, progress, message);
 }
 
-fn emit_progress(app_handle: &AppHandle, dep_id: &str, phase: &str, progress: f64, message: &str) {
+fn emit_progress<R: Runtime>(
+    app_handle: &AppHandle<R>,
+    dep_id: &str,
+    phase: &str,
+    progress: f64,
+    message: &str,
+) {
     let _ = app_handle.emit(
         "dep:install-progress",
         InstallProgress {
@@ -46,13 +52,13 @@ fn emit_progress(app_handle: &AppHandle, dep_id: &str, phase: &str, progress: f6
 /// Download a file from URL to a local path, with progress reporting.
 /// `label` is shown in the progress message (e.g. "FFmpeg (1/2)").
 /// `cancel_token` - if Some, the download will be aborted when the token is set to true.
-pub async fn download_file(
+pub async fn download_file<R: Runtime>(
     client: &reqwest::Client,
     url: &str,
     dest: &Path,
     dep_id: &str,
     label: &str,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
     cancel_token: Option<Arc<AtomicBool>>,
 ) -> Result<(), String> {
     tracing::info!("Downloading {} -> {}", url, dest.display());
@@ -77,7 +83,7 @@ pub async fn download_file(
 
     let total_size = response.content_length();
     let total_str = total_size
-        .map(|s| format_bytes(s))
+        .map(format_bytes)
         .unwrap_or_else(|| "unknown".to_string());
 
     // Create parent directory
@@ -130,13 +136,13 @@ pub async fn download_file(
 // ==================== Extract ====================
 
 /// Extract an archive to a target directory, applying extract mappings
-pub fn extract_archive(
+pub fn extract_archive<R: Runtime>(
     archive_path: &Path,
     target_dir: &Path,
     archive_type: ArchiveType,
     mappings: &[ExtractMapping],
     dep_id: &str,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
 ) -> Result<(), String> {
     tracing::info!(
         "Extracting {} -> {}",
@@ -156,12 +162,12 @@ pub fn extract_archive(
     }
 }
 
-fn extract_zip(
+fn extract_zip<R: Runtime>(
     archive_path: &Path,
     target_dir: &Path,
     mappings: &[ExtractMapping],
     dep_id: &str,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
 ) -> Result<(), String> {
     let file =
         std::fs::File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
@@ -252,12 +258,12 @@ fn extract_zip(
     Ok(())
 }
 
-fn extract_tar_gz(
+fn extract_tar_gz<R: Runtime>(
     archive_path: &Path,
     target_dir: &Path,
     mappings: &[ExtractMapping],
     dep_id: &str,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
 ) -> Result<(), String> {
     let file =
         std::fs::File::open(archive_path).map_err(|e| format!("Failed to open archive: {}", e))?;
@@ -432,13 +438,13 @@ pub fn detect_python3() -> Option<String> {
 }
 
 /// Install a Python package into a venv via pip
-pub fn install_python_package(
+pub fn install_python_package<R: Runtime>(
     python3_path: &str,
     venv_dir: &Path,
     pip_package: &str,
     proxy_url: Option<&str>,
     dep_id: &str,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
 ) -> Result<(), String> {
     // Step 1: Create venv
     emit_progress(
@@ -536,5 +542,265 @@ mod tests {
         assert_eq!(format_bytes(1536), "1.5 KB");
         assert_eq!(format_bytes(10 * 1024 * 1024), "10.0 MB");
         assert_eq!(format_bytes(2 * 1024 * 1024 * 1024), "2.0 GB");
+    }
+
+    // ==================== glob_matches — extended edge cases ====================
+
+    #[test]
+    fn test_glob_matches_empty_path_and_pattern() {
+        assert!(glob_matches("", ""));
+    }
+
+    #[test]
+    fn test_glob_matches_different_segment_count() {
+        assert!(!glob_matches("a/b/c", "a/b"));
+        assert!(!glob_matches("a/b", "a/b/c"));
+    }
+
+    #[test]
+    fn test_glob_matches_wildcard_at_different_positions() {
+        assert!(glob_matches("foo/bar", "*/bar"));
+        assert!(glob_matches("foo/bar", "foo/*"));
+        assert!(glob_matches("foo/bar", "*/*"));
+        assert!(!glob_matches("foo/bar/baz", "*/bar"));
+    }
+
+    #[test]
+    fn test_glob_matches_backslash_normalized() {
+        // Windows-style separator should be normalized
+        assert!(glob_matches(
+            "ffmpeg-7.0\\bin\\ffmpeg.exe",
+            "*/bin/ffmpeg.exe"
+        ));
+    }
+
+    #[test]
+    fn test_glob_matches_case_sensitive() {
+        // glob_matches is case-sensitive (no normalization)
+        assert!(!glob_matches("FFmpeg.exe", "ffmpeg.exe"));
+    }
+
+    #[test]
+    fn test_glob_matches_multiple_wildcards() {
+        assert!(glob_matches("a/b/c", "*/*/*"));
+        assert!(glob_matches("a/b/c", "*/b/*"));
+    }
+
+    // ==================== format_bytes — boundary cases ====================
+
+    #[test]
+    fn test_format_bytes_zero() {
+        assert_eq!(format_bytes(0), "0 B");
+    }
+
+    #[test]
+    fn test_format_bytes_just_below_kb() {
+        assert_eq!(format_bytes(1023), "1023 B");
+    }
+
+    #[test]
+    fn test_format_bytes_just_below_mb() {
+        // 1023 KB = 1047552 bytes, just below 1 MB
+        assert_eq!(format_bytes(1023 * 1024), "1023.0 KB");
+    }
+
+    #[test]
+    fn test_format_bytes_just_below_gb() {
+        // 1023 MB just below 1 GB
+        assert_eq!(format_bytes(1023 * 1024 * 1024), "1023.0 MB");
+    }
+
+    #[test]
+    fn test_format_bytes_huge() {
+        // 1 TB displayed as GB (no TB unit)
+        let one_tb: u64 = 1024 * 1024 * 1024 * 1024;
+        let formatted = format_bytes(one_tb);
+        assert!(formatted.ends_with("GB"));
+        assert!(formatted.starts_with("1024."));
+    }
+
+    // ==================== InstallProgress serialization ====================
+
+    #[test]
+    fn test_install_progress_serialize() {
+        let p = InstallProgress {
+            dep_id: "ffmpeg".to_string(),
+            phase: "downloading".to_string(),
+            progress: 0.42,
+            message: "正在下载...".to_string(),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"dep_id\":\"ffmpeg\""));
+        assert!(json.contains("\"phase\":\"downloading\""));
+        assert!(json.contains("\"progress\":0.42"));
+        assert!(json.contains("正在下载"));
+    }
+
+    // ==================== detect_python3 — smoke ====================
+
+    #[test]
+    fn test_detect_python3_returns_some_or_none_without_panic() {
+        // We can't guarantee Python is installed in CI, but the function
+        // must not panic and must return either Some(non-empty) or None.
+        let result = detect_python3();
+        if let Some(path) = result {
+            assert!(
+                !path.is_empty(),
+                "detected python3 path should not be empty"
+            );
+        }
+    }
+
+    // ==================== install_python_package — error paths ====================
+
+    // install_python_package requires AppHandle; for the venv-creation error
+    // path we use tauri::test::mock_app to obtain a real handle.
+    #[test]
+    fn test_install_python_package_invalid_python_fails() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let venv = tmp.path().join("venv");
+        let result = install_python_package(
+            "/nonexistent/python3-binary",
+            &venv,
+            "requests",
+            None,
+            "test-dep",
+            &handle,
+        );
+        assert!(result.is_err(), "invalid python path should error");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Failed to run python3 -m venv"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    // ==================== extract_archive — zip happy path ====================
+
+    fn build_test_zip(path: &Path) {
+        use std::io::Write as _;
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts: zip::write::FileOptions<()> =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("ffmpeg-7.0/bin/ffmpeg.exe", opts).unwrap();
+        zip.write_all(b"FAKE-FFMPEG-BINARY").unwrap();
+        zip.start_file("ffmpeg-7.0/bin/ffprobe.exe", opts).unwrap();
+        zip.write_all(b"FAKE-FFPROBE-BINARY").unwrap();
+        zip.start_file("ffmpeg-7.0/README.txt", opts).unwrap();
+        zip.write_all(b"docs").unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn test_extract_archive_zip_with_mappings() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let archive_path = tmp.path().join("archive.zip");
+        let target_dir = tmp.path().join("out");
+        build_test_zip(&archive_path);
+
+        let mappings = vec![
+            ExtractMapping {
+                archive_glob: "*/bin/ffmpeg.exe",
+                target_name: "ffmpeg",
+            },
+            ExtractMapping {
+                archive_glob: "*/bin/ffprobe.exe",
+                target_name: "ffprobe",
+            },
+        ];
+
+        let result = extract_archive(
+            &archive_path,
+            &target_dir,
+            ArchiveType::Zip,
+            &mappings,
+            "test-dep",
+            &handle,
+        );
+        assert!(result.is_ok(), "extract failed: {:?}", result);
+        assert!(target_dir.join("ffmpeg").exists(), "ffmpeg not extracted");
+        assert!(target_dir.join("ffprobe").exists(), "ffprobe not extracted");
+        // Unmapped entry should not be extracted
+        assert!(
+            !target_dir.join("README.txt").exists(),
+            "unmapped file should not exist"
+        );
+        // Content matches
+        let content = std::fs::read(target_dir.join("ffmpeg")).unwrap();
+        assert_eq!(content, b"FAKE-FFMPEG-BINARY");
+    }
+
+    #[test]
+    fn test_extract_archive_zip_no_mappings_extracts_everything() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let archive_path = tmp.path().join("archive.zip");
+        let target_dir = tmp.path().join("out");
+        build_test_zip(&archive_path);
+
+        let result = extract_archive(
+            &archive_path,
+            &target_dir,
+            ArchiveType::Zip,
+            &[],
+            "test-dep",
+            &handle,
+        );
+        assert!(result.is_ok());
+        assert!(target_dir.join("ffmpeg-7.0/bin/ffmpeg.exe").exists());
+        assert!(target_dir.join("ffmpeg-7.0/bin/ffprobe.exe").exists());
+        assert!(target_dir.join("ffmpeg-7.0/README.txt").exists());
+    }
+
+    #[test]
+    fn test_extract_archive_zip_no_match_errors() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let archive_path = tmp.path().join("archive.zip");
+        let target_dir = tmp.path().join("out");
+        build_test_zip(&archive_path);
+
+        let mappings = vec![ExtractMapping {
+            archive_glob: "no_such_file.bin",
+            target_name: "x",
+        }];
+        let result = extract_archive(
+            &archive_path,
+            &target_dir,
+            ArchiveType::Zip,
+            &mappings,
+            "test-dep",
+            &handle,
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No files matched"));
+    }
+
+    #[test]
+    fn test_extract_archive_zip_corrupt_archive() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bogus = tmp.path().join("bogus.zip");
+        std::fs::write(&bogus, b"NOT A ZIP FILE").unwrap();
+        let target_dir = tmp.path().join("out");
+
+        let result = extract_archive(
+            &bogus,
+            &target_dir,
+            ArchiveType::Zip,
+            &[],
+            "test-dep",
+            &handle,
+        );
+        assert!(result.is_err());
     }
 }

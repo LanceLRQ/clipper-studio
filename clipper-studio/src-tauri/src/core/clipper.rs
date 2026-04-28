@@ -26,10 +26,12 @@ pub(crate) async fn graceful_kill_child(child: &mut tokio::process::Child) {
             }
         }
         // Wait up to 3s for graceful exit
-        match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
-            Ok(Ok(_)) => return,
-            _ => {} // Timed out or error, fall through to SIGKILL
+        if let Ok(Ok(_)) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await
+        {
+            return;
         }
+        // Timed out or error, fall through to SIGKILL
     }
     let _ = child.kill().await;
     let _ = child.wait().await;
@@ -71,6 +73,7 @@ pub struct PresetOptions {
 /// - Audio extract (audio_only = true): extract audio track only
 ///
 /// Reports progress via the callback. Respects cancellation token.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_clip(
     ffmpeg_path: &str,
     input: &Path,
@@ -174,7 +177,7 @@ pub async fn execute_clip(
                         if let Some(time_str) = line.strip_prefix("out_time_us=") {
                             if let Ok(us) = time_str.trim().parse::<i64>() {
                                 let time_secs = us as f64 / 1_000_000.0;
-                                let progress = (time_secs / duration_secs).min(1.0).max(0.0);
+                                let progress = (time_secs / duration_secs).clamp(0.0, 1.0);
                                 if last_emit.elapsed()
                                     >= std::time::Duration::from_millis(PROGRESS_EMIT_INTERVAL_MS)
                                 {
@@ -424,6 +427,7 @@ impl BurnOptions {
 ///
 /// Progress is split: Pass 1 = 0%~40%, Pass 2 = 40%~100%.
 /// If no burning is needed, Pass 1 uses the full 0%~100% range.
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_clip_with_burn(
     ffmpeg_path: &str,
     input: &Path,
@@ -479,9 +483,8 @@ pub async fn execute_clip_with_burn(
         },
     )
     .await
-    .map_err(|e| {
+    .inspect_err(|_e| {
         let _ = std::fs::remove_file(&intermediate);
-        e
     })?;
 
     // === Merge ASS files if both danmaku and subtitle are requested ===
@@ -612,4 +615,309 @@ async fn merge_ass_files(
 
     tracing::info!("Merged ASS files into {}", output.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ==================== apply_quality_args ====================
+
+    #[test]
+    fn test_apply_quality_args_videotoolbox_skipped() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("h264_videotoolbox", Some(23), &mut args);
+        assert!(
+            args.is_empty(),
+            "VideoToolbox should not append any quality args"
+        );
+    }
+
+    #[test]
+    fn test_apply_quality_args_nvenc() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("h264_nvenc", Some(20), &mut args);
+        assert_eq!(
+            args,
+            vec![
+                "-cq".to_string(),
+                "20".to_string(),
+                "-b:v".to_string(),
+                "0".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_apply_quality_args_qsv() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("hevc_qsv", Some(24), &mut args);
+        assert_eq!(args, vec!["-global_quality".to_string(), "24".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_quality_args_amf() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("h264_amf", Some(28), &mut args);
+        assert_eq!(args, vec!["-q:v".to_string(), "28".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_quality_args_software_libx264() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("libx264", Some(23), &mut args);
+        assert_eq!(args, vec!["-crf".to_string(), "23".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_quality_args_software_libx265() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("libx265", Some(28), &mut args);
+        assert_eq!(args, vec!["-crf".to_string(), "28".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_quality_args_none_crf_no_args() {
+        let mut args: Vec<String> = Vec::new();
+        apply_quality_args("libx264", None, &mut args);
+        assert!(args.is_empty(), "None crf should not append any args");
+    }
+
+    #[test]
+    fn test_apply_quality_args_preserves_existing_args() {
+        let mut args: Vec<String> = vec!["-i".to_string(), "input.mp4".to_string()];
+        apply_quality_args("libx264", Some(20), &mut args);
+        assert_eq!(
+            args,
+            vec![
+                "-i".to_string(),
+                "input.mp4".to_string(),
+                "-crf".to_string(),
+                "20".to_string()
+            ]
+        );
+    }
+
+    // ==================== resolve_video_codec (passthrough branch) ====================
+
+    #[test]
+    fn test_resolve_video_codec_passthrough_unknown() {
+        // Unknown codec hint should pass through unchanged (no FFmpeg call)
+        let result = resolve_video_codec("/nonexistent/ffmpeg", "libsvtav1");
+        assert_eq!(result, "libsvtav1");
+    }
+
+    #[test]
+    fn test_resolve_video_codec_passthrough_copy() {
+        let result = resolve_video_codec("/nonexistent/ffmpeg", "copy");
+        assert_eq!(result, "copy");
+    }
+
+    #[test]
+    fn test_resolve_video_codec_h264_falls_back_when_ffmpeg_missing() {
+        // With nonexistent ffmpeg, hardware probe fails, expect software fallback
+        let result = resolve_video_codec("/nonexistent/ffmpeg", "h264");
+        assert_eq!(result, "libx264");
+    }
+
+    #[test]
+    fn test_resolve_video_codec_h265_falls_back_when_ffmpeg_missing() {
+        let result = resolve_video_codec("/nonexistent/ffmpeg", "h265");
+        assert_eq!(result, "libx265");
+    }
+
+    #[test]
+    fn test_resolve_video_codec_hevc_alias_falls_back() {
+        let result = resolve_video_codec("/nonexistent/ffmpeg", "hevc");
+        assert_eq!(result, "libx265");
+    }
+
+    // ==================== BurnOptions::needs_burn ====================
+
+    fn make_burn_options(
+        burn_danmaku: bool,
+        burn_subtitle: bool,
+        danmaku_path: Option<PathBuf>,
+        subtitle_path: Option<PathBuf>,
+    ) -> BurnOptions {
+        BurnOptions {
+            burn_danmaku,
+            burn_subtitle,
+            danmaku_ass_path: danmaku_path,
+            subtitle_ass_path: subtitle_path,
+            burn_codec: "auto".to_string(),
+            burn_crf: Some(23),
+        }
+    }
+
+    #[test]
+    fn test_needs_burn_both_disabled() {
+        let opts = make_burn_options(false, false, None, None);
+        assert!(!opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_danmaku_with_path() {
+        let opts = make_burn_options(true, false, Some(PathBuf::from("/tmp/d.ass")), None);
+        assert!(opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_danmaku_without_path() {
+        let opts = make_burn_options(true, false, None, None);
+        assert!(
+            !opts.needs_burn(),
+            "burn flag without ASS path should not trigger burn"
+        );
+    }
+
+    #[test]
+    fn test_needs_burn_subtitle_with_path() {
+        let opts = make_burn_options(false, true, None, Some(PathBuf::from("/tmp/s.ass")));
+        assert!(opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_subtitle_without_path() {
+        let opts = make_burn_options(false, true, None, None);
+        assert!(!opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_both_enabled_both_paths() {
+        let opts = make_burn_options(
+            true,
+            true,
+            Some(PathBuf::from("/tmp/d.ass")),
+            Some(PathBuf::from("/tmp/s.ass")),
+        );
+        assert!(opts.needs_burn());
+    }
+
+    #[test]
+    fn test_needs_burn_path_present_but_flag_off() {
+        // ASS path present but burn flag off — should not burn
+        let opts = make_burn_options(false, false, Some(PathBuf::from("/tmp/d.ass")), None);
+        assert!(!opts.needs_burn());
+    }
+
+    // ==================== PresetOptions deserialization ====================
+
+    #[test]
+    fn test_preset_options_deserialize_minimal() {
+        let json = r#"{"codec":"copy"}"#;
+        let opts: PresetOptions = serde_json::from_str(json).unwrap();
+        assert_eq!(opts.codec, "copy");
+        assert!(opts.crf.is_none());
+        assert!(opts.audio_only.is_none());
+    }
+
+    #[test]
+    fn test_preset_options_deserialize_full() {
+        let json = r#"{"codec":"h264","crf":23,"audio_only":false}"#;
+        let opts: PresetOptions = serde_json::from_str(json).unwrap();
+        assert_eq!(opts.codec, "h264");
+        assert_eq!(opts.crf, Some(23));
+        assert_eq!(opts.audio_only, Some(false));
+    }
+
+    #[test]
+    fn test_preset_options_deserialize_audio_only() {
+        let json = r#"{"codec":"copy","audio_only":true}"#;
+        let opts: PresetOptions = serde_json::from_str(json).unwrap();
+        assert_eq!(opts.audio_only, Some(true));
+    }
+
+    // ==================== ClipProgress serialization ====================
+
+    #[test]
+    fn test_clip_progress_serialize_with_speed() {
+        let p = ClipProgress {
+            progress: 0.5,
+            time_secs: 12.34,
+            speed: Some(2.5),
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"progress\":0.5"));
+        assert!(json.contains("\"time_secs\":12.34"));
+        assert!(json.contains("\"speed\":2.5"));
+    }
+
+    #[test]
+    fn test_clip_progress_serialize_no_speed() {
+        let p = ClipProgress {
+            progress: 1.0,
+            time_secs: 60.0,
+            speed: None,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"speed\":null"));
+    }
+
+    // ==================== execute_clip input validation ====================
+
+    #[tokio::test]
+    async fn test_execute_clip_empty_ffmpeg_path() {
+        let preset = PresetOptions {
+            codec: "copy".to_string(),
+            crf: None,
+            audio_only: None,
+        };
+        let result = execute_clip(
+            "",
+            Path::new("/tmp/in.mp4"),
+            Path::new("/tmp/out.mp4"),
+            0,
+            1000,
+            &preset,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await;
+        assert_eq!(result, Err("FFmpeg not available".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_execute_clip_invalid_range_zero_duration() {
+        let preset = PresetOptions {
+            codec: "copy".to_string(),
+            crf: None,
+            audio_only: None,
+        };
+        let result = execute_clip(
+            "/usr/bin/ffmpeg",
+            Path::new("/tmp/in.mp4"),
+            Path::new("/tmp/out.mp4"),
+            1000,
+            1000,
+            &preset,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid time range"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_clip_invalid_range_negative() {
+        let preset = PresetOptions {
+            codec: "copy".to_string(),
+            crf: None,
+            audio_only: None,
+        };
+        let result = execute_clip(
+            "/usr/bin/ffmpeg",
+            Path::new("/tmp/in.mp4"),
+            Path::new("/tmp/out.mp4"),
+            2000,
+            1000,
+            &preset,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid time range"));
+    }
 }

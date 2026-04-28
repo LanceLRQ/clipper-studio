@@ -30,6 +30,10 @@ export async function listMediaTasks(
   return invoke<MediaTaskInfo[]>("list_media_tasks", { taskType });
 }
 
+export async function cancelMediaTask(taskId: number): Promise<boolean> {
+  return invoke<boolean>("cancel_media_task", { taskId });
+}
+
 export async function deleteMediaTask(
   taskId: number,
   deleteFiles = false
