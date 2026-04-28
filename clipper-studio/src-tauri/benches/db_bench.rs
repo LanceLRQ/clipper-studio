@@ -55,12 +55,20 @@ fn bench_insert(c: &mut Criterion) {
     group.throughput(Throughput::Elements(1000));
 
     group.bench_function("videos_1000_in_txn", |b| {
-        b.to_async(&rt).iter_with_setup(
-            || rt.block_on(async { fresh_db().await }),
-            |db| async move {
-                seed_videos(db.conn(), 1000).await;
-            },
-        );
+        // 使用 iter_custom 以便手动管理 runtime，避免在 to_async 已建立的
+        // runtime 上下文中再次 block_on（会触发 "Cannot start a runtime from within a runtime"）。
+        b.iter_custom(|iters| {
+            rt.block_on(async {
+                let mut total = std::time::Duration::ZERO;
+                for _ in 0..iters {
+                    let db = fresh_db().await;
+                    let start = std::time::Instant::now();
+                    seed_videos(db.conn(), 1000).await;
+                    total += start.elapsed();
+                }
+                total
+            })
+        });
     });
 
     group.finish();
