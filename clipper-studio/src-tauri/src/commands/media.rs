@@ -38,13 +38,16 @@ pub async fn transcode_video(
     app_handle: tauri::AppHandle,
     req: TranscodeRequest,
 ) -> Result<MediaTaskInfo, String> {
-    // Get video info
+    // Get video info（带 workspace clip_output_dir）
     let video_row = sea_orm::ConnectionTrait::query_one(
         state.db.conn(),
         sea_orm::Statement::from_string(
             sea_orm::DatabaseBackend::Sqlite,
             format!(
-                "SELECT file_path, file_name, duration_ms FROM videos WHERE id = {}",
+                "SELECT v.file_path, v.file_name, v.duration_ms, \
+                 w.clip_output_dir as ws_clip_output_dir \
+                 FROM videos v LEFT JOIN workspaces w ON v.workspace_id = w.id \
+                 WHERE v.id = {}",
                 req.video_id,
             ),
         ),
@@ -56,11 +59,14 @@ pub async fn transcode_video(
     let file_path: String = video_row.try_get("", "file_path").unwrap_or_default();
     let file_name: String = video_row.try_get("", "file_name").unwrap_or_default();
     let duration_ms: i64 = video_row.try_get("", "duration_ms").unwrap_or(0);
+    let ws_clip_output_dir: Option<String> = video_row
+        .try_get::<Option<String>>("", "ws_clip_output_dir")
+        .unwrap_or(None);
 
     // Load preset
     let preset = load_preset(state.db.conn(), req.preset_id).await?;
 
-    // Determine output path
+    // Determine output path: 用户指定 > 工作区 clip_output_dir > 源文件目录
     let ext = if preset.audio_only.unwrap_or(false) {
         "m4a"
     } else {
@@ -75,14 +81,23 @@ pub async fn transcode_video(
             PathBuf::from(dir)
         }
         None => {
-            let src = PathBuf::from(&file_path);
-            src.parent().unwrap_or(&PathBuf::from(".")).to_path_buf()
+            if let Some(ref dir) = ws_clip_output_dir {
+                PathBuf::from(dir)
+            } else {
+                let src = PathBuf::from(&file_path);
+                src.parent().unwrap_or(&PathBuf::from(".")).to_path_buf()
+            }
         }
     };
 
+    // 确保输出目录存在
+    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+        return Err(format!("无法创建输出目录: {}", e));
+    }
+
     let stem = file_name.rsplit('.').next_back().unwrap_or(&file_name);
     let output_filename = format!("{}_transcoded.{}", stem, ext);
-    let output_path = output_dir.join(&output_filename);
+    let output_path = crate::utils::path::dedup_output_path(&output_dir.join(&output_filename));
 
     // Insert media_tasks record
     sea_orm::ConnectionTrait::execute_unprepared(
@@ -335,9 +350,14 @@ pub async fn merge_videos(
         }
     };
 
+    // 确保输出目录存在
+    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+        return Err(format!("无法创建输出目录: {}", e));
+    }
+
     let stem = first_name.rsplit('.').next_back().unwrap_or(&first_name);
     let output_filename = format!("{}_merged.mp4", stem);
-    let output_path = output_dir.join(&output_filename);
+    let output_path = crate::utils::path::dedup_output_path(&output_dir.join(&output_filename));
 
     // Insert task
     let video_ids_json = serde_json::to_string(&req.video_ids).unwrap_or_default();
